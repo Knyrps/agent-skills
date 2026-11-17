@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "demonstrate",
+  "version": "1.2.20774.73",
+  "description": "Side panel for guided demos driven by an AI agent (next/back/questions, page markings, recordings) plus on-page highlights.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwYFOAK8o8Px/xbojsGeLPkL/VQWyvJuY+qHM1XQ7iBsZeVMxCWzKpBeW6hEYdqoyfV0D7lzJGc7vK4J2Tolgxp14ObrXz2s5bnfPmJ2V2d0VcMsGD7/AWIFRIFQPY9eozosLCUEiM3pn2HhaF40848W8DsryX0omQ9nJvE3wFQzzfL4lJe+OGojuqvSrKfz/2CRPMpuprLwOs186aWTKSgBOHJRL3wiLexgevr/A1o7iVCp1deOudF9X0upm0TqhbRa/gJq0uWgpLIJk/xkZ2C8kxHo6/u8xZwAfoC+fD9Q1eWzy8MWbXt73qNk8juXglPuzzgO01T20eIJdb3SXCQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "alarms", "sidePanel", "tabs", "webNavigation", "debugger"],
+  "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [
+    { "resources": ["vendor/m3-tokens.css"], "matches": ["http://*/*", "https://*/*"], "use_dynamic_url": true }
+  ],
+  "background": { "service_worker": "service-worker.js", "type": "module" },
+  "action": { "default_title": "demonstrate-Panel öffnen" },
+  "side_panel": { "default_path": "panel.html" },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

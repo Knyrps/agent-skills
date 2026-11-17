@@ -1,0 +1,26 @@
+// Applied to ~/.config/opencode/opencode.jsonc (V1 shape, like the rest of that file).
+// "playwright" stays as it was (own browser, launched on demand); tours use "playwright-demo".
+{
+  "mcp": {
+    // Bridge between the agent and the demonstrate side panel; owns 127.0.0.1:47613 and starts the
+    // demo browser (start_browser, or automatically on set_step/highlight). No timeout: the default
+    // execution limit (12 h) covers wait_for_action.
+    "demonstrate": {
+      "type": "local",
+      "command": ["node", "C:\\Users\\valentin.pommee\\.agents\\skills\\demonstrate\\bridge\\index.js"],
+      "enabled": true
+    },
+    // Attaches to the demo browser. Connects lazily on the first tool call, so it loads fine while
+    // the browser is not running.
+    "playwright-demo": {
+      "type": "local",
+      "command": [
+        "node",
+        "C:\\Users\\valentin.pommee\\.config\\opencode\\node_modules\\@playwright\\mcp\\cli.js",
+        "--cdp-endpoint", "http://127.0.0.1:9334",
+        "--ignore-https-errors"
+      ],
+      "enabled": true
+    }
+  }
+}

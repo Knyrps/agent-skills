@@ -1,0 +1,87 @@
+/* Layout only; components and colors come from Material Web + vendor/m3-tokens.css. */
+:root {
+  color-scheme: light dark;
+  --md-ref-typeface-brand: system-ui, "Segoe UI", sans-serif;
+  --md-ref-typeface-plain: system-ui, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+html { background: var(--md-sys-color-surface); }
+body {
+  margin: 0; padding: 16px; min-height: 100vh;
+  display: flex; flex-direction: column; gap: 12px;
+  background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface);
+  font-family: var(--md-ref-typeface-plain);
+}
+svg { width: 18px; height: 18px; fill: currentColor; }
+[hidden] { display: none !important; }
+.muted { color: var(--md-sys-color-on-surface-variant); }
+
+header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.conn { display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
+.conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); }
+.conn.ok .dot { background: #1e8e3e; }
+
+.card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 16px; border-radius: 16px;
+  background: var(--md-sys-color-surface-container);
+}
+.card md-linear-progress { position: absolute; left: 0; right: 0; top: 0; --md-linear-progress-track-height: 3px; --md-linear-progress-active-indicator-height: 3px; }
+.card md-linear-progress:not([data-on]) { visibility: hidden; }
+.step { white-space: pre-wrap; overflow-wrap: anywhere; }
+.explanation { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.status { margin-top: 4px; color: var(--md-sys-color-on-surface-variant); }
+.status.waiting { color: var(--md-sys-color-primary); }
+
+.nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.notice {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 12px; border-radius: 12px;
+  background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container);
+}
+.notice svg { flex: none; margin-top: 1px; }
+
+.ask { display: flex; flex-direction: column; gap: 10px; }
+.ask md-filled-tonal-button, .ask #send { align-self: flex-start; }
+.ask #send { align-self: flex-end; }
+md-filled-tonal-button.active {
+  --md-filled-tonal-button-container-color: var(--md-sys-color-primary);
+  --md-filled-tonal-button-label-text-color: var(--md-sys-color-on-primary);
+  --md-filled-tonal-button-icon-color: var(--md-sys-color-on-primary);
+  --md-filled-tonal-button-hover-label-text-color: var(--md-sys-color-on-primary);
+  --md-filled-tonal-button-hover-icon-color: var(--md-sys-color-on-primary);
+  --md-filled-tonal-button-focus-label-text-color: var(--md-sys-color-on-primary);
+  --md-filled-tonal-button-focus-icon-color: var(--md-sys-color-on-primary);
+}
+md-input-chip { max-width: 100%; }
+.tool-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ask .tool-row md-filled-tonal-button { align-self: auto; }
+.request {
+  display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 16px;
+  background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container);
+}
+.rec-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rec-row:not(:has(> :not([hidden]))) { display: none; }
+.ask .tool-row md-filled-tonal-button { --md-filled-tonal-button-leading-space: 12px; --md-filled-tonal-button-trailing-space: 14px; }
+#rec.recording {
+  --md-filled-tonal-button-container-color: var(--md-sys-color-error);
+  --md-filled-tonal-button-label-text-color: var(--md-sys-color-on-error);
+  --md-filled-tonal-button-icon-color: var(--md-sys-color-on-error);
+  --md-filled-tonal-button-hover-label-text-color: var(--md-sys-color-on-error);
+  --md-filled-tonal-button-hover-icon-color: var(--md-sys-color-on-error);
+}
+#rec.recording svg { animation: rec-pulse 1.2s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: .35; } }
+md-outlined-text-field { width: 100%; resize: vertical; }
+
+.toast {
+  position: fixed; left: 16px; right: 16px; bottom: 16px;
+  padding: 14px 16px; border-radius: 4px;
+  background: var(--md-sys-color-inverse-surface); color: var(--md-sys-color-inverse-on-surface);
+  box-shadow: 0 3px 5px -1px rgb(0 0 0 / .2), 0 6px 10px 0 rgb(0 0 0 / .14);
+  opacity: 0; transform: translateY(8px); pointer-events: none;
+  transition: opacity .15s, transform .15s;
+}
+.toast.show { opacity: 1; transform: none; }
