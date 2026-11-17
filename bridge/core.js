@@ -9,7 +9,12 @@ import { acceptUpgrade, rejectUpgrade } from './ws.js';
 export const PORT = +(process.env.DEMO_BRIDGE_PORT || 47613);
 export const CDP_PORT = +(process.env.DEMO_CDP_PORT || 9334);
 export const EXT_ID = 'jedpjgmldnhcfdejimlabhppmffdijei'; // pinned by "key" in extension/manifest.json
-export const DATA = process.env.DEMO_DATA || path.join(process.env.LOCALAPPDATA || os.homedir(), 'demonstrate');
+// Queue, shots and the browser profile: %LOCALAPPDATA% on Windows, Application Support on macOS,
+// $XDG_DATA_HOME (~/.local/share) elsewhere.
+export const DATA = process.env.DEMO_DATA || path.join({
+  win32: process.env.LOCALAPPDATA || os.homedir(),
+  darwin: path.join(os.homedir(), 'Library', 'Application Support'),
+}[process.platform] || process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'demonstrate');
 const QUEUE_FILE = path.join(DATA, 'queue.json');
 
 // Every OpenCode session starts its own bridge; one owns the port. The newest code wins: an older

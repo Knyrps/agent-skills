@@ -158,7 +158,7 @@ async function highlight({ item = {}, keep }) {
 }
 
 // ------------------------------------------------------------------ scripted tours
-// The agent hands over the whole tour once; Weiter/Zurück then run here without a model round trip.
+// The agent hands over the whole tour once; Next/Back then run here without a model round trip.
 // Step: { title, explanation?, url?, actions?, highlights?, agent? }. `url` navigates before the step;
 // a step without one continues on the current page. `agent: true` hands the step to the agent.
 
@@ -247,7 +247,7 @@ async function tourAction(action) {
   return { ok: true, local: true, delivered: true };
 }
 
-// ------------------------------------------------------------------ "Markieren": capture and paint
+// ------------------------------------------------------------------ "Annotate": capture and paint
 // The content script hides its overlay and describes every mark in document coordinates. The worker
 // captures the page area around all marks (beyond the window if needed) and paints the marks itself:
 // once as the user drew them, once more with a dashed, labelled outline (1a, 1b …) per page element a
@@ -460,7 +460,7 @@ async function handle(m, sender) {
     }
     case 'recSend': {
       const { recordingDraft, demoRequest, tourIndex = -1, tour } = await S.get(['recordingDraft', 'demoRequest', 'tourIndex', 'tour']);
-      if (!recordingDraft) return { error: 'Keine Aufnahme vorhanden.' };
+      if (!recordingDraft) return { error: 'There is no recording.' };
       await S.set({ recordingDraft: null, demoRequest: null });
       return enqueue({ type: 'recording', text: m.text || '', url: m.url,
         ...(demoRequest && { requestId: demoRequest.id, prompt: demoRequest.prompt }),
@@ -474,7 +474,7 @@ async function handle(m, sender) {
     }
     case 'annotate': {
       const tab = await activeTab();
-      if (!tab || !(await allowed(tab.url))) return { error: 'Diese Seite ist nicht freigegeben.' };
+      if (!tab || !(await allowed(tab.url))) return { error: 'This page is not on the allowlist.' };
       const result = await chrome.tabs.sendMessage(tab.id, { cmd: 'annotate' });
       if (!result) return { cancelled: true };
       try {
@@ -487,7 +487,7 @@ async function handle(m, sender) {
     }
     case 'annotationSend': {
       const { annotationDraft, tourIndex = -1, tour } = await S.get(['annotationDraft', 'tourIndex', 'tour']);
-      if (!annotationDraft) return { error: 'Keine Markierung vorhanden.' };
+      if (!annotationDraft) return { error: 'There is no annotation.' };
       await S.set({ annotationDraft: null });
       return enqueue({ type: 'annotation', text: m.text || '', ...(tour && { step: tourIndex }), ...annotationDraft });
     }
@@ -500,7 +500,7 @@ async function handle(m, sender) {
 
 async function startRecording() {
   const tab = await activeTab();
-  if (!tab || !(await allowed(tab.url))) return { error: 'Diese Seite ist nicht freigegeben.' };
+  if (!tab || !(await allowed(tab.url))) return { error: 'This page is not on the allowlist.' };
   await S.set({ recording: { startedAt: Date.now(), tabId: tab.id, steps: [
     { type: 'setViewport', width: tab.width, height: tab.height },
     { type: 'navigate', url: tab.url, ts: Date.now() },

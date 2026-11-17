@@ -10,29 +10,41 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cdpSession } from '../bridge/ws.js';
-import { getJson, EXT_ID } from '../bridge/core.js';
+import { getJson, EXT_ID, DATA } from '../bridge/core.js';
 
 const SKILL = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXT = path.join(SKILL, 'extension');
 const PORT = +(process.env.DEMO_CDP_PORT || 9334);
-const PROFILE = process.env.DEMO_PROFILE || path.join(process.env.LOCALAPPDATA || os.homedir(), 'demonstrate', 'profile');
-const BROWSER = process.env.DEMO_BROWSER_PATH || findChromeForTesting();
+const PROFILE = process.env.DEMO_PROFILE || path.join(DATA, 'profile');
 const INSTALL_HINT = 'Chrome for Testing not found; run `npx playwright install chromium` or set DEMO_BROWSER_PATH';
 
-// Newest Playwright-managed build: %LOCALAPPDATA%\ms-playwright\chromium-<rev>\chrome-win64\chrome.exe
+// Playwright's browser cache per OS, and the executable inside a chromium-<rev> folder.
+const PW_CACHE = {
+  win32: path.join(process.env.LOCALAPPDATA || os.homedir(), 'ms-playwright'),
+  darwin: path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright'),
+}[process.platform] || path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'ms-playwright');
+const EXECUTABLES = {
+  win32: ['chrome-win64/chrome.exe', 'chrome-win/chrome.exe'],
+  darwin: ['chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    'chrome-mac/Chromium.app/Contents/MacOS/Chromium'],
+}[process.platform] || ['chrome-linux64/chrome', 'chrome-linux/chrome'];
+
+// Newest Playwright-managed Chromium build.
 function findChromeForTesting() {
-  const root = process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(process.env.LOCALAPPDATA || os.homedir(), 'ms-playwright');
+  const root = process.env.PLAYWRIGHT_BROWSERS_PATH || PW_CACHE;
   let dirs = [];
   try { dirs = fs.readdirSync(root).filter(d => /^chromium-\d+$/.test(d)); } catch { return null; }
   dirs.sort((a, b) => +b.split('-')[1] - +a.split('-')[1]);
   for (const d of dirs) {
-    for (const sub of ['chrome-win64', 'chrome-win']) {
-      const exe = path.join(root, d, sub, 'chrome.exe');
+    for (const rel of EXECUTABLES) {
+      const exe = path.join(root, d, ...rel.split('/'));
       if (fs.existsSync(exe)) return exe;
     }
   }
   return null;
 }
+const BROWSER = process.env.DEMO_BROWSER_PATH || findChromeForTesting();
 const BASE = `http://127.0.0.1:${PORT}`;
 
 const log = (...m) => console.error('[demonstrate]', ...m);
@@ -54,7 +66,7 @@ async function start() {
       // Local dev hosts use self-signed certificates. Playwright's --ignore-https-errors does not reach
       // a browser it only attaches to over CDP, so the demo profile ignores certificate errors itself.
       '--ignore-certificate-errors',
-      // "Markieren" captures the page through chrome.debugger; this hides the "is being debugged" bar.
+      // "Annotate" captures the page through chrome.debugger; this hides the "is being debugged" bar.
       '--silent-debugger-extension-api',
       '--no-first-run', '--no-default-browser-check', '--start-maximized', 'about:blank'],
     { detached: true, stdio: 'ignore' }).unref();

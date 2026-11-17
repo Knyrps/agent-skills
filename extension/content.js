@@ -1,5 +1,5 @@
 // In-page layer, top frame only, allowlisted hosts only: draws the agent's highlights, records
-// "Zeig ich dir" and runs "Markieren". Everything sits in a closed shadow root with pointer-events: none and is
+// "Record" and runs "Annotate". Everything sits in a closed shadow root with pointer-events: none and is
 // only attached while something is visible. The controls themselves live in the side panel.
 (() => {
   if (window.top !== window || window.__demonstrate) return;
@@ -136,7 +136,7 @@
     setInterval(kick, 500); // picks up SPA route changes and top-layer changes
   }
 
-  // ---------------------------------------------------------------- "Zeig ich dir" recorder
+  // ---------------------------------------------------------------- "Record" recorder
   // Watches what the user does without interfering and hands each step to the worker, which keeps
   // the recording across page loads. Steps follow Chrome DevTools Recorder's format where one exists.
 
@@ -540,11 +540,11 @@
     return { ok: true };
   }
 
-  // ---------------------------------------------------------------- "Markieren": annotate the page
+  // ---------------------------------------------------------------- "Annotate": mark up the page
   // A click marks the element under it, dragging draws a frame, an arrow or a pen stroke; each mark can
   // get a note. Marks are stored relative to what they were drawn on (the document, a fixed layer or a
   // scroll container) and redrawn every frame, so they stay on their content while the user scrolls.
-  // "Fertig" replies with every mark in document coordinates and hides the overlay; the worker captures
+  // "Done" replies with every mark in document coordinates and hides the overlay; the worker captures
   // the page and draws the marks onto the image itself, then clears them with annotateClear.
 
   const SVG = 'http://www.w3.org/2000/svg';
@@ -573,14 +573,14 @@
     const layer = document.createElement('div');
     layer.className = 'annot';
     layer.innerHTML = `<div class="bar" role="toolbar">
-        <button data-tool="rect" class="on" data-tip="Rahmen">${icon('rect')}</button>
-        <button data-tool="arrow" data-tip="Pfeil">${icon('arrow')}</button>
-        <button data-tool="pen" data-tip="Stift">${icon('pen')}</button>
-        <span class="hint">Klick markiert ein Element</span>
+        <button data-tool="rect" class="on" data-tip="Frame">${icon('rect')}</button>
+        <button data-tool="arrow" data-tip="Arrow">${icon('arrow')}</button>
+        <button data-tool="pen" data-tip="Pen">${icon('pen')}</button>
+        <span class="hint">Click to mark an element</span>
         <span class="sep"></span>
-        <button data-act="undo" data-tip="Rückgängig (Strg+Z)" disabled>${icon('undo')}</button>
-        <button data-act="cancel" data-tip="Abbrechen (Esc)">${icon('close')}</button>
-        <button data-act="done" class="filled" disabled>${icon('check')}Fertig</button>
+        <button data-act="undo" data-tip="Undo (Ctrl+Z)" disabled>${icon('undo')}</button>
+        <button data-act="cancel" data-tip="Cancel (Esc)">${icon('close')}</button>
+        <button data-act="done" class="filled" disabled>${icon('check')}Done</button>
       </div>`;
     root.append(layer);
     annot = { layer, bar: layer.querySelector('.bar'), marks: [], seq: 0, tool: 'rect', drawing: null, note: null, reply };
@@ -869,9 +869,9 @@
     card.className = 'note-edit';
     card.style.setProperty('--c', m.color);
     card.style.setProperty('--on', m.on);
-    card.innerHTML = `<span class="num"></span><div class="field"><input aria-label="Notiz" placeholder="Notiz hinzufügen">
-      <div class="help">Enter speichert · Esc verwirft</div></div>
-      <button class="del" data-tip="Markierung löschen" aria-label="Markierung löschen">${icon('delete')}</button>`;
+    card.innerHTML = `<span class="num"></span><div class="field"><input aria-label="Note" placeholder="Add a note">
+      <div class="help">Enter saves · Esc discards</div></div>
+      <button class="del" data-tip="Delete mark" aria-label="Delete mark">${icon('delete')}</button>`;
     const input = card.querySelector('input');
     input.value = m.note;
     card.addEventListener('pointerdown', e => e.stopPropagation());
@@ -906,7 +906,7 @@
     card.style.setProperty('--on', m.on);
     card.innerHTML = '<span class="num"></span><span class="text"></span>';
     card.querySelector('.text').textContent = m.note;
-    card.title = 'Notiz bearbeiten';
+    card.title = 'Edit note';
     card.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); });
     card.addEventListener('click', () => { if (!annot.drawing) openNote(m); });
     annot.layer.insertBefore(card, annot.bar);

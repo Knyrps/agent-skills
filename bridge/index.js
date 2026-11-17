@@ -80,7 +80,7 @@ async function runMcp() {
       + 'if it is not running, open the side panel, and wait until the extension is connected. Idempotent. Call it first in every tour, '
       + 'before any playwright-demo tool.',
     inputSchema: { type: 'object', properties: {} } },
-    { name: 'load_tour', description: 'Hand the whole tour to the browser. Weiter/Zurück then run there without the agent '
+    { name: 'load_tour', description: 'Hand the whole tour to the browser. Next/Back then run there without the agent '
       + '(navigation, actions, highlights, explanation in the side panel). Only questions, picks, agent steps, step errors '
       + 'and the end reach wait_for_action. Starts at step `start` (default 0).',
     inputSchema: { type: 'object', required: ['tour'], properties: {
@@ -94,7 +94,7 @@ async function runMcp() {
         agent: { type: 'boolean', description: 'The agent performs this step itself (it receives an agentStep action)' },
       } } } } },
     } } },
-    { name: 'request_demo', description: 'Ask the user to show something in the page ("Zeig mal, wo du den Filter erwarten würdest"). '
+    { name: 'request_demo', description: 'Ask the user to show something in the page ("Show me where you would expect the filter"). '
       + 'The panel shows the prompt and starts recording; the user acts, stops and sends. Then wait: you get a recording action '
       + 'with requestId and prompt (clicks, right clicks, double clicks, long presses, typing, keys, shortcuts, swipes, scrolls, '
       + 'navigations), or demoDeclined if the user discarded it.',

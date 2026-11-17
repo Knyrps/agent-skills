@@ -1,33 +1,34 @@
 ---
 name: demonstrate
-description: "Guided step-by-step UI tour in the Playwright browser with an on-page bar for next/back/questions/element picks. Use for walkthroughs, tours, demos, 'show me', and demonstrating code changes."
+description: "Guided step-by-step UI tour in a Playwright-driven browser with a side panel for next/back, questions, page annotations and recordings. Use for walkthroughs, tours, demos, 'show me', and demonstrating code changes."
 ---
 
 # demonstrate
 
 You give the user a guided **tour** of a web app. You drive the browser through the Playwright MCP; the
-user watches the same browser and answers through the **demonstrate side panel** (Zurück / Weiter /
-Markieren / Zeig ich dir / Frage). The panel is browser UI, so it never appears in page screenshots. You also draw
+user watches the same browser and answers through the **demonstrate side panel** (Back / Next /
+Annotate / Record / question field). The panel is browser UI, so it never appears in page screenshots. You also draw
 **highlights** on page elements to point at what you are explaining.
 
-`D` below is `$HOME\.agents\skills\demonstrate`. All commands are pwsh.
+`<skill>` below is this skill's directory (the folder that contains this SKILL.md). Commands work in any
+shell (pwsh, bash, zsh).
 
 ## Pieces
 
 - **Browser**: Chrome for Testing on its own profile, CDP on `127.0.0.1:9334`, extension preloaded.
   `start_browser` launches it (idempotent) and opens the panel; it outlives the session.
-- **playwright-demo MCP** (`tools["playwright-demo"].*`) drives this browser. Use it for the whole tour,
+- **playwright-demo MCP** (the `playwright-demo` server's tools) drives this browser. Use it for the whole tour,
   never the plain `playwright` server, which runs a separate browser the user cannot see. It lists the
   side panel as a tab too (`chrome-extension://…/panel.html`): select the app tab with `browser_tabs`
   and act only on that.
-- **demonstrate MCP** (`tools.demonstrate.*`): `start_browser`, `status`, `load_tour`, `goto_step`,
+- **demonstrate MCP** (the `demonstrate` server's tools): `start_browser`, `status`, `load_tour`, `goto_step`,
   `end_tour`, `request_demo` (ask the user to show you something; then wait), `set_step`, `highlight`, `clear_highlights`, `hide_overlays`, `get_queue`,
-  `wait_for_action`. Every one also exists as a CLI: `node "$D\bridge" start | status |
+  `wait_for_action`. Every one also exists as a CLI: `node "<skill>/bridge" start | status |
   tour <file.json> [--start n] | goto <n> | end | request <prompt> | step <label> | highlight <css> [--label t] [--text t]
   [--style spotlight] [--id x] [--keep] | clear [id] | hide | show | wait [--timeout N] | cancel`.
-- **Scripted tour**: you hand over every step at once; the extension runs Weiter/Zurück itself
+- **Scripted tour**: you hand over every step at once; the extension runs Next/Back itself
   (navigation, actions, highlights, explanation in the panel) in about a second, without you. You are
-  woken only for questions, element picks, `agent` steps, step errors and the end.
+  woken only for questions, annotations, recordings, `agent` steps, step errors and the end.
 
 ## Guardrail: allowlisted hosts
 
@@ -58,14 +59,14 @@ Then plan one tour step per user-visible change, ordered along the app's natural
    step to one idea. Done when the user can see the full list.
 2. **Script it** as a tour object: `{ steps: [{ title, explanation, url?, actions?, highlights?, agent? }] }`.
    - `explanation`: 2–5 sentences shown in the panel; this replaces the chat explanation per step.
-   - `url`: navigate first; omit to continue on the page the previous step left. Zurück replays from the
+   - `url`: navigate first; omit to continue on the page the previous step left. Back replays from the
      nearest earlier step with a `url`, so give every step that changes page state a reachable `url`
      (a URL with query parameters is better than a chain of clicks).
    - `actions`: `{click: css, text?}`, `{fill: css, value}`, `{waitFor: css, text?}`, `{wait: ms}`.
    - `highlights`: as `highlight()` (`selector`, `text`, `label`, `style: "spotlight"`, `id`); the first
      replaces, the rest are added. Prefer stable selectors (id, `data-testid`, aria) plus `text`.
    - `agent: true` only for steps that cannot be scripted (they depend on a result you must see first);
-     you then do that step by hand (step-by-step section) and `goto_step(n+1)` when the user clicks Weiter.
+     you then do that step by hand (step-by-step section) and `goto_step(n+1)` when the user clicks Next.
    Verify selectors before loading (playwright-demo `browser_evaluate` with `querySelector`): a missing one
    becomes a `stepError` mid-tour.
 3. **Start.** Call `start_browser`. Check `bridge.extensionConnected: true` and `bridge.panelOpen: true`
@@ -82,14 +83,14 @@ Then plan one tour step per user-visible change, ordered along the app's natural
    - `agentStep`: perform that step by hand (step-by-step section), then wait.
    - `tourEnd`: go to Finish.
    - `question`: answer `text` in chat, in the context of the current step. Stay on the step, wait again.
-   - `recording`: the user demonstrated something ("Zeig ich dir", or your `request_demo`; then it carries
+   - `recording`: the user demonstrated something ("Record", or your `request_demo`; then it carries
      `requestId` and `prompt`). `recording.steps` follows Chrome DevTools Recorder's format (`setViewport`,
      `navigate`, `click` with `button: "secondary"` for right clicks and `modifiers`, `doubleClick`,
      `change` = typed text or selection, `keyDown`, `scroll`) plus `longPress`, `swipe` (from/to point and
      element, direction, pointerType) and `urlChange` (SPA route, no reload); element steps carry
      `selectors`, `tag`, `text`. `text` is the user's question. Answer what they showed; on request replay
      it through playwright-demo or turn it into tour steps. `demoDeclined`: the user discarded your request.
-   - `annotation`: the user marked the page ("Markieren": a click marks one element, dragging draws) and
+   - `annotation`: the user marked the page ("Annotate": a click marks one element, dragging draws) and
      asks `text`. The marks may span more than the window. You get an inline image only you see: the user's
      numbered, coloured marks and notes plus dashed outlines labelled `1a`, `1b`… around the page elements
      each mark refers to. `annotations[]` is the legend: `n`, `kind` (element/rect/arrow/pen), `color`,
@@ -113,13 +114,13 @@ Act through playwright-demo, `set_step("n/N – <title>")`, `highlight` what you
 Preferred: a **background shell job** so the chat stays free and no MCP timeout applies:
 
 ```pwsh
-node "$HOME\.agents\skills\demonstrate\bridge" wait --timeout 1800
+node "<skill>/bridge" wait --timeout 1800
 ```
 
 Run it with the shell tool's background option, then end your turn. Its completion notification carries
 the JSON (`{"actions": [...]}`); continue with step 4. Keep exactly one wait pending at a time.
 
-If the user writes in chat while a wait is pending, first release it with `node "$D\bridge" cancel`
+If the user writes in chat while a wait is pending, first release it with `node "<skill>/bridge" cancel`
 (the background job then completes with `cancelled`, ignore that result), then answer the chat message,
 then start a new wait if the tour continues.
 
@@ -136,13 +137,13 @@ Before a screenshot that should show the plain page, call `hide_overlays(true)`;
 
 - `extensionConnected: false`: call `start_browser` again; the extension reconnects within ~15 s.
   Panel clicks made while disconnected are buffered and delivered later.
-- `bridge not running`: the demonstrate MCP is not attached; `node "$D\bridge" start` and
-  `node "$D\bridge" wait` still work on their own (wait serves the bridge itself while it waits).
+- `bridge not running`: the demonstrate MCP is not attached; `node "<skill>/bridge" start` and
+  `node "<skill>/bridge" wait` still work on their own (wait serves the bridge itself while it waits).
 - playwright-demo fails with `ECONNREFUSED 127.0.0.1:9334`: the browser is not running; call
   `start_browser`, then retry.
 - A playwright-demo locator times out on an element you can see: the current tab is the side panel.
   Select the app tab (step 3) and retry.
-- Several OpenCode sessions each start a bridge; one owns port 47613 and a bridge with newer code
+- Several agent sessions each start a bridge; one owns port 47613 and a bridge with newer code
   takes it over automatically. One browser serves one tour at a time: if `status` shows a step you did
   not set, another session is touring, so ask the user before `load_tour`.
 - Chrome for Testing missing: `npx playwright install chromium`, or set `DEMO_BROWSER_PATH`.

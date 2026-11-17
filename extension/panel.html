@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>demonstrate</title>
@@ -9,13 +9,13 @@
 </head>
 <body>
   <header>
-    <span class="md-typescale-title-medium">Geführte Demo</span>
+    <span class="md-typescale-title-medium">Guided demo</span>
     <span id="conn" class="conn md-typescale-label-medium"><span class="dot"></span><span id="conn-text">Offline</span></span>
   </header>
 
   <section class="card">
     <md-linear-progress id="busy" indeterminate></md-linear-progress>
-    <div class="md-typescale-label-medium muted">Aktueller Schritt</div>
+    <div class="md-typescale-label-medium muted">Current step</div>
     <div id="step" class="md-typescale-title-large step">—</div>
     <div id="explanation" class="md-typescale-body-large explanation" hidden></div>
     <div id="status" class="md-typescale-body-medium status"></div>
@@ -24,10 +24,10 @@
   <div class="nav">
     <md-outlined-button id="back">
       <svg slot="icon" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-      Zurück
+      Back
     </md-outlined-button>
     <md-filled-button id="next" trailing-icon>
-      Weiter
+      Next
       <svg slot="icon" viewBox="0 0 24 24"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
     </md-filled-button>
   </div>
@@ -38,27 +38,27 @@
   </div>
 
   <section id="request" class="request" hidden>
-    <div class="md-typescale-label-medium">Der Agent bittet dich, es vorzumachen</div>
+    <div class="md-typescale-label-medium">The agent asks you to show it</div>
     <div id="request-text" class="md-typescale-body-large"></div>
-    <div class="md-typescale-body-medium">Die Aufnahme läuft schon – mach es in der Seite vor und klicke dann „Aufnahme beenden“.</div>
+    <div class="md-typescale-body-medium">Recording has started. Do it in the page, then click "Stop recording".</div>
   </section>
 
   <md-divider></md-divider>
 
   <section class="ask">
-    <div class="md-typescale-title-small">Frage stellen</div>
+    <div class="md-typescale-title-small">Ask a question</div>
     <div class="tool-row">
     <md-filled-tonal-button id="annotate">
       <svg slot="icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-      Markieren
+      Annotate
     </md-filled-tonal-button>
     <md-filled-tonal-button id="rec">
       <svg slot="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>
-      <span id="rec-label">Zeig ich dir</span>
+      <span id="rec-label">Record</span>
     </md-filled-tonal-button>
     </div>
     <div class="rec-row">
-      <md-text-button id="rec-discard" hidden>Verwerfen</md-text-button>
+      <md-text-button id="rec-discard" hidden>Discard</md-text-button>
       <span id="rec-count" class="md-typescale-label-medium muted" hidden></span>
     </div>
     <md-chip-set id="annot-chip" hidden>
@@ -67,11 +67,11 @@
     <md-chip-set id="rec-chip" hidden>
       <md-input-chip id="rec-chip-text" label=""></md-input-chip>
     </md-chip-set>
-    <md-outlined-text-field id="q" type="textarea" rows="2" label="Deine Frage"
-      supporting-text="Enter sendet · Shift+Enter für neue Zeile"></md-outlined-text-field>
+    <md-outlined-text-field id="q" type="textarea" rows="2" label="Your question"
+      supporting-text="Enter sends · Shift+Enter for a new line"></md-outlined-text-field>
     <md-filled-button id="send">
       <svg slot="icon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-      Senden
+      Send
     </md-filled-button>
   </section>
 

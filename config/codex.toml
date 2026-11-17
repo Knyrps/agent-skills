@@ -1,0 +1,12 @@
+# Append to ~/.codex/config.toml. Replace <skill> with the absolute skill path.
+# The skill waits for the user through a background shell job; if it falls back to wait_for_action,
+# that call blocks up to 10 minutes, hence the long tool timeout.
+
+[mcp_servers.demonstrate]
+command = "node"
+args = ["<skill>/bridge/index.js"]
+tool_timeout_sec = 900
+
+[mcp_servers.playwright-demo]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest", "--cdp-endpoint", "http://127.0.0.1:9334", "--ignore-https-errors"]
