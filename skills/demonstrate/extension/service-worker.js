@@ -708,7 +708,8 @@ async function runVideo(v) {
       if (!pages.length) { await dwell(v, Math.max(800, total - spent)); continue; }
       cues.push({ start: t, end: t, text: pages[0] });
       const first = cues[cues.length - 1];
-      await dwell(v, Math.max(700, times[0] - spent));
+      // While actions run the viewer watches the pointer, so only half of that time counts as reading.
+      await dwell(v, Math.max(1500 * pace, times[0] - spent / 2));
       first.end = await now();
       for (let k = 1; k < pages.length && !v.abort; k++) await caption(pages[k], times[k]);
     }
