@@ -548,8 +548,8 @@
   // The element a real pointer at (x, y) would hit, if it belongs to the target; else the target itself.
   const hit = (el, x, y) => { const h = pageElementAt(x, y); return h && (h === el || el.contains(h)) ? h : el; };
   const mid = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
-  // In a video the chapter label covers the top and the caption the bottom of the window.
-  const onScreen = r => r.top >= (film ? 96 : 0) && r.bottom <= innerHeight - (film ? 150 : 0) && r.left >= 0 && r.right <= innerWidth;
+  // In a video the caption block covers the bottom of the window.
+  const onScreen = r => r.top >= (film ? 24 : 0) && r.bottom <= innerHeight - (film ? 170 : 0) && r.left >= 0 && r.right <= innerWidth;
 
   // Brings the element into view: smoothly with a wheel badge in a video, at once otherwise.
   async function reveal(el, always = false) {

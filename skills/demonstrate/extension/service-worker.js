@@ -622,6 +622,7 @@ async function runVideo(v) {
   const { tour, opts } = v, steps = tour.steps, pace = opts.pace;
   const chapters = [], cues = [];
   const shown = steps.filter(s => s.video !== false);
+  const sections = [...new Set(shown.map(s => s.section).filter(Boolean))];
   const title = tour.title || opts.name || steps[0].title;
   let mimeType = '', section = null, n = 0;
   const caption = async (text, ms) => {
@@ -653,23 +654,27 @@ async function runVideo(v) {
       await S.set({ step: `${i + 1}/${steps.length} – ${s.title}`, explanation: s.explanation || '', highlights: [] });
       v.onCamera = s.video !== false;
       if (!v.onCamera) await videoCmd({ cmd: 'pause' });
-      await stage(v, { card: null, caption: null, lower: null });
+      // A new section swaps the card in place (intro → section), so no page flashes between two cards;
+      // the card also covers the navigation to the step's page.
+      const newSection = v.onCamera && opts.cards && s.section && s.section !== section;
+      if (newSection) {
+        section = s.section;
+        await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
+        await S.set({ highlights: [] });
+        await stage(v, { caption: null, lower: null,
+          card: { kind: 'section', title: s.section, kicker: `Section ${sections.indexOf(s.section) + 1} of ${sections.length}` } });
+      } else await stage(v, { card: v.onCamera && v.stage.card?.kind === 'intro' ? v.stage.card : null, caption: null, lower: null });
       if (s.url && i > 0) await navigate(v.tabId, s.url);
       await settle(v);
-      if (v.onCamera && opts.cards && s.section && s.section !== section) {
-        section = s.section;
-        await stage(v, { card: { kind: 'section', title: s.section, kicker: 'Section' } });
-        await dwell(v, 2500 * pace);
-        await stage(v, { card: null });
-      }
+      if (newSection) await dwell(v, 2500 * pace);
       const t = v.onCamera ? await now() : 0;
       if (v.onCamera) {
         n++;
         chapters.push({ t, title: s.title });
         const timing = stepTiming(s, opts);
         v.timing = timing;
-        await stage(v, { footer: { index: n - 1, count: shown.length },
-          lower: { n, of: shown.length, title: s.title, until: Date.now() + 3000 * pace },
+        await stage(v, { card: null, footer: { index: n - 1, count: shown.length },
+          lower: { n, of: shown.length, title: s.title },
           caption: opts.captions ? timing.pages[0] || null : null });
       }
       if (s.actions?.length) { await run(v.tabId, s.actions, i, v.onCamera); await settle(v); }

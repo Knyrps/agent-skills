@@ -5,10 +5,10 @@ A video is a scripted tour that plays by itself while the tab is recorded. Read 
 ## What ends up in the video
 
 - **Intro card**: `tour.title`, then `tour.subtitle` or today's date and `branding.name`.
-- **Section slide**: when a step's `section` differs from the previous one ("Section · Checkout").
-- **Chapter label** (top left, 3 s) and **progress bar** (bottom, one tick per chapter) on every step.
-- **Captions** (bottom centre): the step's `caption`, else its `explanation`, split into pages of whole
-  sentences and shown at reading pace. The same text goes to the `.vtt`.
+- **Section slide**: when a step's `section` differs from the previous one ("Section 2 of 3 · Checkout").
+- **Caption block** (bottom centre) on every step: the chapter ("2 · Title") above the step's `caption`,
+  else its `explanation`, split into pages of whole sentences and shown at reading pace. The same text goes
+  to the `.vtt`. A **progress bar** (bottom edge, one tick per chapter) shows where the video is.
 - **Drawn pointer**: an arrow cursor for mouse actions, a finger dot for touch actions (`swipe`,
   `longPress`). It glides to each target, presses with a ripple, types character by character, scrolls
   smoothly and leaves a trail on swipes and drags.

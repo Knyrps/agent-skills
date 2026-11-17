@@ -17,16 +17,13 @@
       border-radius:12px;background:color-mix(in srgb,var(--md-sys-color-inverse-surface) 94%,transparent);
       color:var(--md-sys-color-inverse-on-surface);font:400 18px/26px ${FONT};letter-spacing:.15px;text-align:center;
       box-shadow:${EL3};transition:opacity .25s cubic-bezier(.2,0,0,1),translate .25s cubic-bezier(.2,0,0,1)}
-    .lower{position:fixed;left:24px;top:24px;display:flex;align-items:center;gap:12px;padding:8px 20px 8px 8px;border-radius:16px;
-      background:var(--md-sys-color-surface-container-high);color:var(--md-sys-color-on-surface);box-shadow:${EL2};
-      transition:opacity .3s cubic-bezier(.2,0,0,1),translate .3s cubic-bezier(.2,0,0,1)}
-    .lower .n{box-sizing:border-box;min-width:40px;height:40px;padding:0 10px;border-radius:12px;background:var(--md-sys-color-primary);
-      color:var(--md-sys-color-on-primary);font:500 16px/40px ${FONT};text-align:center}
-    .lower .k{font:500 11px/16px ${FONT};letter-spacing:.5px;color:var(--md-sys-color-on-surface-variant);text-transform:uppercase}
-    .lower .t{font:500 16px/24px ${FONT};letter-spacing:.15px}
+    .cap .ch{font:500 12px/16px ${FONT};letter-spacing:.5px;margin-bottom:4px;
+      color:color-mix(in srgb,var(--md-sys-color-primary) 40%,var(--md-sys-color-inverse-on-surface))}
+    .cap .ch:empty,.cap .tx:empty{display:none}
+    .cap:has(.tx:empty) .ch{margin:0}
+    .tx{transition:opacity .2s cubic-bezier(.2,0,0,1)}
     .hide{opacity:0!important}
     .cap.hide{translate:-50% 10px}
-    .lower.hide{translate:-12px 0}
     .bar{position:fixed;left:0;right:0;bottom:0;height:4px;background:var(--md-sys-color-secondary-container)}
     .bar .fill{position:absolute;left:0;top:0;bottom:0;background:var(--md-sys-color-primary);transition:width .6s cubic-bezier(.2,0,0,1)}
     .bar .tick{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--md-sys-color-surface)}
@@ -45,7 +42,7 @@
     .foot{margin-top:12px;padding-top:16px;border-top:1px solid var(--md-sys-color-outline-variant);align-self:stretch;
       font:400 14px/20px ${FONT};letter-spacing:.25px;color:var(--md-sys-color-on-surface-variant)}`;
 
-  let host = null, root = null, els = {}, state = {}, lowerTimer = 0;
+  let host = null, root = null, els = {}, state = {};
   const tokens = fetch(chrome.runtime.getURL('vendor/m3-tokens.css')).then(r => r.text())
     .then(css => `:host{${(css.match(/:root\s*\{([^}]*)\}/) || [])[1] || ''}}`).catch(() => '');
 
@@ -59,10 +56,9 @@
       host.popover = 'manual';
       root = host.attachShadow({ mode: 'closed' });
       root.innerHTML = `<style class="tokens"></style><style>${STYLES}</style><div class="shield"></div>
-        <div class="bar"><div class="fill"></div></div><div class="lower hide"><span class="n"></span><span><div class="k"></div><div class="t"></div></span></div>
-        <div class="cap hide"></div><div class="card hide"><div class="in"></div></div>`;
-      for (const k of ['shield', 'bar', 'fill', 'lower', 'cap', 'card', 'in']) els[k] = root.querySelector('.' + k);
-      els.n = els.lower.querySelector('.n'); els.k = els.lower.querySelector('.k'); els.t = els.lower.querySelector('.t');
+        <div class="bar"><div class="fill"></div></div>
+        <div class="cap hide"><div class="ch"></div><div class="tx"></div></div><div class="card hide"><div class="in"></div></div>`;
+      for (const k of ['shield', 'bar', 'fill', 'cap', 'ch', 'tx', 'card', 'in']) els[k] = root.querySelector('.' + k);
       const style = root.querySelector('.tokens');
       tokens.then(css => { style.textContent = css; });
     }
@@ -114,19 +110,14 @@
         els.bar.append(t);
       }
     }
-    const l = s.lower;
-    clearTimeout(lowerTimer);
-    if (l && !s.card) {
-      els.n.textContent = String(l.n);
-      els.k.textContent = l.kicker || `Chapter ${l.n} of ${l.of}`;
-      els.t.textContent = l.title;
-      els.lower.classList.remove('hide');
-      const left = (l.until || 0) - Date.now();
-      if (left > 0) lowerTimer = setTimeout(() => els.lower.classList.add('hide'), left);
-      else els.lower.classList.add('hide');
-    } else els.lower.classList.add('hide');
-    els.cap.classList.toggle('hide', !s.caption || !!s.card);
-    if (s.caption) els.cap.textContent = s.caption;
+    // The caption block carries the chapter ("2 · Title") above the caption for the whole step; the text
+    // stays in place while the block fades out, so it never blanks mid-fade.
+    const l = s.lower, on = !s.card && !!(l || s.caption);
+    if (on) {
+      els.ch.textContent = l ? `${l.n} · ${l.title}` : '';
+      els.tx.textContent = s.caption || '';
+    }
+    els.cap.classList.toggle('hide', !on);
     els.card.classList.toggle('hide', !s.card);
     if (s.card) {
       const html = cardHtml(s.card, b);
@@ -136,7 +127,6 @@
 
   function end() {
     stage.active = false;
-    clearTimeout(lowerTimer);
     host?.remove();
     for (const t of BLOCKED) removeEventListener(t, block, true);
   }

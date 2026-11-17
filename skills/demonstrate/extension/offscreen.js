@@ -53,7 +53,7 @@ async function start(m) {
   stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: {
     chromeMediaSource: 'tab', chromeMediaSourceId: m.streamId,
     minWidth: m.width, maxWidth: m.width, minHeight: m.height, maxHeight: m.height,
-    maxFrameRate: m.fps, minFrameRate: m.minFps ?? 5,
+    maxFrameRate: m.fps, minFrameRate: m.minFps ?? m.fps,
   } } });
   const [track] = stream.getVideoTracks();
   track.addEventListener('ended', () => fail('the tab capture ended (tab closed or capture taken over)'));
