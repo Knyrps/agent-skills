@@ -16,7 +16,16 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 [hidden] { display: none !important; }
 .muted { color: var(--md-sys-color-on-surface-variant); }
 
-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.listen { display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
+.listen .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); flex: none; }
+.listen.on { color: var(--md-sys-color-primary); }
+.listen.on .dot { background: var(--md-sys-color-primary); }
+.tour { display: flex; flex-direction: column; gap: 12px; }
+.countdown { color: var(--md-sys-color-primary); }
+.card.rec { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+.card.rec .muted, .card.rec .status { color: inherit; }
 .conn { display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); }
 .conn.ok .dot { background: #1e8e3e; }

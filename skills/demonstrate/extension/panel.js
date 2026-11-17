@@ -10,39 +10,47 @@ const steps = n => { n = Math.max(0, n); return `${n} step${n === 1 ? '' : 's'}`
   chrome.runtime.connect({ name: 'panel' }).onDisconnect.addListener(() => setTimeout(connectPort, 1000));
 })();
 
+// Without a tour, step label or video the panel is just the channel to the agent: Annotate, Record, message.
 async function render() {
-  const s = await S.get(['step', 'waiting', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning', 'explanation', 'video']);
+  const s = await S.get(['step', 'waiting', 'listener', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning', 'explanation', 'video']);
+  const pending = (s.outbox || []).length;
+  $('conn-text').textContent = (s.connected ? 'Connected' : 'Offline') + (pending ? ` · ${pending} pending` : '');
+  $('conn').classList.toggle('ok', !!s.connected);
+  const who = s.listener || 'the agent';
+  $('listen-text').textContent = !s.connected ? 'Bridge offline · input is kept'
+    : s.waiting ? `${who} is listening` : s.listener ? `Saved until ${who} listens` : 'No agent listening · input is kept';
+  $('listen').classList.toggle('on', !!(s.connected && s.waiting));
+  $('tour').hidden = !(s.tour || s.step || s.video);
   $('step').textContent = s.step || '—';
+  $('step').hidden = !!s.video && !s.step;
+  if (s.video) $('annotate').disabled = $('rec').disabled = true; else renderRecording();
   $('explanation').textContent = s.explanation || '';
   $('explanation').hidden = !s.explanation;
-  if (s.video) {
-    $('back').disabled = $('next').disabled = true;
-    $('busy').toggleAttribute('data-on', s.video.state === 'starting');
-    $('status').textContent = s.video.state === 'starting' ? 'Preparing the video recording…'
-      : `● Recording video (${s.video.width}×${s.video.height}) · step ${s.video.step + 1} of ${s.video.steps}`;
-    $('status').classList.add('waiting');
+  const v = s.video;
+  $('nav').hidden = !!v;
+  $('video-nav').hidden = !v;
+  $('countdown').hidden = v?.state !== 'countdown';
+  $('card').classList.toggle('rec', v?.state === 'recording');
+  if (v) {
+    $('step-kicker').textContent = 'Video recording';
+    $('countdown').textContent = v.state === 'countdown' ? String(v.count) : '';
+    $('busy').toggleAttribute('data-on', v.state === 'starting' || v.state === 'finishing');
+    $('status').textContent = { countdown: 'Recording starts. Keep your hands off the page.', starting: 'Preparing the recording…',
+      finishing: 'Saving the video…' }[v.state] || `● Recording ${v.width}×${v.height} · step ${v.step + 1} of ${v.steps}`;
+    $('video-stop').disabled = $('video-discard').disabled = v.state === 'finishing';
     return;
   }
+  $('step-kicker').textContent = 'Current step';
   if (s.tour) {
     // A scripted tour runs here; the agent is only needed for questions.
     $('back').disabled = !!s.tourRunning || (s.tourIndex ?? 0) <= 0;
     $('next').disabled = !!s.tourRunning;
     $('busy').toggleAttribute('data-on', !!s.tourRunning);
-    $('status').textContent = s.tourRunning ? 'Preparing the step…'
-      : s.connected && s.waiting ? 'The agent answers questions right away.' : 'Questions are kept until the agent is listening.';
-    $('status').classList.toggle('waiting', !s.tourRunning);
-    const pending = (s.outbox || []).length;
-    $('conn-text').textContent = (s.connected ? 'Connected' : 'Offline') + (pending ? ` · ${pending} pending` : '');
-    $('conn').classList.toggle('ok', !!s.connected);
+    $('status').textContent = s.tourRunning ? 'Preparing the step…' : '';
     return;
   }
   $('back').disabled = $('next').disabled = false;
-  const pending = (s.outbox || []).length;
-  $('conn-text').textContent = (s.connected ? 'Connected' : 'Offline') + (pending ? ` · ${pending} pending` : '');
-  $('conn').classList.toggle('ok', !!s.connected);
-  $('status').textContent = !s.connected ? 'Agent not connected. Your input is kept until it is.'
-    : s.waiting ? 'The agent is waiting for you.' : 'The agent is working…';
-  $('status').classList.toggle('waiting', !!(s.connected && s.waiting));
+  $('status').textContent = s.waiting ? 'The agent is waiting for you.' : 'The agent is working…';
   $('busy').toggleAttribute('data-on', !!(s.connected && !s.waiting));
 }
 
@@ -64,12 +72,18 @@ function toast(msg) {
   toastTimer = setTimeout(() => $('toast').classList.remove('show'), 4000);
 }
 
+async function sentText(delivered) {
+  const { waiting, listener } = await S.get(['waiting', 'listener']);
+  if (delivered && waiting) return `Sent to ${listener || 'the agent'}.`;
+  return `Saved. ${listener || 'The agent'} gets it as soon as it listens.`;
+}
+
 async function act(type, extra = {}) {
   const r = await chrome.runtime.sendMessage({ type: 'action', action: { type, url: tabUrl, ...extra } })
     .catch(e => ({ error: e.message }));
   if (r?.error) return toast('Error: ' + r.error);
   if (r?.local) return;
-  toast(r?.delivered ? 'Sent.' : 'Saved. It will be delivered once the agent connects.');
+  toast(await sentText(r?.delivered));
 }
 
 async function send() {
@@ -82,7 +96,7 @@ async function send() {
     if (recordingDraft) results.push(await chrome.runtime.sendMessage({ type: 'recSend', text, url: tabUrl }).catch(e => ({ error: e.message })));
     const failed = results.find(r => r?.error);
     if (failed) return toast('Error: ' + failed.error);
-    toast(results.every(r => r?.delivered) ? 'Sent.' : 'Saved. It will be delivered once the agent connects.');
+    toast(await sentText(results.every(r => r?.delivered)));
     $('q').value = '';
     return;
   }
@@ -91,6 +105,8 @@ async function send() {
   $('q').value = '';
 }
 
+$('video-stop').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'videoStop' }));
+$('video-discard').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'videoStop', discard: true }));
 $('next').addEventListener('click', () => act('next'));
 $('back').addEventListener('click', () => act('back'));
 $('send').addEventListener('click', send);

@@ -121,6 +121,8 @@
   const nodes = new Map(); // highlight id -> { box, label, sig }
   const show = (el, on) => { el.style.display = on ? '' : 'none'; };
   const here = () => location.origin + location.pathname;
+  const G = globalThis.__demonstrateGestures; // gestures.js, loaded first
+  const busy = () => G.pointer.active || !!globalThis.__demonstrateStage?.active;
 
   chrome.runtime.sendMessage({ type: 'hello', url: location.href })
     .then(r => { if (r?.allowed) init(); }).catch(() => {});
@@ -286,7 +288,7 @@
 
   function kick() {
     if (suspended) return;
-    const needed = visible().length > 0 || !!annotating;
+    const needed = visible().length > 0 || !!annotating || busy();
     if (!needed) { unmount(); return; }
     mount();
     // a page dialog/popover opened after us would cover the overlay: move back to the top
@@ -311,6 +313,7 @@
       [boxLayer, labelLayer] = [root.querySelector('.boxes'), root.querySelector('.labels')];
       const style = root.querySelector('.tokens');
       tokens.then(css => { style.textContent = css; });
+      G.attach(root, labelLayer);
     }
     if (!host.isConnected) {
       document.documentElement.appendChild(host);
@@ -332,6 +335,12 @@
     }
     const vis = list.find(n => { const r = n.getBoundingClientRect(); return r.width > 0 || r.height > 0; });
     return { el: vis || list[0] || null, count: list.length };
+  }
+
+  // Client centre of the first visible match, for a gesture's end point.
+  function centre(selector) {
+    const r = find({ selector, text: '' }).el?.getBoundingClientRect();
+    return r && (r.width || r.height) ? [r.left + r.width / 2, r.top + r.height / 2] : null;
   }
 
   function resolve(h) {
@@ -377,12 +386,12 @@
     raf = 0;
     if (suspended) return;
     const list = visible();
-    if (!list.length && !annotating) { unmount(); return; }
+    if (!list.length && !annotating && !busy()) { unmount(); return; }
     mount();
     const W = innerWidth, H = innerHeight;
     let holes = '';
     const live = new Set();
-    const boxes = [], callouts = [];
+    const boxes = [], callouts = [], gestures = [];
     for (const h of list) {
       live.add(h.id);
       let n = nodes.get(h.id);
@@ -404,7 +413,7 @@
       const r = el?.getBoundingClientRect();
       if (!r || (r.width === 0 && r.height === 0)) { show(n.box, false); show(n.label, false); continue; }
       const p = 4, x = r.left - p, y = r.top - p, w = r.width + 2 * p, bh = r.height + 2 * p;
-      show(n.box, true);
+      show(n.box, h.style !== 'none');
       n.box.style.transform = `translate(${x}px,${y}px)`;
       n.box.style.width = w + 'px';
       n.box.style.height = bh + 'px';
@@ -412,8 +421,11 @@
       boxes.push({ id: h.id, x, y, w, h: bh });
       show(n.label, !!h.label);
       if (h.label) callouts.push({ n, id: h.id, x, y, w, h: bh });
+      if (h.gesture) gestures.push({ id: h.id, kind: h.gesture, dir: h.direction, color: h.color || DEFAULT_COLOR,
+        rect: { x: r.left, y: r.top, w: r.width, h: r.height }, to: h.to ? centre(h.to) : null });
     }
     placeCallouts(callouts, boxes, W, H);
+    G.sync(gestures);
     for (const [id, n] of nodes) if (!live.has(id)) { n.box.remove(); n.label.remove(); nodes.delete(id); }
     show(dim, !!holes);
     if (holes) {
@@ -518,24 +530,245 @@
     }
   }
 
-  // Each action: { click | fill | waitFor: selector, text?, value? } or { wait: ms }.
-  async function runActions(actions) {
-    for (const a of actions) {
-      if (a.wait) { await pause(+a.wait); continue; }
-      const selector = a.click || a.fill || a.waitFor;
-      if (!selector) throw new Error('unknown action ' + JSON.stringify(a));
-      const el = await waitFor({ selector, text: a.text }, a.timeout);
-      if (a.click) {
-        el.scrollIntoView({ block: 'center', behavior: 'instant' });
-        el.click();
-      } else if (a.fill) {
-        el.focus();
-        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
-        setter ? setter.call(el, a.value ?? '') : (el.value = a.value ?? '');
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
+  // Actions: { click | fill | waitFor | hover | doubleClick | rightClick | longPress | swipe | drag | scroll: selector,
+  // text?, value?, to?, direction?, distance?, ms?, after? }, { scrollBy: px | {x, y}, in?: selector },
+  // { press: key, on?: selector } or { wait: ms }. Live tours run them at once; a video (`cinematic`) shows a
+  // drawn cursor or finger that travels to each target, presses, types and scrolls at watching speed.
+  const ACTIONS = ['click', 'fill', 'waitFor', 'hover', 'doubleClick', 'rightClick', 'longPress', 'swipe', 'drag', 'scroll'];
+  const P = G.pointer;
+  let film = false, hovered = null, tint = DEFAULT_COLOR;
+
+  const evt = (el, type, x, y, o = {}) => {
+    const init = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y,
+      button: o.button ?? 0, buttons: o.buttons ?? 0, detail: o.detail ?? 0 };
+    if (type.startsWith('pointer')) return el.dispatchEvent(new PointerEvent(type, { ...init, pointerId: o.touch ? 2 : 1,
+      pointerType: o.touch ? 'touch' : 'mouse', isPrimary: true, width: o.touch ? 20 : 1, height: o.touch ? 20 : 1 }));
+    return el.dispatchEvent(new MouseEvent(type, init));
+  };
+  // The element a real pointer at (x, y) would hit, if it belongs to the target; else the target itself.
+  const hit = (el, x, y) => { const h = pageElementAt(x, y); return h && (h === el || el.contains(h)) ? h : el; };
+  const mid = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+  // In a video the chapter label covers the top and the caption the bottom of the window.
+  const onScreen = r => r.top >= (film ? 96 : 0) && r.bottom <= innerHeight - (film ? 150 : 0) && r.left >= 0 && r.right <= innerWidth;
+
+  // Brings the element into view: smoothly with a wheel badge in a video, at once otherwise.
+  async function reveal(el, always = false) {
+    if (!always && onScreen(el.getBoundingClientRect())) return;
+    if (!film) { el.scrollIntoView({ block: 'center', behavior: 'instant' }); return; }
+    const before = el.getBoundingClientRect().top;
+    P.wheel(before > innerHeight / 2 ? 'down' : 'up');
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    let last = NaN;
+    for (let i = 0; i < 25; i++) {
+      await pause(80);
+      const t = el.getBoundingClientRect().top;
+      if (Math.abs(t - last) < .5) break;
+      last = t;
+    }
+    if (Math.abs(el.getBoundingClientRect().top - before) < 1 && !onScreen(el.getBoundingClientRect())) el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    P.wheel(null);
+    await pause(150);
+  }
+
+  async function hover(el, x, y, touch) {
+    const h = hit(el, x, y);
+    if (hovered && hovered !== h && hovered.isConnected) {
+      for (const t of ['pointerout', 'pointerleave', 'mouseout', 'mouseleave']) evt(hovered, t, x, y, { touch });
+    }
+    if (hovered !== h) for (const t of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter']) evt(h, t, x, y, { touch });
+    hovered = h;
+    evt(h, 'pointermove', x, y, { touch }); if (!touch) evt(h, 'mousemove', x, y);
+    return h;
+  }
+
+  // Travels to the element: the drawn pointer glides there in a video.
+  async function approach(el, touch = false) {
+    await reveal(el);
+    const [x, y] = mid(el);
+    if (film) {
+      const shown = P.show({ touch, color: tint });
+      kick();
+      await shown;
+      await P.glide(x, y);
+    }
+    return [x, y, await hover(el, x, y, touch)];
+  }
+
+  async function press(el, x, y, { button = 0, touch = false, count = 1 } = {}) {
+    const btn = button === 2 ? 'right' : 'left', buttons = button === 2 ? 2 : 1;
+    for (let i = 1; i <= count; i++) {
+      if (film) await P.press(btn);
+      evt(el, 'pointerdown', x, y, { button, buttons, touch }); evt(el, 'mousedown', x, y, { button, buttons, detail: i });
+      if (i === 1 && el.focus && !el.contains(document.activeElement)) (el.closest('a,button,input,select,textarea,[tabindex],[contenteditable]') || el).focus?.({ preventScroll: true });
+      if (film) await pause(70);
+      evt(el, 'pointerup', x, y, { button, touch }); evt(el, 'mouseup', x, y, { button, detail: i });
+      if (film) await P.release();
+      if (button === 2) evt(el, 'contextmenu', x, y, { button: 2, buttons: 0 });
+      else evt(el, 'click', x, y, { detail: i });
+      if (count > 1 && i < count) await pause(film ? 90 : 0);
+    }
+    if (count === 2) evt(el, 'dblclick', x, y, { detail: 2 });
+  }
+
+  function setValue(el, v) {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+    if (el.isContentEditable) el.textContent = v; else setter ? setter.call(el, v) : (el.value = v);
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: v, inputType: 'insertText' }));
+  }
+
+  async function fill(el, value) {
+    if (el.tagName === 'SELECT') {
+      const opt = [...el.options].find(o => o.value === value || o.text.trim() === value);
+      if (!opt) throw new Error(`no option "${value}" in ${describeShort(el)}`);
+      el.value = opt.value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    el.focus({ preventScroll: true });
+    if (!film) { setValue(el, value); el.dispatchEvent(new Event('change', { bubbles: true })); return; }
+    setValue(el, '');
+    let typed = '';
+    for (const ch of value) {
+      typed += ch;
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
+      setValue(el, typed);
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
+      await pause(45 + Math.random() * 45);
+    }
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // Scrollable ancestor (or self) along an axis.
+  function scroller(el, axis) {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const s = getComputedStyle(n), o = axis === 'x' ? s.overflowX : s.overflowY;
+      if (/(auto|scroll|overlay)/.test(o) && (axis === 'x' ? n.scrollWidth > n.clientWidth + 1 : n.scrollHeight > n.clientHeight + 1)) return n;
+    }
+    return document.scrollingElement;
+  }
+
+  const DIR = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
+
+  // A touch swipe: the finger moves across the element; content under it scrolls the other way.
+  async function swipe(el, a) {
+    const [x, y, h] = await approach(el, true);
+    const d = a.to ? null : DIR[a.direction || 'left'];
+    if (!d && !a.to) throw new Error('swipe needs direction (left/right/up/down) or to');
+    const r = el.getBoundingClientRect(), dist = +a.distance || Math.min(d?.[0] ? r.width * .6 : r.height * .6, 400);
+    let end = a.to ? mid(await waitFor({ selector: a.to })) : [x + d[0] * dist, y + d[1] * dist];
+    const from = [x - (a.to ? 0 : d[0] * dist / 2), y - (a.to ? 0 : d[1] * dist / 2)];
+    if (!a.to) end = [x + d[0] * dist / 2, y + d[1] * dist / 2];
+    if (film) await P.glide(...from, 250);
+    evt(h, 'pointerdown', ...from, { touch: true, buttons: 1 });
+    if (film) { await P.press(); P.trail(true); }
+    const sc = d && scroller(el, d[0] ? 'x' : 'y');
+    if (sc) sc.scrollBy({ left: -d[0] * dist * 1.4, top: -d[1] * dist * 1.4, behavior: film ? 'smooth' : 'instant' });
+    const steps = film ? 12 : 4, ms = film ? 550 : 0;
+    const glide = film ? P.glide(...end, ms) : null;
+    for (let i = 1; i <= steps; i++) {
+      const k = i / steps;
+      evt(h, 'pointermove', from[0] + (end[0] - from[0]) * k, from[1] + (end[1] - from[1]) * k, { touch: true, buttons: 1 });
+      if (film) await pause(ms / steps);
+    }
+    await glide;
+    evt(h, 'pointerup', ...end, { touch: true });
+    if (film) await P.release();
+  }
+
+  async function longPress(el, ms = 900) {
+    const [x, y, h] = await approach(el, true);
+    evt(h, 'pointerdown', x, y, { touch: true, buttons: 1 });
+    if (film) { await P.press(); P.hold(ms); }
+    await pause(ms);
+    evt(h, 'contextmenu', x, y, { button: 0 });
+    evt(h, 'pointerup', x, y, { touch: true });
+    if (film) await P.release();
+  }
+
+  // Mouse drag with pointer events, plus HTML5 drag-and-drop events when the source is draggable.
+  async function drag(el, a) {
+    if (!a.to) throw new Error('drag needs to: selector');
+    const [x, y, h] = await approach(el);
+    const target = await waitFor({ selector: a.to });
+    evt(h, 'pointerdown', x, y, { buttons: 1 }); evt(h, 'mousedown', x, y, { buttons: 1 });
+    if (film) { await P.press(); P.trail(true); }
+    const html5 = el.closest('[draggable="true"]');
+    const dt = html5 ? new DataTransfer() : null;
+    const dragEvt = (n, type, px, py) => n.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: px, clientY: py, dataTransfer: dt }));
+    if (html5) dragEvt(html5, 'dragstart', x, y);
+    const [tx, ty] = mid(target), steps = film ? 14 : 4, ms = film ? 800 : 0;
+    const glide = film ? P.glide(tx, ty, ms) : null;
+    for (let i = 1; i <= steps; i++) {
+      const px = x + (tx - x) * i / steps, py = y + (ty - y) * i / steps, under = pageElementAt(px, py) || target;
+      evt(under, 'pointermove', px, py, { buttons: 1 }); evt(under, 'mousemove', px, py, { buttons: 1 });
+      if (html5) { if (i === steps) dragEvt(target, 'dragenter', px, py); dragEvt(under, 'dragover', px, py); }
+      if (film) await pause(ms / steps);
+    }
+    await glide;
+    const drop = hit(target, tx, ty);
+    if (html5) { dragEvt(drop, 'drop', tx, ty); dragEvt(html5, 'dragend', tx, ty); }
+    evt(drop, 'pointerup', tx, ty); evt(drop, 'mouseup', tx, ty);
+    if (film) await P.release();
+    hovered = drop;
+  }
+
+  async function scrollBy(a) {
+    const v = typeof a.scrollBy === 'number' ? { x: 0, y: a.scrollBy } : a.scrollBy;
+    const box = a.in ? await waitFor({ selector: a.in }) : null;
+    const sc = box ? scroller(box, v.x ? 'x' : 'y') : document.scrollingElement;
+    if (film && box) await approach(box);
+    if (film) P.wheel(v.y < 0 ? 'up' : v.y > 0 ? 'down' : v.x < 0 ? 'left' : 'right');
+    sc.scrollBy({ left: v.x || 0, top: v.y || 0, behavior: film ? 'smooth' : 'instant' });
+    if (film) { await pause(Math.min(1500, 300 + Math.hypot(v.x || 0, v.y || 0))); P.wheel(null); }
+  }
+
+  async function pressKey(a) {
+    const el = a.on ? await waitFor({ selector: a.on }) : document.activeElement || document.body;
+    const key = a.press, o = { key, code: key.length === 1 ? 'Key' + key.toUpperCase() : key, bubbles: true, cancelable: true };
+    const go = el.dispatchEvent(new KeyboardEvent('keydown', o));
+    if (key === 'Enter' && go) {
+      const form = el.form || el.closest?.('form');
+      if (form && el.tagName === 'INPUT') form.requestSubmit ? form.requestSubmit() : form.submit();
+      else if (/^(BUTTON|A)$/.test(el.tagName)) el.click();
+    }
+    el.dispatchEvent(new KeyboardEvent('keyup', o));
+  }
+
+  async function runActions(actions, cinematic = false, accent = '') {
+    film = cinematic;
+    tint = accent || DEFAULT_COLOR;
+    if (film && !P.active) {
+      const { pointerAt } = await S.get('pointerAt');
+      const shown = P.show({ x: pointerAt?.[0] ?? innerWidth * .7, y: pointerAt?.[1] ?? innerHeight * .75 });
+      kick();
+      await shown;
+    }
+    try {
+      for (const a of actions) {
+        if (a.wait) { await pause(+a.wait); continue; }
+        if (a.scrollBy != null) { await scrollBy(a); await pause(a.after ?? (film ? 500 : 200)); continue; }
+        if (a.press) { if (film) await pause(250); await pressKey(a); await pause(a.after ?? (film ? 700 : 300)); continue; }
+        const kind = ACTIONS.find(k => typeof a[k] === 'string');
+        if (!kind) throw new Error('unknown action ' + JSON.stringify(a));
+        const el = await waitFor({ selector: a[kind], text: a.text }, a.timeout);
+        if (kind === 'waitFor') continue;
+        if (kind === 'scroll') await reveal(el, true);
+        else if (kind === 'swipe') await swipe(el, a);
+        else if (kind === 'longPress') await longPress(el, +a.ms || 900);
+        else if (kind === 'drag') await drag(el, a);
+        else {
+          const [x, y, h] = await approach(el);
+          if (film && kind === 'hover') await pause(+a.ms || 900);
+          if (kind === 'click' || kind === 'fill') await press(h, x, y);
+          if (kind === 'doubleClick') await press(h, x, y, { count: 2 });
+          if (kind === 'rightClick') await press(h, x, y, { button: 2 });
+          if (kind === 'fill') await fill(el, String(a.value ?? ''));
+        }
+        await pause(a.after ?? (film ? 600 : 300));
       }
-      await pause(a.after ?? 300);
+    } finally {
+      if (film) S.set({ pointerAt: P.at }).catch(() => {});
     }
     return { ok: true };
   }
@@ -981,7 +1214,7 @@
   // text), else the element at its centre.
   const INTERACTIVE = 'a,button,input,select,textarea,label,img,svg,video,canvas,[role="button"],[role="link"],[role="tab"],[role="checkbox"],[role="option"],[role="menuitem"]';
   const ownText = el => [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
-  const pageElementAt = (x, y) => document.elementsFromPoint(x, y).find(el => el !== host && el !== document.documentElement && el !== document.body) || null;
+  const pageElementAt = (x, y) => document.elementsFromPoint(x, y).find(el => el !== host && el.localName !== 'demonstrate-stage' && el !== document.documentElement && el !== document.body) || null;
 
   function refsOf(m) {
     if (m.kind === 'element') return [m.el];
@@ -1061,13 +1294,14 @@
     if (m.cmd === 'annotate') { startAnnotate(reply); return true; }
     if (m.cmd === 'annotateClear') { finishAnnotate(null); return false; }
     if (m.cmd === 'probe') { probe(m).then(reply, e => reply({ found: false, error: String(e) })); return true; }
+    if (m.cmd === 'pointerHide') { G.pointer.hide().then(() => reply({ ok: true })); return true; }
     if (m.cmd === 'ping') { reply({ ok: document.readyState !== 'loading' }); return false; }
     if (m.cmd === 'metrics') {
       reply({ iw: innerWidth, ih: innerHeight, dpr: devicePixelRatio,
         aw: screen.availWidth, ah: screen.availHeight, ax: screen.availLeft ?? 0, ay: screen.availTop ?? 0 });
       return false;
     }
-    if (m.cmd === 'runActions') { runActions(m.actions || []).then(reply, e => reply({ ok: false, error: String(e?.message || e) })); return true; }
+    if (m.cmd === 'runActions') { runActions(m.actions || [], !!m.cinematic, m.accent).then(reply, e => reply({ ok: false, error: String(e?.message || e) })); return true; }
     return false;
   }
 })();

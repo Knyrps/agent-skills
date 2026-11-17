@@ -1,13 +1,18 @@
-// Shared by the service worker and the side panel. config.json is edited by hand; reload the
-// extension (or restart the demo browser) after changing it.
+// Shared by the service worker and the side panel. config.json holds the defaults; config.local.json
+// (git-ignored, optional) adds allowlisted hosts and video branding for this machine. Restart the demo
+// browser after editing either.
 let configP = null;
 
+const read = file => fetch(chrome.runtime.getURL(file)).then(r => (r.ok ? r.json() : {})).catch(() => ({}));
+
 export function loadConfig() {
-  configP ||= fetch(chrome.runtime.getURL('config.json')).then(r => r.json()).catch(() => ({}))
-    .then(c => ({
-      bridgeUrl: c.bridgeUrl || 'ws://127.0.0.1:47613/ext',
-      allowlist: Array.isArray(c.allowlist) ? c.allowlist : ['localhost', '*.dev.local'],
-    }));
+  configP ||= Promise.all([read('config.json'), read('config.local.json')]).then(([c, local]) => ({
+    bridgeUrl: local.bridgeUrl || c.bridgeUrl || 'ws://127.0.0.1:47613/ext',
+    allowlist: [...(Array.isArray(c.allowlist) ? c.allowlist : ['localhost', '*.dev.local']),
+      ...(Array.isArray(local.allowlist) ? local.allowlist : [])],
+    // { name, logo (file in extension/, e.g. "local/logo.svg"), accent (CSS colour), footer }
+    branding: { ...(c.branding || {}), ...(local.branding || {}) },
+  }));
   return configP;
 }
 

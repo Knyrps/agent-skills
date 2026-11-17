@@ -90,7 +90,7 @@ async function onBridge(m) {
     if ((await S.get('tour')).tour) return;
     return S.set({ step: String(m.label || '') });
   }
-  if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting });
+  if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting, listener: String(m.listener || '') });
   if (!m.rid) return;
   let result;
   try { result = await command(m); } catch (e) { result = { ok: false, error: String(e?.message || e) }; }
@@ -140,20 +140,33 @@ async function command(m) {
   }
 }
 
+const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
+
 async function highlight({ item = {}, keep, tab }) {
   if (!item.selector) return { ok: false, error: 'selector is required' };
   tab ||= await activeTab();
   if (!tab) return { ok: false, error: 'no active tab' };
+  // `url` opens the page first, so showing one thing needs no browser driving by the agent.
+  if (item.url && tab.url !== item.url) {
+    if (!(await allowed(item.url))) return { ok: false, error: `not on an allowlisted host: ${item.url}` };
+    await navigate(tab.id, String(item.url));
+    tab = await chrome.tabs.get(tab.id);
+  }
   if (!(await allowed(tab.url))) return { ok: false, error: `active tab is not on an allowlisted host: ${tab.url}` };
   const h = {
     id: String(item.id || 'h' + Date.now().toString(36)),
     selector: String(item.selector),
     text: item.text ? String(item.text) : '',
     label: item.label ? String(item.label) : '',
-    style: item.style === 'spotlight' ? 'spotlight' : 'outline',
+    style: ['spotlight', 'none'].includes(item.style) ? item.style : 'outline',
     color: item.color ? String(item.color) : '',
+    gesture: item.gesture ? String(item.gesture) : '',
+    direction: item.direction ? String(item.direction) : '',
+    to: item.to ? String(item.to) : '',
     pageKey: pageKey(tab.url),
   };
+  if (h.gesture && !GESTURES.includes(h.gesture)) return { ok: false, error: `unknown gesture "${h.gesture}"; use one of ${GESTURES.join(', ')}` };
+  if (h.direction && !['left', 'right', 'up', 'down', 'in', 'out'].includes(h.direction)) return { ok: false, error: 'direction must be left, right, up, down, in or out' };
   await serial(async () => {
     const { highlights = [] } = await S.get('highlights');
     await S.set({ highlights: (keep ? highlights.filter(x => x.id !== h.id) : []).concat(h) });
@@ -222,9 +235,35 @@ async function gotoStep(index, { replay }) {
   }
 }
 
+// One action per message: an action that loads a new page closes the message channel, which then
+// counts as done once the new page is ready.
 async function run(tabId, actions, i, cinematic = false) {
-  const r = await chrome.tabs.sendMessage(tabId, { cmd: 'runActions', actions, cinematic });
-  if (!r?.ok) throw new Error(`step ${i + 1}: ${r?.error || 'actions failed'}`);
+  for (const a of actions) {
+    let r;
+    try { r = await chrome.tabs.sendMessage(tabId, { cmd: 'runActions', actions: [a], cinematic, accent: cinematic ? video?.stage?.branding?.accent : '' }); }
+    catch (e) {
+      if (!/closed|Receiving end/i.test(e.message)) throw e;
+      await pageReady(tabId);
+      continue;
+    }
+    if (!r?.ok) throw new Error(`step ${i + 1}: ${r?.error || 'actions failed'}`);
+    const t = await chrome.tabs.get(tabId);
+    if (t.status === 'loading') await pageReady(tabId);
+  }
+}
+
+async function pageReady(tabId, ms = 120000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const t = await chrome.tabs.get(tabId);
+    if (t.status === 'complete') {
+      const r = await chrome.tabs.sendMessage(tabId, { cmd: 'ping' }).catch(() => null);
+      if (r?.ok) return;
+      if (!(await allowed(t.url))) throw new Error('the page left the allowlisted hosts: ' + t.url);
+    }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  throw new Error('page load timed out');
 }
 
 async function navigate(tabId, url) {
@@ -504,21 +543,23 @@ async function recordTour(m) {
   const agentStep = tour.steps.findIndex(s => s.agent);
   if (agentStep >= 0) return { ok: false, error: `step ${agentStep + 1} is an agent step; videos need fully scripted tours` };
   const opts = { name: m.name || tour.title || '', size: m.size || 'auto', pace: Math.min(3, Math.max(0.3, +m.pace || 1)),
-    captions: m.captions !== false, out: m.out || '' };
+    captions: m.captions !== false, cards: m.cards !== false, out: m.out || '' };
   const tab = await activeTab();
   if (!tab) return { ok: false, error: 'no active tab' };
   // The first page has to be loaded to measure the viewport; this load is not recorded.
+  const first = tour.steps.find(s => s.url)?.url;
   if (!(await allowed(tab.url))) {
-    if (!tour.steps[0].url) return { ok: false, error: `the active tab is not on an allowlisted host: ${tab.url}` };
-    await navigate(tab.id, tour.steps[0].url);
+    if (!first) return { ok: false, error: `the active tab is not on an allowlisted host: ${tab.url}` };
+    await navigate(tab.id, first);
   }
   await S.set({ tour: null, tourIndex: -1, highlights: [], explanation: '', step: '' });
   const staged = await stageWindow(tab, opts.size);
-  video = { tabId: tab.id, tour, opts, ...staged, step: -1, abort: false, discard: false, failure: '', finishing: false };
+  video = { tabId: tab.id, tour, opts, ...staged, step: -1, abort: false, discard: false, failure: '', finishing: false,
+    loading: false, onCamera: false, stage: {} };
   await S.set({ video: { state: 'starting', steps: tour.steps.length, step: -1, width: staged.width, height: staged.height } });
   runVideo(video);
   return { ok: true, width: staged.width, height: staged.height, viewport: staged.viewport, exact: staged.exact,
-    estimatedMs: estimateMs(tour, opts) };
+    estimatedMs: estimateMs(tour, { ...opts, intro: opts.cards }) };
 }
 
 async function recordStop(m) {
@@ -533,26 +574,105 @@ async function dwell(v, ms) {
   while (!v.abort && Date.now() < end) await new Promise(r => setTimeout(r, Math.min(200, end - Date.now())));
 }
 
-async function runVideo(v) {
-  const { tour, opts } = v, steps = tour.steps;
-  const chapters = [], cues = [];
-  let mimeType = '';
+const panelVideo = (v, state, extra = {}) =>
+  S.set({ video: { state, steps: v.tour.steps.length, step: v.step, width: v.width, height: v.height, ...extra } });
+
+// The stage script draws captions, chapter label, progress bar and cards; it is injected again after
+// every page load and always gets the whole state.
+async function stage(v, patch) {
+  Object.assign(v.stage, patch);
+  await chrome.scripting.executeScript({ target: { tabId: v.tabId }, files: ['stage.js'] }).catch(() => {});
+  await chrome.tabs.sendMessage(v.tabId, { cmd: 'stage', state: v.stage }).catch(() => {});
+}
+
+// A page started loading in the recorded tab: cut the load out of the video.
+chrome.webNavigation.onBeforeNavigate.addListener(d => {
+  const v = video;
+  if (!v || d.tabId !== v.tabId || d.frameId !== 0 || v.finishing) return;
+  v.loading = true;
+  videoCmd({ cmd: 'pause' }).catch(() => {});
+});
+
+// After a page load: wait for the new page, redraw the stage, resume recording if the step is on camera.
+async function settle(v) {
+  const t = await chrome.tabs.get(v.tabId);
+  if (!v.loading && t.status !== 'loading') return;
+  await pageReady(v.tabId);
+  v.loading = false;
+  await stage(v, {});
+  if (v.onCamera) await videoCmd({ cmd: 'resume' });
+}
+
+const now = async () => (await videoCmd({ cmd: 'now' })).t;
+const today = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+async function logoData(file) {
+  if (!file) return '';
+  if (/^(data|https?):/.test(file)) return file;
   try {
+    const blob = await (await fetch(chrome.runtime.getURL(file))).blob();
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    return `data:${blob.type || 'image/png'};base64,${btoa(bin)}`;
+  } catch { return ''; }
+}
+
+async function runVideo(v) {
+  const { tour, opts } = v, steps = tour.steps, pace = opts.pace;
+  const chapters = [], cues = [];
+  const shown = steps.filter(s => s.video !== false);
+  const title = tour.title || opts.name || steps[0].title;
+  let mimeType = '', section = null, n = 0;
+  const caption = async (text, ms) => {
+    const t0 = await now();
+    if (opts.captions) await stage(v, { caption: text });
+    await dwell(v, ms);
+    cues.push({ start: t0, end: await now(), text });
+  };
+  try {
+    const { branding = {} } = await loadConfig();
+    v.stage = { branding: { ...branding, logoData: await logoData(branding.logo) }, shield: true, footer: null, lower: null, caption: null,
+      card: opts.cards ? { kind: 'intro', title, subtitle: tour.subtitle || [today(), branding.name].filter(Boolean).join(' · ') } : null };
+    // The first page is already loaded; go there now so the intro card covers it, not a page load.
+    if (steps[0].url && (await chrome.tabs.get(v.tabId)).url !== steps[0].url) await navigate(v.tabId, steps[0].url);
+    await stage(v, {});
+    for (let c = 3; c > 0 && !v.abort; c--) { await panelVideo(v, 'countdown', { count: c }); await dwell(v, 1000); }
+    if (v.abort) throw Object.assign(new Error('cancelled'), { quiet: true });
     await openRecorder();
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: v.tabId });
     const info = await videoCmd({ cmd: 'start', streamId, width: v.width, height: v.height, fps: 30,
-      bitrate: bitrate(v.width, v.height), name: opts.name || tour.steps[0].title });
+      bitrate: bitrate(v.width, v.height), name: opts.name || title });
     mimeType = info.mimeType;
+    v.onCamera = true;
+    if (opts.cards) await dwell(v, 3500 * pace);
     for (let i = 0; i < steps.length && !v.abort; i++) {
       const s = steps[i];
       v.step = i;
-      await S.set({ video: { state: 'recording', steps: steps.length, step: i, width: v.width, height: v.height },
-        step: `${i + 1}/${steps.length} – ${s.title}`, explanation: s.explanation || '', highlights: [] });
-      const onCamera = s.video !== false;
-      if (s.url || !onCamera) await videoCmd({ cmd: 'pause' });
-      if (s.url) await navigate(v.tabId, s.url);
-      if (onCamera) await videoCmd({ cmd: 'resume' });
-      if (s.actions?.length) await run(v.tabId, s.actions, i, onCamera);
+      await panelVideo(v, 'recording');
+      await S.set({ step: `${i + 1}/${steps.length} – ${s.title}`, explanation: s.explanation || '', highlights: [] });
+      v.onCamera = s.video !== false;
+      if (!v.onCamera) await videoCmd({ cmd: 'pause' });
+      await stage(v, { card: null, caption: null, lower: null });
+      if (s.url && i > 0) await navigate(v.tabId, s.url);
+      await settle(v);
+      if (v.onCamera && opts.cards && s.section && s.section !== section) {
+        section = s.section;
+        await stage(v, { card: { kind: 'section', title: s.section, kicker: 'Section' } });
+        await dwell(v, 2500 * pace);
+        await stage(v, { card: null });
+      }
+      const t = v.onCamera ? await now() : 0;
+      if (v.onCamera) {
+        n++;
+        chapters.push({ t, title: s.title });
+        const timing = stepTiming(s, opts);
+        v.timing = timing;
+        await stage(v, { footer: { index: n - 1, count: shown.length },
+          lower: { n, of: shown.length, title: s.title, until: Date.now() + 3000 * pace },
+          caption: opts.captions ? timing.pages[0] || null : null });
+      }
+      if (s.actions?.length) { await run(v.tabId, s.actions, i, v.onCamera); await settle(v); }
       const tab = await chrome.tabs.get(v.tabId);
       for (const [k, h] of (s.highlights || []).entries()) {
         await run(v.tabId, [{ waitFor: h.selector, text: h.text, after: 0 }], i);
@@ -560,26 +680,38 @@ async function runVideo(v) {
         if (!r.ok) throw new Error(`step ${i + 1} highlight: ${r.error}`);
         if (r.found === false) throw new Error(`step ${i + 1} highlight not found: ${h.selector}`);
       }
-      if (!onCamera) continue;
-      const { t } = await videoCmd({ cmd: 'now' });
-      chapters.push({ t, title: s.title });
-      const timing = stepTiming(s, opts);
-      let at = t;
-      timing.pages.forEach((text, k) => { cues.push({ start: at, end: at + timing.times[k], text }); at += timing.times[k]; });
-      await dwell(v, timing.total);
+      if (!v.onCamera) { await videoCmd({ cmd: 'resume' }); continue; }
+      // Captions: the first page has been up since the step began; the rest follow at reading pace.
+      const { pages, times, total } = v.timing;
+      const spent = (await now()) - t;
+      if (!pages.length) { await dwell(v, Math.max(800, total - spent)); continue; }
+      cues.push({ start: t, end: t, text: pages[0] });
+      const first = cues[cues.length - 1];
+      await dwell(v, Math.max(1200, times[0] - spent));
+      first.end = await now();
+      for (let k = 1; k < pages.length && !v.abort; k++) await caption(pages[k], times[k]);
+    }
+    if (!v.abort && opts.cards) {
+      const fmt = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+      await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
+      await S.set({ highlights: [] });
+      await stage(v, { caption: null, lower: null, card: { kind: 'outro', title, chapters: chapters.map(c => ({ time: fmt(c.t), title: c.title })) } });
+      await dwell(v, Math.max(4000, 900 * chapters.length) * pace);
     }
   } catch (e) {
-    v.failure ||= String(e?.message || e);
+    if (!e.quiet) v.failure ||= String(e?.message || e);
+    else v.discard = true;
   }
   v.finishing = true;
+  await panelVideo(v, 'finishing');
   const partial = v.abort && !v.failure;
   try {
     if (v.failure || v.discard) {
-      await videoCmd({ cmd: 'stop', discard: true }, 30000).catch(() => {});
+      if (videoPort) await videoCmd({ cmd: 'stop', discard: true }, 30000).catch(() => {});
       await enqueue(v.failure ? { type: 'videoError', step: v.step, error: v.failure } : { type: 'videoDiscarded', step: v.step });
     } else {
       // The bridge queues videoReady itself once the file is complete.
-      await videoCmd({ cmd: 'stop', meta: { title: tour.title || opts.name || steps[0].title, chapters, cues,
+      await videoCmd({ cmd: 'stop', meta: { title, chapters, cues: opts.captions ? cues : [],
         steps: steps.map(s => s.title), width: v.width, height: v.height, mimeType, out: opts.out,
         ...(partial && { partial: true }) } }, 120000);
     }
@@ -587,6 +719,9 @@ async function runVideo(v) {
     await enqueue({ type: 'videoError', step: v.step, error: 'finishing the video failed: ' + (e?.message || e) });
   } finally {
     await chrome.offscreen.closeDocument().catch(() => {});
+    await chrome.tabs.sendMessage(v.tabId, { cmd: 'stage', end: true }).catch(() => {});
+    await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
+    await S.set({ pointerAt: null });
     await restoreWindow(v.restore);
     video = null;
     await S.set({ video: null, step: '', explanation: '', highlights: [] });
@@ -610,6 +745,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
 async function handle(m, sender) {
   switch (m.type) {
     case 'hello': return { allowed: await allowed(sender.tab?.url || m.url) };
+    case 'videoStop': return video ? recordStop(m) : { ok: false };
     case 'annotate': case 'recStart':
       if (video) return { error: 'A video is being recorded.' };
       return m.type === 'recStart' ? startRecording() : handleAnnotate();

@@ -4,7 +4,10 @@
 // node bridge cancel          release every pending wait (prints {cancelled:n})
 // node bridge status | serve | step <label> | highlight <selector> [--label t] [--text t] [--style spotlight] [--keep]
 //             clear [id] | hide | show
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { call, ensureOwnerLoop, startOwner, log, PORT } from './core.js';
 import { start as startBrowser, browserVersion } from '../scripts/browser.mjs';
 
@@ -27,7 +30,9 @@ async function ensureBrowser({ force = false } = {}) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 const opt = name => { const i = rest.indexOf('--' + name); return i >= 0 ? rest[i + 1] : undefined; };
-const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out']);
+const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out', '--gesture', '--direction', '--to', '--url',
+  '--session', '--label']);
+const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
 const positional = rest.filter((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
 const out = o => process.stdout.write(JSON.stringify(o, null, 2) + '\n');
 
@@ -43,7 +48,8 @@ async function runCli() {
   switch (cmd) {
     case 'wait': {
       const timeout = Math.max(1, +(opt('timeout') || 600));
-      const wait = () => call('GET', `/wait?timeout=${timeout}`);
+      const q = new URLSearchParams({ timeout, ...(opt('session') && { session: opt('session') }), ...(opt('label') && { label: opt('label') }) });
+      const wait = () => call('GET', `/wait?${q}`);
       try { return await wait(); } catch (e) { if (!/not running/.test(e.message)) throw e; }
       // No MCP instance owns the port: serve it from here until this wait is answered.
       // The extension reconnects within a few seconds and replays anything it buffered.
@@ -53,10 +59,12 @@ async function runCli() {
     }
     case 'status': return call('GET', '/status');
     case 'start': return ensureBrowser({ force: true });
-    case 'cancel': return call('POST', '/cancel');
+    case 'cancel': return call('POST', '/cancel', opt('session') ? { session: opt('session') } : {});
+    case 'queue': return call('GET', '/queue' + (rest.includes('--recent') ? '?recent=1' : ''));
     case 'step': return call('POST', '/cmd', { cmd: 'setStep', label: positional.join(' ') });
     case 'highlight': return call('POST', '/cmd', { cmd: 'highlight', keep: rest.includes('--keep'),
-      item: { selector: positional[0], label: opt('label'), text: opt('text'), style: opt('style'), color: opt('color'), id: opt('id') } });
+      item: { selector: positional[0], label: opt('label'), text: opt('text'), style: opt('style'), color: opt('color'), id: opt('id'),
+        gesture: opt('gesture'), direction: opt('direction'), to: opt('to'), url: opt('url') } });
     case 'clear': return call('POST', '/cmd', { cmd: 'clearHighlights', id: positional[0] });
     case 'hide': return call('POST', '/cmd', { cmd: 'hideOverlays', hidden: true });
     case 'show': return call('POST', '/cmd', { cmd: 'hideOverlays', hidden: false });
@@ -67,7 +75,7 @@ async function runCli() {
     case 'record': {
       if (!(await browserVersion())) await ensureBrowser();
       return call('POST', '/cmd', { cmd: 'recordTour', tour: JSON.parse(fs.readFileSync(positional[0], 'utf8')),
-        name: opt('name'), size: opt('size'), pace: opt('pace') && +opt('pace'), out: opt('out'), captions: !rest.includes('--no-captions') });
+        name: opt('name'), size: opt('size'), pace: opt('pace') && +opt('pace'), out: opt('out'), captions: !rest.includes('--no-captions'), cards: !rest.includes('--no-cards') });
     }
     case 'record-stop': return call('POST', '/cmd', { cmd: 'recordStop' });
     case 'record-cancel': return call('POST', '/cmd', { cmd: 'recordStop', discard: true });
@@ -82,12 +90,33 @@ async function runMcp() {
 
   await ensureOwnerLoop();
 
+  // This agent session: what the user sends from the panel reaches it through a watcher, a `wait` job
+  // the agent runs in the background. Tools that drive the browser claim the panel for this session.
+  const SESSION = crypto.randomUUID().slice(0, 8);
+  const LABEL = path.basename(process.cwd()).replace(/[^\w.-]+/g, '-').slice(0, 40) || 'agent';
+  const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const WATCH = `node "${path.join(SKILL_DIR, 'bridge')}" wait --session ${SESSION} --label ${LABEL} --timeout 86400`;
+  const cmd = body => call('POST', '/cmd', { ...body, session: SESSION, sessionLabel: LABEL });
+  const hello = () => call('POST', '/hello', { session: SESSION, label: LABEL }).catch(() => {});
+  hello();
+  setInterval(hello, 30000).unref();
+  const watcher = async () => {
+    const s = await call('GET', '/status').catch(() => null);
+    const running = !!s?.watching?.includes(SESSION);
+    return running ? { running } : { running, command: WATCH,
+      todo: 'Start this command now as a background shell job (no waiting on it); it wakes you when the user sends something from the browser.' };
+  };
+  const done = async body => reply({ ...body, watcher: await watcher() });
+
   const STEPS = { type: 'array', items: { type: 'object', required: ['title'], properties: {
     title: { type: 'string' },
     explanation: { type: 'string', description: '2-5 sentences shown in the side panel' },
     url: { type: 'string', description: 'Navigate here first; omit to continue on the current page' },
-    actions: { type: 'array', description: '{click|fill|waitFor: css, text?, value?, after?: ms} or {wait: ms}', items: { type: 'object' } },
-    highlights: { type: 'array', description: 'Same fields as highlight(); the first replaces, the rest are kept', items: { type: 'object' } },
+    actions: { type: 'array', items: { type: 'object' }, description: '{click|fill|waitFor|hover|doubleClick|rightClick|longPress|swipe|drag|scroll: css, '
+      + 'text?, value? (fill), to? (drag/swipe end css), direction? (swipe), ms? (longPress/hover), after?: ms}, {scrollBy: px|{x,y}, in?: css}, '
+      + '{press: key, on?: css} or {wait: ms}. In a video a drawn cursor or finger performs them visibly.' },
+    section: { type: 'string', description: 'Video only: a section name; a section slide appears when it changes' },
+    highlights: { type: 'array', description: 'Same fields as highlight() incl. gesture/direction/to; the first replaces, the rest are kept', items: { type: 'object' } },
     agent: { type: 'boolean', description: 'The agent performs this step itself (it receives an agentStep action)' },
     caption: { type: ['string', 'boolean'], description: 'Video only: subtitle text instead of explanation; false = none' },
     dwell: { type: 'number', description: 'Video only: ms the step stays on screen (default: reading time of the caption)' },
@@ -114,7 +143,8 @@ async function runMcp() {
       name: { type: 'string', description: 'File name without extension' },
       size: { type: 'string', description: 'auto (default), 1080p, 900p, 720p or WIDTHxHEIGHT' },
       pace: { type: 'number', description: 'Scales reading time (default 1)' },
-      captions: { type: 'boolean', description: 'Subtitles from each step\'s caption/explanation (default true)' },
+      captions: { type: 'boolean', description: 'Captions in the picture and a .vtt from each step\'s caption/explanation (default true)' },
+      cards: { type: 'boolean', description: 'Intro card, section slides and outro card with the chapter list (default true)' },
       out: { type: 'string', description: 'Also copy the video and sidecars to this file or folder' },
     } } },
     { name: 'stop_recording', description: 'Stop the video being recorded. discard=true deletes it; otherwise the part recorded so far is '
@@ -131,16 +161,22 @@ async function runMcp() {
       inputSchema: { type: 'object', properties: {} } },
     { name: 'status', description: 'Bridge state: is the browser extension connected, is the side panel open, current step, queued actions.',
       inputSchema: { type: 'object', properties: {} } },
-    { name: 'set_step', description: 'Show the current step in the side panel, e.g. "3/7 - Rechnung anlegen". Empty string clears it.',
+    { name: 'set_step', description: 'Show the current step in the side panel, e.g. "3/7 - Create invoice". Empty string clears it.',
       inputSchema: { type: 'object', properties: { label: { type: 'string' } }, required: ['label'] } },
-    { name: 'highlight', description: 'Draw a highlight around an element in the active tab (allowlisted hosts only) and scroll it into view. '
+    { name: 'highlight', description: 'Show the user something: draw a highlight around an element in the app tab (allowlisted hosts only), '
+      + 'optionally with a label and a looping gesture illustration (tap, swipe, drag…), and scroll it into view. Works without a tour; '
+      + 'with `url` it opens that page first, so no Playwright call is needed. '
       + 'Replaces existing highlights unless keep=true. Returns whether the element was found. Highlights follow the element while it moves '
       + 'and disappear when the page path changes.',
     inputSchema: { type: 'object', required: ['selector'], properties: {
       selector: { type: 'string', description: 'CSS selector' },
       text: { type: 'string', description: 'Only match elements whose visible text contains this (case-insensitive); innermost match wins' },
       label: { type: 'string', description: 'Short callout shown next to the element' },
-      style: { type: 'string', enum: ['outline', 'spotlight'], description: 'spotlight also dims the rest of the page (default outline)' },
+      style: { type: 'string', enum: ['outline', 'spotlight', 'none'], description: 'spotlight also dims the rest of the page; none draws no box, only label and gesture (default outline)' },
+      gesture: { type: 'string', enum: GESTURES, description: 'Loop an illustration of this gesture on the element (shown only, never performed)' },
+      direction: { type: 'string', enum: ['left', 'right', 'up', 'down', 'in', 'out'], description: 'swipe/drag/scroll direction; in/out for pinch' },
+      to: { type: 'string', description: 'CSS selector where a swipe or drag ends' },
+      url: { type: 'string', description: 'Open this page in the app tab first (allowlisted hosts only)' },
       color: { type: 'string', description: 'CSS color (default Chrome blue #0b57d0)' },
       id: { type: 'string', description: 'Name for this highlight, to update or clear it later' },
       keep: { type: 'boolean', description: 'Keep existing highlights and add this one (default false)' },
@@ -151,8 +187,9 @@ async function runMcp() {
     { name: 'hide_overlays', description: 'Temporarily hide (true) or show again (false) all highlights, e.g. around evidence screenshots. '
       + 'The side panel is browser UI and never appears in page screenshots.',
     inputSchema: { type: 'object', properties: { hidden: { type: 'boolean' } }, required: ['hidden'] } },
-    { name: 'get_queue', description: 'Return and clear pending user actions without waiting.',
-      inputSchema: { type: 'object', properties: {} } },
+    { name: 'get_queue', description: 'Return and clear what the user sent from the browser (marks, recordings, messages) without waiting. '
+      + 'Use it when the user says they sent, marked or recorded something. recent=true also returns what was delivered in the last hour.',
+      inputSchema: { type: 'object', properties: { recent: { type: 'boolean' } } } },
     { name: 'wait_for_action', description: 'Block until the user acts in the side panel (next/back/question/annotation/recording) and return the actions. '
       + 'A recording action carries the clicks, changes, keys, scrolls, swipes and navigations the user demonstrated. '
       + 'An annotation action includes the labelled screenshot inline. Prefer running `node bridge wait` as a background shell job.',
@@ -167,24 +204,29 @@ async function runMcp() {
     try {
       if (AUTOSTART.has(req.params.name) && !(await browserVersion())) await ensureBrowser();
       switch (req.params.name) {
-        case 'start_browser': return reply(await ensureBrowser({ force: true }));
-        case 'status': return reply(await call('GET', '/status'));
-        case 'load_tour': return reply(await call('POST', '/cmd', { cmd: 'loadTour', tour: a.tour, start: +(a.start || 0) }));
-        case 'record_tour': return reply(await call('POST', '/cmd', { cmd: 'recordTour', tour: a.tour, name: a.name, size: a.size,
-          pace: a.pace, captions: a.captions, out: a.out }));
-        case 'stop_recording': return reply(await call('POST', '/cmd', { cmd: 'recordStop', discard: !!a.discard }));
-        case 'request_demo': return reply(await call('POST', '/cmd', { cmd: 'requestDemo', prompt: String(a.prompt || '') }));
-        case 'goto_step': return reply(await call('POST', '/cmd', { cmd: 'gotoStep', index: +a.index }));
-        case 'end_tour': return reply(await call('POST', '/cmd', { cmd: 'endTour' }));
-        case 'set_step': return reply(await call('POST', '/cmd', { cmd: 'setStep', label: String(a.label ?? '') }));
-        case 'highlight': return reply(await call('POST', '/cmd', { cmd: 'highlight', keep: !!a.keep, item: {
-          selector: a.selector, text: a.text, label: a.label, style: a.style, color: a.color, id: a.id, scroll: a.scroll } }));
-        case 'clear_highlights': return reply(await call('POST', '/cmd', { cmd: 'clearHighlights', id: a.id }));
-        case 'hide_overlays': return reply(await call('POST', '/cmd', { cmd: 'hideOverlays', hidden: a.hidden !== false }));
-        case 'get_queue': return withShots(await call('GET', '/queue'));
+        case 'start_browser': {
+          const r = await ensureBrowser({ force: true });
+          await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
+          return done(r);
+        }
+        case 'status': return done(await call('GET', '/status'));
+        case 'load_tour': return done(await cmd({ cmd: 'loadTour', tour: a.tour, start: +(a.start || 0) }));
+        case 'record_tour': return done(await cmd({ cmd: 'recordTour', tour: a.tour, name: a.name, size: a.size,
+          pace: a.pace, captions: a.captions, cards: a.cards, out: a.out }));
+        case 'stop_recording': return done(await cmd({ cmd: 'recordStop', discard: !!a.discard }));
+        case 'request_demo': return done(await cmd({ cmd: 'requestDemo', prompt: String(a.prompt || '') }));
+        case 'goto_step': return done(await cmd({ cmd: 'gotoStep', index: +a.index }));
+        case 'end_tour': return done(await cmd({ cmd: 'endTour' }));
+        case 'set_step': return done(await cmd({ cmd: 'setStep', label: String(a.label ?? '') }));
+        case 'highlight': return done(await cmd({ cmd: 'highlight', keep: !!a.keep, item: {
+          selector: a.selector, text: a.text, label: a.label, style: a.style, color: a.color, id: a.id, scroll: a.scroll,
+          gesture: a.gesture, direction: a.direction, to: a.to, url: a.url } }));
+        case 'clear_highlights': return done(await cmd({ cmd: 'clearHighlights', id: a.id }));
+        case 'hide_overlays': return done(await cmd({ cmd: 'hideOverlays', hidden: a.hidden !== false }));
+        case 'get_queue': return withShots(await call('GET', '/queue' + (a.recent ? '?recent=1' : '')));
         case 'wait_for_action': {
           const t = Math.max(1, Math.min(86400, +(a.timeoutSec || 600)));
-          return withShots(await call('GET', `/wait?timeout=${t}`, null, { signal: extra?.signal }));
+          return withShots(await call('GET', `/wait?timeout=${t}&session=${SESSION}&label=${LABEL}`, null, { signal: extra?.signal }));
         }
         default: return reply({ ok: false, error: 'unknown tool ' + req.params.name });
       }
@@ -201,7 +243,7 @@ function reply(body) {
 // annotated image stays a path: the labelled copy already contains it.
 function withShots(body) {
   const content = [{ type: 'text', text: JSON.stringify(body, null, 2) }];
-  for (const act of body.actions || []) {
+  for (const act of [...(body.actions || []), ...(body.recent || [])]) {
     for (const file of [act.labelledImagePath].filter(Boolean)) {
       try { content.push({ type: 'image', data: fs.readFileSync(file).toString('base64'), mimeType: file.endsWith('.jpg') ? 'image/jpeg' : 'image/png' }); } catch {}
     }

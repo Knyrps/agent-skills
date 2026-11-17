@@ -50,9 +50,44 @@ export function startOwner({ standalone = false } = {}) {
     let rid = 0;
 
     const broadcast = msg => { const s = JSON.stringify(msg); for (const c of exts) c.send(s); };
+    // Routing: panel input goes to one agent session, the one that drove the browser last (`owner`), and
+    // only to that session's watcher. While it has no watcher the input stays queued. An owner that has
+    // neither a watcher nor sent a heartbeat for 90 s is dropped, and the next waiting session takes over.
+    const sessions = new Map(); // session id -> { label, seen }
+    let owner = null, recent = [], announced = '';
+    const touch = (id, label) => {
+      if (!id) return;
+      const s = sessions.get(id);
+      sessions.set(id, { label: label || s?.label || id, seen: Date.now() });
+    };
+    const ownerAlive = () => [...waiters].some(w => w.session === owner) || Date.now() - (sessions.get(owner)?.seen || 0) < 90000;
+    function recipients() {
+      if (owner && !ownerAlive()) owner = null;
+      if (!owner) owner = [...waiters].find(w => w.session)?.session || null;
+      return owner ? [...waiters].filter(w => w.session === owner) : [...waiters];
+    }
+    const listener = () => {
+      const r = recipients();
+      return { waiting: r.length > 0, listener: owner ? sessions.get(owner)?.label || owner : '' };
+    };
+    // Tells the panel who receives its input and whether that session is listening right now.
+    const announce = () => {
+      const l = listener(), key = JSON.stringify(l);
+      if (key === announced) return;
+      announced = key;
+      broadcast({ cmd: 'setWaiting', ...l });
+    };
+    const claim = (id, label) => {
+      if (!id) return;
+      touch(id, label);
+      owner = id;
+      announce();
+      flush();
+    };
+    setInterval(announce, 15000).unref();
     const pushState = c => {
       c.send(JSON.stringify({ cmd: 'setStep', label: state.step }));
-      c.send(JSON.stringify({ cmd: 'setWaiting', waiting: waiters.size > 0 }));
+      c.send(JSON.stringify({ cmd: 'setWaiting', ...listener() }));
     };
     // Commands that need an answer (highlight etc.) go to the most recently connected extension.
     const requestExt = (msg, ms = 8000) => new Promise((resolve, reject) => {
@@ -63,16 +98,27 @@ export function startOwner({ standalone = false } = {}) {
       replies.set(id, v => { clearTimeout(t); replies.delete(id); resolve(v); });
       conn.send(JSON.stringify({ ...msg, rid: id }));
     });
-    const setWaiters = fn => { const before = waiters.size > 0; fn(); const now = waiters.size > 0;
-      if (before !== now) broadcast({ cmd: 'setWaiting', waiting: now }); };
+    const setWaiters = fn => { fn(); announce(); };
     const persist = () => fs.writeFile(QUEUE_FILE, JSON.stringify(queue), () => {});
+    // Undelivered input expires after a day (its screenshots are pruned then); delivered input stays
+    // readable for an hour in case a watcher took it and the agent never reacted.
+    const expire = () => {
+      const day = Date.now() - 24 * 3600e3, hour = Date.now() - 3600e3;
+      const before = queue.length;
+      queue = queue.filter(a => (a.ts || Date.now()) > day);
+      recent = recent.filter(a => a.deliveredAt > hour);
+      if (queue.length !== before) persist();
+    };
 
     function flush() {
-      if (!queue.length || !waiters.size) return;
+      expire();
+      const to = recipients();
+      if (!queue.length || !to.length) return;
       const body = { actions: queue };
+      recent.push(...queue.map(a => ({ ...a, deliveredAt: Date.now() })));
       queue = [];
       persist();
-      setWaiters(() => { for (const w of waiters) { clearTimeout(w.timer); json(w.res, 200, body); } waiters.clear(); });
+      setWaiters(() => { for (const w of to) { clearTimeout(w.timer); json(w.res, 200, body); waiters.delete(w); } });
     }
 
     async function onAction(conn, msg) {
@@ -164,30 +210,53 @@ export function startOwner({ standalone = false } = {}) {
       }
       if (route === 'GET /status') return json(res, 200, { ok: true, pid: process.pid, standalone, version: VERSION,
         extensionConnected: exts.size > 0, panelOpen: exts.size > 0 && state.panelOpen,
-        step: state.step, queued: queue.length, waiters: waiters.size });
-      if (route === 'GET /queue') { const actions = queue; queue = []; persist(); return json(res, 200, { actions }); }
+        step: state.step, queued: queue.length, waiters: waiters.size,
+        owner: owner && { session: owner, label: sessions.get(owner)?.label || owner }, listening: listener().waiting,
+        watching: [...new Set([...waiters].map(w => w.session).filter(Boolean))] });
+      if (route === 'GET /queue') {
+        expire();
+        const actions = queue;
+        queue = [];
+        persist();
+        if (url.searchParams.get('recent')) return json(res, 200, { actions, recent: recent.map(({ deliveredAt, ...a }) => a) });
+        recent.push(...actions.map(a => ({ ...a, deliveredAt: Date.now() })));
+        return json(res, 200, { actions });
+      }
       if (route === 'GET /wait') {
         const sec = clamp(+url.searchParams.get('timeout') || 600, 1, 86400);
-        const w = { res, timer: setTimeout(() => setWaiters(() => { waiters.delete(w); json(res, 200, { actions: [], timeout: true }); }), sec * 1000) };
+        const session = url.searchParams.get('session') || '';
+        touch(session, url.searchParams.get('label'));
+        const w = { res, session, timer: setTimeout(() => setWaiters(() => { waiters.delete(w); json(res, 200, { actions: [], timeout: true }); }), sec * 1000) };
         setWaiters(() => waiters.add(w));
         res.on('close', () => { clearTimeout(w.timer); setWaiters(() => waiters.delete(w)); });
         return flush();
       }
       if (route === 'POST /cancel') {
-        const n = waiters.size;
-        setWaiters(() => { for (const w of waiters) { clearTimeout(w.timer); json(w.res, 200, { actions: [], cancelled: true }); } waiters.clear(); });
-        return json(res, 200, { cancelled: n });
+        let body = {};
+        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
+        const hit = [...waiters].filter(w => !body.session || w.session === body.session);
+        setWaiters(() => { for (const w of hit) { clearTimeout(w.timer); json(w.res, 200, { actions: [], cancelled: true }); waiters.delete(w); } });
+        return json(res, 200, { cancelled: hit.length });
+      }
+      if (route === 'POST /hello' || route === 'POST /claim') {
+        let body = {};
+        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
+        if (route === 'POST /claim') claim(body.session, body.label); else { touch(body.session, body.label); announce(); }
+        return json(res, 200, { ok: true, owner, listening: listener().waiting });
       }
       if (route === 'POST /cmd') {
         let body;
         try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'bad json' }); }
+        // Whoever drives the browser receives what the user sends from it.
+        if (body.session && body.cmd !== 'state') claim(body.session, body.sessionLabel);
+        delete body.session; delete body.sessionLabel;
         if (body.cmd === 'setStep') {
           state.step = String(body.label || '');
           broadcast({ cmd: 'setStep', label: state.step });
           return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
         }
         if (!['highlight', 'clearHighlights', 'hideOverlays', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
-        try { return json(res, 200, await requestExt(body, body.cmd === 'recordTour' ? 150000 : 8000)); }
+        try { return json(res, 200, await requestExt(body, body.cmd === 'recordTour' || body.item?.url ? 150000 : 8000)); }
         catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       }
       if (route === 'POST /shutdown' && standalone) { json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 50); return; }

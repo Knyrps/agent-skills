@@ -9,27 +9,46 @@
 </head>
 <body>
   <header>
-    <span class="md-typescale-title-medium">Guided demo</span>
+    <div class="titles">
+      <span class="md-typescale-title-medium">demonstrate</span>
+      <span id="listen" class="listen md-typescale-label-medium"><span class="dot"></span><span id="listen-text"></span></span>
+    </div>
     <span id="conn" class="conn md-typescale-label-medium"><span class="dot"></span><span id="conn-text">Offline</span></span>
   </header>
 
-  <section class="card">
-    <md-linear-progress id="busy" indeterminate></md-linear-progress>
-    <div class="md-typescale-label-medium muted">Current step</div>
-    <div id="step" class="md-typescale-title-large step">—</div>
-    <div id="explanation" class="md-typescale-body-large explanation" hidden></div>
-    <div id="status" class="md-typescale-body-medium status"></div>
-  </section>
+  <div id="tour" class="tour" hidden>
+    <section id="card" class="card">
+      <md-linear-progress id="busy" indeterminate></md-linear-progress>
+      <div id="step-kicker" class="md-typescale-label-medium muted">Current step</div>
+      <div id="step" class="md-typescale-title-large step">—</div>
+      <div id="countdown" class="countdown md-typescale-display-medium" hidden></div>
+      <div id="explanation" class="md-typescale-body-large explanation" hidden></div>
+      <div id="status" class="md-typescale-body-medium status"></div>
+    </section>
 
-  <div class="nav">
-    <md-outlined-button id="back">
-      <svg slot="icon" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-      Back
-    </md-outlined-button>
-    <md-filled-button id="next" trailing-icon>
-      Next
-      <svg slot="icon" viewBox="0 0 24 24"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
-    </md-filled-button>
+    <div id="nav" class="nav">
+      <md-outlined-button id="back">
+        <svg slot="icon" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        Back
+      </md-outlined-button>
+      <md-filled-button id="next" trailing-icon>
+        Next
+        <svg slot="icon" viewBox="0 0 24 24"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
+      </md-filled-button>
+    </div>
+
+    <div id="video-nav" class="nav" hidden>
+      <md-outlined-button id="video-discard">
+        <svg slot="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        Discard
+      </md-outlined-button>
+      <md-filled-button id="video-stop">
+        <svg slot="icon" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+        Stop and save
+      </md-filled-button>
+    </div>
+
+    <md-divider></md-divider>
   </div>
 
   <div id="notice" class="notice md-typescale-body-medium" hidden>
@@ -43,10 +62,9 @@
     <div class="md-typescale-body-medium">Recording has started. Do it in the page, then click "Stop recording".</div>
   </section>
 
-  <md-divider></md-divider>
-
   <section class="ask">
-    <div class="md-typescale-title-small">Ask a question</div>
+    <div class="md-typescale-title-small">Send to the agent</div>
+    <div class="md-typescale-body-medium muted">Point at something, show what you do, or ask.</div>
     <div class="tool-row">
     <md-filled-tonal-button id="annotate">
       <svg slot="icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
@@ -67,7 +85,7 @@
     <md-chip-set id="rec-chip" hidden>
       <md-input-chip id="rec-chip-text" label=""></md-input-chip>
     </md-chip-set>
-    <md-outlined-text-field id="q" type="textarea" rows="2" label="Your question"
+    <md-outlined-text-field id="q" type="textarea" rows="2" label="Message"
       supporting-text="Enter sends · Shift+Enter for a new line"></md-outlined-text-field>
     <md-filled-button id="send">
       <svg slot="icon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>

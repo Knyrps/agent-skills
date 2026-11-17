@@ -1,16 +1,17 @@
 # demonstrate
 
-Guided UI tours for an AI coding agent. The agent drives a browser through the Playwright MCP. You
-watch the same browser and answer in the **demonstrate side panel**:
+A two-way pointing channel between you and an AI coding agent on a live web page. You and the agent
+share one browser window:
 
-- **Back / Next** step through the tour.
-- **Annotate** lets you point at things: click an element to mark it, or drag a frame, an arrow or a
-  pen stroke, each with an optional note.
-- **Record** captures what you do in the page (clicks, typing, keys, scrolling, swipes, navigation).
-- A **question field** sends a question, with the annotation or recording attached.
-
-The agent can also draw highlights around page elements, and ask you to show it something
-(`request_demo`).
+- **The agent shows you things**: highlights, labels and looping gesture illustrations (tap, swipe,
+  drag, pinch, scroll …) on page elements.
+- **You show the agent things** from the **demonstrate side panel**, with or without a tour:
+  - **Annotate**: click an element to mark it, or drag a frame, an arrow or a pen stroke, each with a note.
+  - **Record**: captures what you do in the page (clicks, typing, keys, scrolling, swipes, navigation).
+  - **Message** and **Send**, with the annotation or recording attached.
+  The agent hears it through a background watcher; the panel shows which session is listening.
+- **Guided tours** with Back / Next, and **review videos** (MP4 with captions, chapter labels, progress bar,
+  intro/section/outro cards and a drawn cursor or finger) are layers on top.
 
 ```
 agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node bridge wait` (background job)
@@ -26,7 +27,9 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
 | `SKILL.md` | Instructions for the agent |
 | `scripts/browser.mjs` | `start` / `stop` / `status` / `panel` for the demo browser |
 | `extension/` | MV3 extension: side panel (Material Web), service worker (bridge socket, outbox, capture), content script (highlights, annotation, recorder) |
-| `extension/config.json` | Host allowlist and bridge URL |
+| `extension/config.json` | Host allowlist and bridge URL; `config.local.json` (git-ignored) adds hosts and video branding |
+| `extension/gestures.js`, `stage.js` | Gesture glyphs and the drawn pointer; the video stage (captions, cards, input shield) |
+| `references/video.md` | How the agent writes review videos |
 | `bridge/` | MCP server, bridge server and CLI (`index.js`). Its only dependency is `@modelcontextprotocol/sdk` |
 | `config/` | MCP config snippets per agent host |
 | `vendor-src/` | Rebuilds `extension/vendor/` (Material Web bundle, M3 colour tokens). Not needed at runtime |
@@ -101,7 +104,9 @@ Open any page on `http://localhost:<port>/` in the demo browser, then:
 
 | Test | Do | Expect |
 | --- | --- | --- |
-| Next | `node <skill>/bridge wait --timeout 60`, then click **Next** | Panel shows "The agent is waiting for you." The CLI prints `{"actions":[{"type":"next",…}]}` |
+| Idle panel | Open the panel with no tour running | Only "Send to the agent" (Annotate, Record, message) is shown; no step card, no Back/Next |
+| Watcher | `node <skill>/bridge wait --session s1 --label mine --timeout 60`, type a message, **Send** | Panel header shows "mine is listening"; the toast says "Sent to mine." and the CLI prints the `question` |
+| Next | `node <skill>/bridge step "1/2 – Test"`, then `wait --timeout 60` and click **Next** | Step card and Back/Next appear. The CLI prints `{"actions":[{"type":"next",…}]}` |
 | Back | Same, click **Back** | `"type":"back"` |
 | Question | Same, type a question, press Enter | `"type":"question","text":"…"` |
 | Annotate | `wait`, click **Annotate**, hover (dashed outline) and click one element, drag a frame, scroll the page and an inner scroll area with the wheel, switch to the arrow and drag one inside the scroll area (Enter after each note), click a number circle to add or change its note (Esc restores it, the bin deletes the mark), **Done**, type a question, **Send**. Esc instead of Done cancels, Ctrl+Z undoes | Clicks don't reach the page. Each mark has its own colour and number, stays on its content while scrolling, and is clipped to its scroll area. An "Annotation · N" chip appears and the drawing disappears. Output is one `"type":"annotation"` action with `annotations[]` (document coordinates, `color`, note, `elements[]` labelled 1a, 1b …), `imageArea`, `imagePath` (all marks, also those scrolled out of view) and `labelledImagePath` (plus dashed element outlines, for the model only). No "being debugged" bar appears |
@@ -114,6 +119,9 @@ Open any page on `http://localhost:<port>/` in the demo browser, then:
 | Buffering | Stop the bridge, click **Next**, start the bridge, run `wait` | The buffered `next` is delivered |
 | Allowlist | Open `http://127.0.0.1:<port>/` | Panel shows the "not on the allowlist" notice. `highlight` returns an error |
 | Cancel | `wait` in one terminal, `node <skill>/bridge cancel` in another | The wait prints `{"actions":[],"cancelled":true}` |
+| Gestures | `node <skill>/bridge highlight button --gesture double-tap --label Here --url http://localhost:<port>/`, then with `--gesture swipe --direction left --keep` on another element | The page opens; a finger dot taps twice with a ripple; the swipe shows a dotted path and a trail. An unknown gesture name returns the list of valid ones |
+| Video | `node <skill>/bridge record tour.json --name test`, then `wait --timeout 300` | 3-2-1 countdown in the panel, the window shrinks to a 1:1 size, intro card, chapter labels, captions, a gliding cursor; Esc in the page or **Stop and save** keeps a partial video. `videoReady` has `path`, `vtt`, `chapters` and the window is restored |
+| Tests | `npm test` in `bridge` | Routing, MP4 converter and timing rules pass |
 
 ## Verify playwright-demo drives this browser
 
