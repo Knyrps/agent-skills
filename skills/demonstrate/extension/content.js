@@ -568,7 +568,7 @@
     }
     if (Math.abs(el.getBoundingClientRect().top - before) < 1 && !onScreen(el.getBoundingClientRect())) el.scrollIntoView({ block: 'center', behavior: 'instant' });
     P.wheel(null);
-    await pause(150);
+    await pause(80);
   }
 
   async function hover(el, x, y, touch) {
@@ -635,7 +635,7 @@
       el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
       setValue(el, typed);
       el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
-      await pause(45 + Math.random() * 45);
+      await pause(30 + Math.random() * 30);
     }
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
@@ -665,7 +665,7 @@
     if (film) { await P.press(); P.trail(true); }
     const sc = d && scroller(el, d[0] ? 'x' : 'y');
     if (sc) sc.scrollBy({ left: -d[0] * dist * 1.4, top: -d[1] * dist * 1.4, behavior: film ? 'smooth' : 'instant' });
-    const steps = film ? 12 : 4, ms = film ? 550 : 0;
+    const steps = film ? 12 : 4, ms = film ? 450 : 0;
     const glide = film ? P.glide(...end, ms) : null;
     for (let i = 1; i <= steps; i++) {
       const k = i / steps;
@@ -707,7 +707,7 @@
     const dt = html5 ? new DataTransfer() : null;
     const dragEvt = (n, type, px, py) => n.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: px, clientY: py, dataTransfer: dt }));
     if (html5) dragEvt(html5, 'dragstart', x, y);
-    const [tx, ty] = target.point || mid(target), steps = film ? 18 : 4, ms = film ? 900 : 0;
+    const [tx, ty] = target.point || mid(target), steps = film ? 16 : 4, ms = film ? 650 : 0;
     const glide = film ? P.glide(tx, ty, ms) : null;
     for (let i = 1; i <= steps; i++) {
       const px = x + (tx - x) * i / steps, py = y + (ty - y) * i / steps, under = pageElementAt(px, py) || h;
@@ -757,8 +757,8 @@
     try {
       for (const a of actions) {
         if (a.wait) { await pause(+a.wait); continue; }
-        if (a.scrollBy != null) { await scrollBy(a); await pause(a.after ?? (film ? 500 : 200)); continue; }
-        if (a.press) { if (film) await pause(250); await pressKey(a); await pause(a.after ?? (film ? 700 : 300)); continue; }
+        if (a.scrollBy != null) { await scrollBy(a); await pause(a.after ?? (film ? 250 : 200)); continue; }
+        if (a.press) { if (film) await pause(120); await pressKey(a); await pause(a.after ?? (film ? 350 : 300)); continue; }
         const kind = ACTIONS.find(k => typeof a[k] === 'string');
         if (!kind) throw new Error('unknown action ' + JSON.stringify(a));
         const el = await waitFor({ selector: a[kind], text: a.text }, a.timeout);
@@ -770,13 +770,13 @@
         else {
           const touch = !!a.touch; // drawn as a finger (phone videos); the events stay mouse-compatible
           const [x, y, h] = await approach(el, touch);
-          if (film && kind === 'hover') await pause(+a.ms || 900);
+          if (film && kind === 'hover') await pause(+a.ms || 600);
           if (kind === 'click' || kind === 'fill') await press(h, x, y, { touch });
           if (kind === 'doubleClick') await press(h, x, y, { count: 2 });
           if (kind === 'rightClick') await press(h, x, y, { button: 2 });
           if (kind === 'fill') await fill(el, String(a.value ?? ''));
         }
-        await pause(a.after ?? (film ? 600 : 300));
+        await pause(a.after ?? (film ? 250 : 300));
       }
     } finally {
       if (film) S.set({ pointerAt: P.at }).catch(() => {});

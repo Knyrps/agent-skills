@@ -28,15 +28,15 @@ export function captionPages(text) {
   return pages;
 }
 
-// Reading time for one caption page: 2.5 s base plus 0.33 s per word, 2.5–10 s, scaled by pace.
-export const pageMs = (text, pace = 1) => Math.round(clamp(1500 + 330 * words(text), 2500, 10000) * pace);
+// Reading time for one caption page: 1 s base plus 0.28 s per word (about 3.5 words/s), 1.8–9 s, scaled by pace.
+export const pageMs = (text, pace = 1) => Math.round(clamp(1000 + 280 * words(text), 1800, 9000) * pace);
 
 // How long a step stays on screen and how its caption pages share that time. `step.dwell` overrides the total.
 export function stepTiming(step, { pace = 1, captions = true } = {}) {
   const text = step.caption === false ? '' : String(step.caption ?? step.explanation ?? '');
   const pages = captions ? captionPages(text) : [];
   let times = pages.map(p => pageMs(p, pace));
-  let total = times.reduce((a, b) => a + b, 0) || Math.round((text ? clamp(1500 + 330 * words(text), 2500, 20000) : 2500) * pace);
+  let total = times.reduce((a, b) => a + b, 0) || Math.round((text ? clamp(1000 + 280 * words(text), 1800, 20000) : 1800) * pace);
   total = Math.min(total, 20000 * pace);
   if (+step.dwell > 0) total = +step.dwell;
   const sum = times.reduce((a, b) => a + b, 0);
@@ -65,4 +65,5 @@ export function pickSize(size, scale, room) {
   return { width: out[0], height: out[1], viewport: { width: vw, height: vh }, scaled: k < 1 };
 }
 
-export const bitrate = (w, h, fps = 30) => Math.round(w * h * fps * 0.13);
+// Constant rate: about 9 Mbit/s at 1080p30, enough for text that scrolls.
+export const bitrate = (w, h, fps = 30) => Math.round(w * h * fps * 0.15);

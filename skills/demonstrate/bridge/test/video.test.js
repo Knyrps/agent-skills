@@ -101,8 +101,8 @@ test('caption pages keep whole sentences and stay short', () => {
 });
 
 test('reading time grows with words and respects pace and dwell', () => {
-  assert.equal(pageMs('Hi'), 2500);
-  assert.equal(pageMs('word '.repeat(100)), 10000);
+  assert.equal(pageMs('Hi'), 1800);
+  assert.equal(pageMs('word '.repeat(100)), 9000);
   assert.ok(pageMs('one two three four five six seven eight nine ten', 2) > pageMs('one two three four five six seven eight nine ten'));
   const t = stepTiming({ explanation: 'First sentence here. Second one.' });
   assert.equal(t.times.reduce((a, b) => a + b, 0), t.total);
@@ -110,8 +110,8 @@ test('reading time grows with words and respects pace and dwell', () => {
   assert.equal(d.total, 9000);
   assert.ok(Math.abs(d.times.reduce((a, b) => a + b, 0) - 9000) <= 1);
   assert.deepEqual(stepTiming({ explanation: 'x', caption: false }).pages, []);
-  assert.equal(stepTiming({}).total, 2500);
-  assert.ok(estimateMs({ steps: [{}, { video: false }] }) >= 2500);
+  assert.equal(stepTiming({}).total, 1800);
+  assert.ok(estimateMs({ steps: [{}, { video: false }] }) >= 1800);
 });
 
 test('pickSize takes the largest preset that fits the screen 1:1', () => {

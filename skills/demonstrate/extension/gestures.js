@@ -249,7 +249,7 @@
     async glide(x, y, ms) {
       const now = performance.now(), [x0, y0] = pos(now), d = Math.hypot(x - x0, y - y0);
       if (d < 1) return;
-      const dur = ms ?? clamp(250 + d * .9, 350, 1100);
+      const dur = ms ?? clamp(180 + d * .55, 250, 750);
       P.x = x; P.y = y;
       P.move = { x0, y0, x1: x, y1: y, t0: now, dur, arc: P.trail ? 0 : -Math.min(40, d * .12) };
       await sleep(dur);

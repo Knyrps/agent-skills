@@ -62,7 +62,11 @@ async function start(m) {
   if (!mimeType) throw new Error('this browser cannot record video (no MP4 or WebM encoder)');
   const ext = mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
   ({ id } = await bridge('POST', '/video/open', JSON.stringify({ name: m.name, ext })));
-  rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: m.bitrate, videoKeyFrameIntervalDuration: 2000 });
+  // Screen content is mostly still, so a variable-rate encoder starves the moments that move (scrolling,
+  // dialogs opening) and they turn blocky. A constant rate keeps motion as sharp as the still frames.
+  track.contentHint = 'detail';
+  rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: m.bitrate, videoBitrateMode: m.bitrateMode || 'constant',
+    videoKeyFrameIntervalDuration: 2000 });
   rec.ondataavailable = e => put(e.data);
   rec.onerror = e => fail('recorder error: ' + (e.error?.message || e.error || 'unknown'));
   rec.onstop = () => ending?.();

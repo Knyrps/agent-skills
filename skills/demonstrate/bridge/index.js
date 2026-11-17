@@ -75,7 +75,7 @@ async function runCli() {
     case 'record': {
       if (!(await browserVersion())) await ensureBrowser();
       return call('POST', '/cmd', { cmd: 'recordTour', tour: JSON.parse(fs.readFileSync(positional[0], 'utf8')),
-        name: opt('name'), size: opt('size'), pace: opt('pace') && +opt('pace'), out: opt('out'), zoom: opt('zoom') && +opt('zoom'), captions: !rest.includes('--no-captions'), cards: !rest.includes('--no-cards') });
+        name: opt('name'), size: opt('size'), pace: opt('pace') && +opt('pace'), out: opt('out'), zoom: opt('zoom') && +opt('zoom'), hidpi: !rest.includes('--no-hidpi'), captions: !rest.includes('--no-captions'), cards: !rest.includes('--no-cards') });
     }
     case 'record-stop': return call('POST', '/cmd', { cmd: 'recordStop' });
     case 'record-cancel': return call('POST', '/cmd', { cmd: 'recordStop', discard: true });
@@ -146,6 +146,7 @@ async function runMcp() {
       captions: { type: 'boolean', description: 'Captions in the picture and a .vtt from each step\'s caption/explanation (default true)' },
       cards: { type: 'boolean', description: 'Intro card, section slides and outro card with the chapter list (default true)' },
       zoom: { type: 'number', description: 'Page zoom while recording, e.g. 0.8 to show the 1:1 desktop layout on a 125 % screen; restored afterwards' },
+      hidpi: { type: 'boolean', description: 'Render the tab at a higher pixel density for up to 1080 lines of real detail (default true)' },
       out: { type: 'string', description: 'Also copy the video and sidecars to this file or folder' },
     } } },
     { name: 'stop_recording', description: 'Stop the video being recorded. discard=true deletes it; otherwise the part recorded so far is '
@@ -213,7 +214,7 @@ async function runMcp() {
         case 'status': return done(await call('GET', '/status'));
         case 'load_tour': return done(await cmd({ cmd: 'loadTour', tour: a.tour, start: +(a.start || 0) }));
         case 'record_tour': return done(await cmd({ cmd: 'recordTour', tour: a.tour, name: a.name, size: a.size,
-          pace: a.pace, captions: a.captions, cards: a.cards, zoom: a.zoom, out: a.out }));
+          pace: a.pace, captions: a.captions, cards: a.cards, zoom: a.zoom, hidpi: a.hidpi, out: a.out }));
         case 'stop_recording': return done(await cmd({ cmd: 'recordStop', discard: !!a.discard }));
         case 'request_demo': return done(await cmd({ cmd: 'requestDemo', prompt: String(a.prompt || '') }));
         case 'goto_step': return done(await cmd({ cmd: 'gotoStep', index: +a.index }));

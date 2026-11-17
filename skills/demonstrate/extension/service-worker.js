@@ -543,7 +543,7 @@ async function recordTour(m) {
   const agentStep = tour.steps.findIndex(s => s.agent);
   if (agentStep >= 0) return { ok: false, error: `step ${agentStep + 1} is an agent step; videos need fully scripted tours` };
   const opts = { name: m.name || tour.title || '', size: m.size || 'auto', pace: Math.min(3, Math.max(0.3, +m.pace || 1)),
-    captions: m.captions !== false, cards: m.cards !== false, out: m.out || '' };
+    captions: m.captions !== false, cards: m.cards !== false, hidpi: m.hidpi !== false, out: m.out || '' };
   const tab = await activeTab();
   if (!tab) return { ok: false, error: 'no active tab' };
   // The first page has to be loaded to measure the viewport; this load is not recorded.
@@ -558,7 +558,12 @@ async function recordTour(m) {
   const zoom = m.zoom ? Math.min(2, Math.max(0.25, +m.zoom)) : 0;
   const zoomBefore = zoom ? await chrome.tabs.getZoom(tab.id) : 0;
   if (zoom) { await chrome.tabs.setZoom(tab.id, zoom); await new Promise(r => setTimeout(r, 300)); }
-  const staged = await stageWindow(tab, opts.size);
+  let staged = await stageWindow(tab, opts.size);
+  // Leaving the maximized state can still be in progress and swallow the resize; try once more.
+  if (!staged.exact) {
+    await new Promise(r => setTimeout(r, 1000));
+    staged = { ...(await stageWindow(tab, opts.size)), restore: staged.restore };
+  }
   video = { tabId: tab.id, tour, opts, ...staged, zoomBefore, step: -1, abort: false, discard: false, failure: '', finishing: false,
     loading: false, onCamera: false, stage: {} };
   await S.set({ video: { state: 'starting', steps: tour.steps.length, step: -1, width: staged.width, height: staged.height } });
@@ -649,11 +654,15 @@ async function runVideo(v) {
     if (v.abort) throw Object.assign(new Error('cancelled'), { quiet: true });
     await openRecorder();
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: v.tabId });
+    // Chrome renders a captured tab at a higher pixel density when the capture is larger than the tab, so
+    // the video gets real detail beyond the window's pixels (up to 1080 lines, at most twice the window).
+    const k = opts.hidpi === false ? 1 : Math.min(2, Math.max(1, 1080 / v.height));
+    v.width = even(v.width * k); v.height = even(v.height * k);
     const info = await videoCmd({ cmd: 'start', streamId, width: v.width, height: v.height, fps: 30,
       bitrate: bitrate(v.width, v.height), name: opts.name || title });
     mimeType = info.mimeType;
     v.onCamera = true;
-    if (opts.cards) await dwell(v, 3500 * pace);
+    if (opts.cards) await dwell(v, 2500 * pace);
     for (let i = 0; i < steps.length && !v.abort; i++) {
       const s = steps[i];
       v.step = i;
@@ -673,7 +682,7 @@ async function runVideo(v) {
       } else await stage(v, { card: v.onCamera && v.stage.card?.kind === 'intro' ? v.stage.card : null, caption: null, lower: null });
       if (s.url && i > 0) await navigate(v.tabId, s.url);
       await settle(v);
-      if (newSection) await dwell(v, 2500 * pace);
+      if (newSection) await dwell(v, 1600 * pace);
       const t = v.onCamera ? await now() : 0;
       if (v.onCamera) {
         n++;
@@ -699,7 +708,7 @@ async function runVideo(v) {
       if (!pages.length) { await dwell(v, Math.max(800, total - spent)); continue; }
       cues.push({ start: t, end: t, text: pages[0] });
       const first = cues[cues.length - 1];
-      await dwell(v, Math.max(1200, times[0] - spent));
+      await dwell(v, Math.max(700, times[0] - spent));
       first.end = await now();
       for (let k = 1; k < pages.length && !v.abort; k++) await caption(pages[k], times[k]);
     }
@@ -708,7 +717,7 @@ async function runVideo(v) {
       await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
       await S.set({ highlights: [] });
       await stage(v, { caption: null, lower: null, card: { kind: 'outro', title, chapters: chapters.map(c => ({ time: fmt(c.t), title: c.title })) } });
-      await dwell(v, Math.max(4000, 900 * chapters.length) * pace);
+      await dwell(v, Math.max(3000, 500 * chapters.length) * pace);
     }
   } catch (e) {
     if (!e.quiet) v.failure ||= String(e?.message || e);

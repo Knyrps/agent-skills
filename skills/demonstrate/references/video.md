@@ -58,11 +58,13 @@ and native touch scrolling do not react to them. Show such effects with a highli
 
 ## Options and output
 
-`record_tour({ tour, name?, size?, pace?, captions?, cards?, zoom?, out? })`
+`record_tour({ tour, name?, size?, pace?, captions?, cards?, zoom?, hidpi?, out? })`
 
 - `size`: `auto` (largest of 1080p/900p/720p that fits the screen 1:1), a preset, or `WIDTHxHEIGHT`.
 - `zoom`: page zoom while recording. On a 125 % screen, `0.8` shows a 1280×720 video at the page's 1:1
   desktop layout instead of a cramped 1024×576 one. Chrome keeps zoom per site; it is restored afterwards.
+- `hidpi` (default true): Chrome renders the tab at a higher pixel density, so the file gets up to 1080
+  lines of real detail (at most twice the window's pixels): a 1280×720 window becomes a sharp 1920×1080 video.
 - `captions: false`: no captions in the picture and no `.vtt`. `cards: false`: no intro, section or outro.
 - `out`: also copy the video and its sidecars to this file or folder.
 - Files land in the bridge's data folder (`videos/`) and are deleted after 14 days: `<name>.mp4`,
