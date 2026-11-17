@@ -1062,6 +1062,11 @@
     if (m.cmd === 'annotateClear') { finishAnnotate(null); return false; }
     if (m.cmd === 'probe') { probe(m).then(reply, e => reply({ found: false, error: String(e) })); return true; }
     if (m.cmd === 'ping') { reply({ ok: document.readyState !== 'loading' }); return false; }
+    if (m.cmd === 'metrics') {
+      reply({ iw: innerWidth, ih: innerHeight, dpr: devicePixelRatio,
+        aw: screen.availWidth, ah: screen.availHeight, ax: screen.availLeft ?? 0, ay: screen.availTop ?? 0 });
+      return false;
+    }
     if (m.cmd === 'runActions') { runActions(m.actions || []).then(reply, e => reply({ ok: false, error: String(e?.message || e) })); return true; }
     return false;
   }

@@ -5,6 +5,9 @@
   "description": "MCP server + local bridge between the agent and the demonstrate browser extension",
   "type": "module",
   "main": "index.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
   "engines": {
     "node": ">=20"
   },

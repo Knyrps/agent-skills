@@ -2,6 +2,7 @@
 // State lives in chrome.storage.session so it survives service-worker restarts and navigations;
 // the side panel and the content scripts render from it.
 import { loadConfig, hostAllowed, pageKey } from './allow.js';
+import { stepTiming, estimateMs, pickSize, bitrate } from './video-plan.js';
 
 const S = chrome.storage.session;
 S.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }).catch(() => {}); // content scripts read highlights
@@ -20,6 +21,8 @@ const allowed = async url => hostAllowed(url, (await loadConfig()).allowlist);
 
 let ws = null, backoff = 1000, retry = null, ping = null;
 const panels = new Set();
+let video = null; // the recording in progress, see "video recording" below
+S.set({ video: null });
 
 async function connect() {
   if (ws) return;
@@ -95,7 +98,10 @@ async function onBridge(m) {
 }
 
 async function command(m) {
+  if (video && !['state', 'recordStop', 'setStep'].includes(m.cmd)) return { ok: false, error: 'a video is being recorded; wait for videoReady or call recordStop' };
   switch (m.cmd) {
+    case 'recordTour': return recordTour(m);
+    case 'recordStop': return recordStop(m);
     case 'highlight': return highlight(m);
     case 'clearHighlights':
       await serial(async () => {
@@ -127,16 +133,16 @@ async function command(m) {
     }
     case 'state': {
       const tab = await activeTab();
-      return { ok: true, panelOpen: panels.size > 0,
+      return { ok: true, panelOpen: panels.size > 0, ...(video && { video: (await S.get('video')).video }),
         tab: tab && { url: tab.url, title: tab.title, allowed: await allowed(tab.url) } };
     }
     default: return { ok: false, error: 'unknown command ' + m.cmd };
   }
 }
 
-async function highlight({ item = {}, keep }) {
+async function highlight({ item = {}, keep, tab }) {
   if (!item.selector) return { ok: false, error: 'selector is required' };
-  const tab = await activeTab();
+  tab ||= await activeTab();
   if (!tab) return { ok: false, error: 'no active tab' };
   if (!(await allowed(tab.url))) return { ok: false, error: `active tab is not on an allowlisted host: ${tab.url}` };
   const h = {
@@ -216,8 +222,8 @@ async function gotoStep(index, { replay }) {
   }
 }
 
-async function run(tabId, actions, i) {
-  const r = await chrome.tabs.sendMessage(tabId, { cmd: 'runActions', actions });
+async function run(tabId, actions, i, cinematic = false) {
+  const r = await chrome.tabs.sendMessage(tabId, { cmd: 'runActions', actions, cinematic });
   if (!r?.ok) throw new Error(`step ${i + 1}: ${r?.error || 'actions failed'}`);
 }
 
@@ -239,6 +245,7 @@ async function navigate(tabId, url) {
 
 async function tourAction(action) {
   const { tour, tourIndex = -1 } = await S.get(['tour', 'tourIndex']);
+  if (video && (action.type === 'next' || action.type === 'back')) return { ok: true, local: true, busy: true };
   if (!tour || (action.type !== 'next' && action.type !== 'back')) return null;
   if (running) return { ok: true, local: true, busy: true };
   const target = tourIndex + (action.type === 'next' ? 1 : -1);
@@ -412,6 +419,180 @@ async function renderAnnotation(tab, spec) {
   };
 }
 
+// ------------------------------------------------------------------ video recording
+// record_tour plays a scripted tour on one pinned tab while the offscreen page records that tab.
+// The window is sized so the viewport maps 1:1 onto the output; page loads are cut by pausing.
+
+let videoPort = null, videoRid = 0, portWaiter = null;
+const videoReplies = new Map();
+
+function onVideoPort(port) {
+  videoPort = port;
+  portWaiter?.();
+  port.onMessage.addListener(m => {
+    if (m.rid) return videoReplies.get(m.rid)?.(m);
+    if (m.type === 'error' && video) { video.failure ||= m.error; video.abort = true; }
+  });
+  port.onDisconnect.addListener(() => {
+    if (videoPort === port) videoPort = null;
+    if (video && !video.finishing) { video.failure ||= 'the video recorder page closed'; video.abort = true; }
+  });
+}
+
+function videoCmd(m, ms = 15000) {
+  return new Promise((resolve, reject) => {
+    if (!videoPort) return reject(new Error('the video recorder is not running'));
+    const rid = ++videoRid;
+    const t = setTimeout(() => { videoReplies.delete(rid); reject(new Error('the video recorder did not answer: ' + m.cmd)); }, ms);
+    videoReplies.set(rid, r => { clearTimeout(t); videoReplies.delete(rid); r.ok === false ? reject(new Error(r.error)) : resolve(r); });
+    videoPort.postMessage({ ...m, rid });
+  });
+}
+
+async function openRecorder() {
+  if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument().catch(() => {});
+  videoPort = null;
+  const connected = new Promise((resolve, reject) => {
+    portWaiter = resolve;
+    setTimeout(() => reject(new Error('the video recorder page did not start')), 10000);
+  });
+  await chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['USER_MEDIA'],
+    justification: 'Records the demo tour tab to a video file' });
+  await connected;
+  portWaiter = null;
+}
+
+const metrics = tabId => chrome.tabs.sendMessage(tabId, { cmd: 'metrics' });
+const even = n => Math.max(2, Math.round(n / 2) * 2);
+
+// Resizes the window so the tab's viewport has the chosen size in device-independent pixels.
+async function stageWindow(tab, size) {
+  const win = await chrome.windows.get(tab.windowId);
+  const restore = { id: win.id, state: win.state, left: win.left, top: win.top, width: win.width, height: win.height };
+  const zoom = await chrome.tabs.getZoom(tab.id);
+  let m = await metrics(tab.id);
+  const scale = m.dpr / zoom;
+  const vw = () => m.iw * zoom, vh = () => m.ih * zoom;
+  const dx = win.width - vw(), dy = win.height - vh();
+  const pick = pickSize(size, scale, { width: m.aw - dx, height: m.ah - dy });
+  const target = pick.viewport;
+  if (win.state !== 'normal') await chrome.windows.update(win.id, { state: 'normal' });
+  let bounds = { left: m.ax, top: m.ay, width: Math.round(target.width + dx), height: Math.round(target.height + dy) };
+  for (let i = 0; i < 4; i++) {
+    await chrome.windows.update(win.id, bounds);
+    await new Promise(r => setTimeout(r, 300));
+    m = await metrics(tab.id);
+    const ex = target.width - vw(), ey = target.height - vh();
+    if (Math.abs(ex) < 1 && Math.abs(ey) < 1) break;
+    bounds = { ...bounds, width: Math.round(bounds.width + ex), height: Math.round(bounds.height + ey) };
+  }
+  // Whatever the window ended up as, the output keeps the viewport's shape so nothing is letterboxed.
+  const exact = Math.abs(target.width - vw()) < 1 && Math.abs(target.height - vh()) < 1 && !pick.scaled;
+  const width = exact ? pick.width : even(vw() * scale), height = exact ? pick.height : even(vh() * scale);
+  return { restore, width, height, viewport: { width: Math.round(vw()), height: Math.round(vh()) }, scale, exact };
+}
+
+async function restoreWindow(r) {
+  if (!r) return;
+  if (r.state === 'normal') await chrome.windows.update(r.id, { left: r.left, top: r.top, width: r.width, height: r.height }).catch(() => {});
+  else await chrome.windows.update(r.id, { state: r.state }).catch(() => {});
+}
+
+async function recordTour(m) {
+  if (video) return { ok: false, error: 'a video is already being recorded' };
+  const tour = validTour(m.tour);
+  const agentStep = tour.steps.findIndex(s => s.agent);
+  if (agentStep >= 0) return { ok: false, error: `step ${agentStep + 1} is an agent step; videos need fully scripted tours` };
+  const opts = { name: m.name || tour.title || '', size: m.size || 'auto', pace: Math.min(3, Math.max(0.3, +m.pace || 1)),
+    captions: m.captions !== false, out: m.out || '' };
+  const tab = await activeTab();
+  if (!tab) return { ok: false, error: 'no active tab' };
+  // The first page has to be loaded to measure the viewport; this load is not recorded.
+  if (!(await allowed(tab.url))) {
+    if (!tour.steps[0].url) return { ok: false, error: `the active tab is not on an allowlisted host: ${tab.url}` };
+    await navigate(tab.id, tour.steps[0].url);
+  }
+  await S.set({ tour: null, tourIndex: -1, highlights: [], explanation: '', step: '' });
+  const staged = await stageWindow(tab, opts.size);
+  video = { tabId: tab.id, tour, opts, ...staged, step: -1, abort: false, discard: false, failure: '', finishing: false };
+  await S.set({ video: { state: 'starting', steps: tour.steps.length, step: -1, width: staged.width, height: staged.height } });
+  runVideo(video);
+  return { ok: true, width: staged.width, height: staged.height, viewport: staged.viewport, exact: staged.exact,
+    estimatedMs: estimateMs(tour, opts) };
+}
+
+async function recordStop(m) {
+  if (!video) return { ok: false, error: 'no video is being recorded' };
+  video.abort = true;
+  video.discard = !!m.discard;
+  return { ok: true, stopping: true };
+}
+
+async function dwell(v, ms) {
+  const end = Date.now() + ms;
+  while (!v.abort && Date.now() < end) await new Promise(r => setTimeout(r, Math.min(200, end - Date.now())));
+}
+
+async function runVideo(v) {
+  const { tour, opts } = v, steps = tour.steps;
+  const chapters = [], cues = [];
+  let mimeType = '';
+  try {
+    await openRecorder();
+    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: v.tabId });
+    const info = await videoCmd({ cmd: 'start', streamId, width: v.width, height: v.height, fps: 30,
+      bitrate: bitrate(v.width, v.height), name: opts.name || tour.steps[0].title });
+    mimeType = info.mimeType;
+    for (let i = 0; i < steps.length && !v.abort; i++) {
+      const s = steps[i];
+      v.step = i;
+      await S.set({ video: { state: 'recording', steps: steps.length, step: i, width: v.width, height: v.height },
+        step: `${i + 1}/${steps.length} – ${s.title}`, explanation: s.explanation || '', highlights: [] });
+      const onCamera = s.video !== false;
+      if (s.url || !onCamera) await videoCmd({ cmd: 'pause' });
+      if (s.url) await navigate(v.tabId, s.url);
+      if (onCamera) await videoCmd({ cmd: 'resume' });
+      if (s.actions?.length) await run(v.tabId, s.actions, i, onCamera);
+      const tab = await chrome.tabs.get(v.tabId);
+      for (const [k, h] of (s.highlights || []).entries()) {
+        await run(v.tabId, [{ waitFor: h.selector, text: h.text, after: 0 }], i);
+        const r = await highlight({ item: { id: h.id || 'h' + k, ...h }, keep: k > 0, tab });
+        if (!r.ok) throw new Error(`step ${i + 1} highlight: ${r.error}`);
+        if (r.found === false) throw new Error(`step ${i + 1} highlight not found: ${h.selector}`);
+      }
+      if (!onCamera) continue;
+      const { t } = await videoCmd({ cmd: 'now' });
+      chapters.push({ t, title: s.title });
+      const timing = stepTiming(s, opts);
+      let at = t;
+      timing.pages.forEach((text, k) => { cues.push({ start: at, end: at + timing.times[k], text }); at += timing.times[k]; });
+      await dwell(v, timing.total);
+    }
+  } catch (e) {
+    v.failure ||= String(e?.message || e);
+  }
+  v.finishing = true;
+  const partial = v.abort && !v.failure;
+  try {
+    if (v.failure || v.discard) {
+      await videoCmd({ cmd: 'stop', discard: true }, 30000).catch(() => {});
+      await enqueue(v.failure ? { type: 'videoError', step: v.step, error: v.failure } : { type: 'videoDiscarded', step: v.step });
+    } else {
+      // The bridge queues videoReady itself once the file is complete.
+      await videoCmd({ cmd: 'stop', meta: { title: tour.title || opts.name || steps[0].title, chapters, cues,
+        steps: steps.map(s => s.title), width: v.width, height: v.height, mimeType, out: opts.out,
+        ...(partial && { partial: true }) } }, 120000);
+    }
+  } catch (e) {
+    await enqueue({ type: 'videoError', step: v.step, error: 'finishing the video failed: ' + (e?.message || e) });
+  } finally {
+    await chrome.offscreen.closeDocument().catch(() => {});
+    await restoreWindow(v.restore);
+    video = null;
+    await S.set({ video: null, step: '', explanation: '', highlights: [] });
+  }
+}
+
 async function activeTab() {
   const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true, windowType: 'normal' });
   if (t) return t;
@@ -429,13 +610,15 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
 async function handle(m, sender) {
   switch (m.type) {
     case 'hello': return { allowed: await allowed(sender.tab?.url || m.url) };
+    case 'annotate': case 'recStart':
+      if (video) return { error: 'A video is being recorded.' };
+      return m.type === 'recStart' ? startRecording() : handleAnnotate();
     case 'action': {
       const local = await tourAction(m.action);
       if (local) return local;
       const { tourIndex = -1, tour } = await S.get(['tourIndex', 'tour']);
       return enqueue(tour ? { ...m.action, step: tourIndex } : m.action);
     }
-    case 'recStart': return startRecording();
     case 'recStep': {
       if (!sender.tab) return {};
       await serial(async () => {
@@ -472,19 +655,6 @@ async function handle(m, sender) {
       if (demoRequest) await enqueue({ type: 'demoDeclined', requestId: demoRequest.id, prompt: demoRequest.prompt });
       return { ok: true };
     }
-    case 'annotate': {
-      const tab = await activeTab();
-      if (!tab || !(await allowed(tab.url))) return { error: 'This page is not on the allowlist.' };
-      const result = await chrome.tabs.sendMessage(tab.id, { cmd: 'annotate' });
-      if (!result) return { cancelled: true };
-      try {
-        const annotationDraft = await renderAnnotation(tab, result);
-        await S.set({ annotationDraft });
-        return { ok: true, count: result.annotations.length };
-      } finally {
-        chrome.tabs.sendMessage(tab.id, { cmd: 'annotateClear' }).catch(() => {});
-      }
-    }
     case 'annotationSend': {
       const { annotationDraft, tourIndex = -1, tour } = await S.get(['annotationDraft', 'tourIndex', 'tour']);
       if (!annotationDraft) return { error: 'There is no annotation.' };
@@ -495,6 +665,20 @@ async function handle(m, sender) {
       await S.set({ annotationDraft: null });
       return { ok: true };
     default: return { error: 'unknown message' };
+  }
+}
+
+async function handleAnnotate() {
+  const tab = await activeTab();
+  if (!tab || !(await allowed(tab.url))) return { error: 'This page is not on the allowlist.' };
+  const result = await chrome.tabs.sendMessage(tab.id, { cmd: 'annotate' });
+  if (!result) return { cancelled: true };
+  try {
+    const annotationDraft = await renderAnnotation(tab, result);
+    await S.set({ annotationDraft });
+    return { ok: true, count: result.annotations.length };
+  } finally {
+    chrome.tabs.sendMessage(tab.id, { cmd: 'annotateClear' }).catch(() => {});
   }
 }
 
@@ -525,6 +709,7 @@ chrome.webNavigation.onCommitted.addListener(d => recordUrl('navigate', d));
 chrome.webNavigation.onHistoryStateUpdated.addListener(d => recordUrl('urlChange', d));
 
 chrome.runtime.onConnect.addListener(port => {
+  if (port.name === 'video') return onVideoPort(port);
   if (port.name !== 'panel') return;
   panels.add(port);
   connect();

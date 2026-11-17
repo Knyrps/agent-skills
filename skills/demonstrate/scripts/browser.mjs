@@ -68,6 +68,8 @@ async function start() {
       '--ignore-certificate-errors',
       // "Annotate" captures the page through chrome.debugger; this hides the "is being debugged" bar.
       '--silent-debugger-extension-api',
+      // Video recording captures the tour tab without a click on the extension icon first.
+      `--allowlisted-extension-id=${EXT_ID}`,
       '--no-first-run', '--no-default-browser-check', '--start-maximized', 'about:blank'],
     { detached: true, stdio: 'ignore' }).unref();
     for (let i = 0; i < 40 && !(await version()); i++) await sleep(250);

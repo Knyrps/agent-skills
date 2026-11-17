@@ -27,7 +27,7 @@ async function ensureBrowser({ force = false } = {}) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 const opt = name => { const i = rest.indexOf('--' + name); return i >= 0 ? rest[i + 1] : undefined; };
-const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start']);
+const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out']);
 const positional = rest.filter((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
 const out = o => process.stdout.write(JSON.stringify(o, null, 2) + '\n');
 
@@ -64,6 +64,13 @@ async function runCli() {
     case 'goto': return call('POST', '/cmd', { cmd: 'gotoStep', index: +positional[0] });
     case 'end': return call('POST', '/cmd', { cmd: 'endTour' });
     case 'request': return call('POST', '/cmd', { cmd: 'requestDemo', prompt: positional.join(' ') });
+    case 'record': {
+      if (!(await browserVersion())) await ensureBrowser();
+      return call('POST', '/cmd', { cmd: 'recordTour', tour: JSON.parse(fs.readFileSync(positional[0], 'utf8')),
+        name: opt('name'), size: opt('size'), pace: opt('pace') && +opt('pace'), out: opt('out'), captions: !rest.includes('--no-captions') });
+    }
+    case 'record-stop': return call('POST', '/cmd', { cmd: 'recordStop' });
+    case 'record-cancel': return call('POST', '/cmd', { cmd: 'recordStop', discard: true });
     default: throw new Error('unknown command: ' + cmd);
   }
 }
@@ -75,6 +82,17 @@ async function runMcp() {
 
   await ensureOwnerLoop();
 
+  const STEPS = { type: 'array', items: { type: 'object', required: ['title'], properties: {
+    title: { type: 'string' },
+    explanation: { type: 'string', description: '2-5 sentences shown in the side panel' },
+    url: { type: 'string', description: 'Navigate here first; omit to continue on the current page' },
+    actions: { type: 'array', description: '{click|fill|waitFor: css, text?, value?, after?: ms} or {wait: ms}', items: { type: 'object' } },
+    highlights: { type: 'array', description: 'Same fields as highlight(); the first replaces, the rest are kept', items: { type: 'object' } },
+    agent: { type: 'boolean', description: 'The agent performs this step itself (it receives an agentStep action)' },
+    caption: { type: ['string', 'boolean'], description: 'Video only: subtitle text instead of explanation; false = none' },
+    dwell: { type: 'number', description: 'Video only: ms the step stays on screen (default: reading time of the caption)' },
+    video: { type: 'boolean', description: 'Video only: false runs the step off camera, e.g. a login' },
+  } } };
   const TOOLS = [
     { name: 'start_browser', description: 'Start the demo browser (Chrome for Testing with the demonstrate extension, CDP 127.0.0.1:9334) '
       + 'if it is not running, open the side panel, and wait until the extension is connected. Idempotent. Call it first in every tour, '
@@ -85,15 +103,23 @@ async function runMcp() {
       + 'and the end reach wait_for_action. Starts at step `start` (default 0).',
     inputSchema: { type: 'object', required: ['tour'], properties: {
       start: { type: 'number' },
-      tour: { type: 'object', required: ['steps'], properties: { steps: { type: 'array', items: { type: 'object', required: ['title'], properties: {
-        title: { type: 'string' },
-        explanation: { type: 'string', description: '2-5 sentences shown in the side panel' },
-        url: { type: 'string', description: 'Navigate here first; omit to continue on the current page' },
-        actions: { type: 'array', description: '{click|fill|waitFor: css, text?, value?, after?: ms} or {wait: ms}', items: { type: 'object' } },
-        highlights: { type: 'array', description: 'Same fields as highlight(); the first replaces, the rest are kept', items: { type: 'object' } },
-        agent: { type: 'boolean', description: 'The agent performs this step itself (it receives an agentStep action)' },
-      } } } } },
+      tour: { type: 'object', required: ['steps'], properties: { steps: STEPS } },
     } } },
+    { name: 'record_tour', description: 'Record a scripted tour as a video (MP4) for reviews: the browser plays every step by itself at '
+      + 'reading pace while the tab is recorded, then the bridge writes the video, a .vtt subtitle file and a chapter list. '
+      + 'Returns right away with the output size and an estimated duration; wait_for_action then delivers videoReady '
+      + '{ path, vtt, chapters, durationMs, … } or videoError { step, error }. No agent steps allowed.',
+    inputSchema: { type: 'object', required: ['tour'], properties: {
+      tour: { type: 'object', required: ['steps'], properties: { title: { type: 'string' }, steps: STEPS } },
+      name: { type: 'string', description: 'File name without extension' },
+      size: { type: 'string', description: 'auto (default), 1080p, 900p, 720p or WIDTHxHEIGHT' },
+      pace: { type: 'number', description: 'Scales reading time (default 1)' },
+      captions: { type: 'boolean', description: 'Subtitles from each step\'s caption/explanation (default true)' },
+      out: { type: 'string', description: 'Also copy the video and sidecars to this file or folder' },
+    } } },
+    { name: 'stop_recording', description: 'Stop the video being recorded. discard=true deletes it; otherwise the part recorded so far is '
+      + 'kept and delivered as videoReady with partial: true.',
+    inputSchema: { type: 'object', properties: { discard: { type: 'boolean' } } } },
     { name: 'request_demo', description: 'Ask the user to show something in the page ("Show me where you would expect the filter"). '
       + 'The panel shows the prompt and starts recording; the user acts, stops and sends. Then wait: you get a recording action '
       + 'with requestId and prompt (clicks, right clicks, double clicks, long presses, typing, keys, shortcuts, swipes, scrolls, '
@@ -133,8 +159,8 @@ async function runMcp() {
     inputSchema: { type: 'object', properties: { timeoutSec: { type: 'number', description: 'Default 600' } } } },
   ];
 
-  const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'load_tour', 'request_demo']);
-  const server = new Server({ name: 'demonstrate', version: '1.2.0' }, { capabilities: { tools: {} } });
+  const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'load_tour', 'request_demo', 'record_tour']);
+  const server = new Server({ name: 'demonstrate', version: '1.3.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const a = req.params.arguments || {};
@@ -144,6 +170,9 @@ async function runMcp() {
         case 'start_browser': return reply(await ensureBrowser({ force: true }));
         case 'status': return reply(await call('GET', '/status'));
         case 'load_tour': return reply(await call('POST', '/cmd', { cmd: 'loadTour', tour: a.tour, start: +(a.start || 0) }));
+        case 'record_tour': return reply(await call('POST', '/cmd', { cmd: 'recordTour', tour: a.tour, name: a.name, size: a.size,
+          pace: a.pace, captions: a.captions, out: a.out }));
+        case 'stop_recording': return reply(await call('POST', '/cmd', { cmd: 'recordStop', discard: !!a.discard }));
         case 'request_demo': return reply(await call('POST', '/cmd', { cmd: 'requestDemo', prompt: String(a.prompt || '') }));
         case 'goto_step': return reply(await call('POST', '/cmd', { cmd: 'gotoStep', index: +a.index }));
         case 'end_tour': return reply(await call('POST', '/cmd', { cmd: 'endTour' }));

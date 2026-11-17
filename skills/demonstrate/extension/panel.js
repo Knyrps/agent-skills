@@ -11,10 +11,18 @@ const steps = n => { n = Math.max(0, n); return `${n} step${n === 1 ? '' : 's'}`
 })();
 
 async function render() {
-  const s = await S.get(['step', 'waiting', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning', 'explanation']);
+  const s = await S.get(['step', 'waiting', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning', 'explanation', 'video']);
   $('step').textContent = s.step || '—';
   $('explanation').textContent = s.explanation || '';
   $('explanation').hidden = !s.explanation;
+  if (s.video) {
+    $('back').disabled = $('next').disabled = true;
+    $('busy').toggleAttribute('data-on', s.video.state === 'starting');
+    $('status').textContent = s.video.state === 'starting' ? 'Preparing the video recording…'
+      : `● Recording video (${s.video.width}×${s.video.height}) · step ${s.video.step + 1} of ${s.video.steps}`;
+    $('status').classList.add('waiting');
+    return;
+  }
   if (s.tour) {
     // A scripted tour runs here; the agent is only needed for questions.
     $('back').disabled = !!s.tourRunning || (s.tourIndex ?? 0) <= 0;
