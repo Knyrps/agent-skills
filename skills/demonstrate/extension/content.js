@@ -321,7 +321,7 @@
     }
   }
 
-  function unmount() { if (host?.isConnected) host.remove(); }
+  function unmount() { globalThis.__demonstrateBoxes = []; if (host?.isConnected) host.remove(); }
 
   // ---------------------------------------------------------------- highlights
 
@@ -425,6 +425,7 @@
         rect: { x: r.left, y: r.top, w: r.width, h: r.height }, to: h.to ? centre(h.to) : null });
     }
     placeCallouts(callouts, boxes, W, H);
+    globalThis.__demonstrateBoxes = boxes; // the video stage moves its caption off highlighted elements
     G.sync(gestures);
     for (const [id, n] of nodes) if (!live.has(id)) { n.box.remove(); n.label.remove(); nodes.delete(id); }
     show(dim, !!holes);
@@ -687,26 +688,35 @@
   }
 
   // Mouse drag with pointer events, plus HTML5 drag-and-drop events when the source is draggable.
+  // `to` drops on an element; `by: [dx, dy]` moves by an offset (slider handles), in px or as "40%" of
+  // the size of the `in` element (or of the dragged element's parent).
   async function drag(el, a) {
-    if (!a.to) throw new Error('drag needs to: selector');
-    const [x, y, h] = await approach(el);
-    const target = await waitFor({ selector: a.to });
+    if (!a.to && !Array.isArray(a.by)) throw new Error('drag needs to: selector or by: [dx, dy]');
+    const [x, y, h] = await approach(el, !!a.touch);
+    let target;
+    if (a.to) target = await waitFor({ selector: a.to });
+    else {
+      const ref = (a.in ? await waitFor({ selector: a.in }) : el.parentElement).getBoundingClientRect();
+      const off = (v, size) => (/%$/.test(String(v)) ? parseFloat(v) / 100 * size : +v || 0);
+      const p = [x + off(a.by[0], ref.width), y + off(a.by[1], ref.height)];
+      target = { point: p };
+    }
     evt(h, 'pointerdown', x, y, { buttons: 1 }); evt(h, 'mousedown', x, y, { buttons: 1 });
     if (film) { await P.press(); P.trail(true); }
     const html5 = el.closest('[draggable="true"]');
     const dt = html5 ? new DataTransfer() : null;
     const dragEvt = (n, type, px, py) => n.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: px, clientY: py, dataTransfer: dt }));
     if (html5) dragEvt(html5, 'dragstart', x, y);
-    const [tx, ty] = mid(target), steps = film ? 14 : 4, ms = film ? 800 : 0;
+    const [tx, ty] = target.point || mid(target), steps = film ? 18 : 4, ms = film ? 900 : 0;
     const glide = film ? P.glide(tx, ty, ms) : null;
     for (let i = 1; i <= steps; i++) {
-      const px = x + (tx - x) * i / steps, py = y + (ty - y) * i / steps, under = pageElementAt(px, py) || target;
+      const px = x + (tx - x) * i / steps, py = y + (ty - y) * i / steps, under = pageElementAt(px, py) || h;
       evt(under, 'pointermove', px, py, { buttons: 1 }); evt(under, 'mousemove', px, py, { buttons: 1 });
-      if (html5) { if (i === steps) dragEvt(target, 'dragenter', px, py); dragEvt(under, 'dragover', px, py); }
+      if (html5 && !target.point) { if (i === steps) dragEvt(target, 'dragenter', px, py); dragEvt(under, 'dragover', px, py); }
       if (film) await pause(ms / steps);
     }
     await glide;
-    const drop = hit(target, tx, ty);
+    const drop = target.point ? pageElementAt(tx, ty) || h : hit(target, tx, ty);
     if (html5) { dragEvt(drop, 'drop', tx, ty); dragEvt(html5, 'dragend', tx, ty); }
     evt(drop, 'pointerup', tx, ty); evt(drop, 'mouseup', tx, ty);
     if (film) await P.release();
@@ -758,9 +768,10 @@
         else if (kind === 'longPress') await longPress(el, +a.ms || 900);
         else if (kind === 'drag') await drag(el, a);
         else {
-          const [x, y, h] = await approach(el);
+          const touch = !!a.touch; // drawn as a finger (phone videos); the events stay mouse-compatible
+          const [x, y, h] = await approach(el, touch);
           if (film && kind === 'hover') await pause(+a.ms || 900);
-          if (kind === 'click' || kind === 'fill') await press(h, x, y);
+          if (kind === 'click' || kind === 'fill') await press(h, x, y, { touch });
           if (kind === 'doubleClick') await press(h, x, y, { count: 2 });
           if (kind === 'rightClick') await press(h, x, y, { button: 2 });
           if (kind === 'fill') await fill(el, String(a.value ?? ''));

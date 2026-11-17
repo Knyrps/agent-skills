@@ -41,9 +41,10 @@ Page loads are cut out. The real mouse and keyboard are blocked while recording;
 | `{ swipe: css, direction }` or `{ swipe: css, to: css }` | finger swipe; scrolls the container under it |
 | `{ longPress: css, ms? }` | finger hold with a filling ring |
 | `{ drag: css, to: css }` | press, move with a trail, drop (HTML5 drag events when draggable) |
+| `{ drag: css, by: [dx, dy], in?: css }` | drag by an offset, e.g. a slider handle; `"40%"` is relative to the `in` element (default: the parent) |
 | `{ waitFor: css, text? }`, `{ wait: ms }` | waits, nothing shown |
 
-Every action takes `after` (ms of pause afterwards). Actions use synthetic events: CSS `:hover` styles
+Every action takes `after` (ms of pause afterwards); clicks and drags take `touch: true` to show a finger instead of the cursor (phone-sized videos). Actions use synthetic events: CSS `:hover` styles
 and native touch scrolling do not react to them. Show such effects with a highlight instead.
 
 ## Writing a good review video
@@ -57,9 +58,11 @@ and native touch scrolling do not react to them. Show such effects with a highli
 
 ## Options and output
 
-`record_tour({ tour, name?, size?, pace?, captions?, cards?, out? })`
+`record_tour({ tour, name?, size?, pace?, captions?, cards?, zoom?, out? })`
 
 - `size`: `auto` (largest of 1080p/900p/720p that fits the screen 1:1), a preset, or `WIDTHxHEIGHT`.
+- `zoom`: page zoom while recording. On a 125 % screen, `0.8` shows a 1280×720 video at the page's 1:1
+  desktop layout instead of a cramped 1024×576 one. Chrome keeps zoom per site; it is restored afterwards.
 - `captions: false`: no captions in the picture and no `.vtt`. `cards: false`: no intro, section or outro.
 - `out`: also copy the video and its sidecars to this file or folder.
 - Files land in the bridge's data folder (`videos/`) and are deleted after 14 days: `<name>.mp4`,

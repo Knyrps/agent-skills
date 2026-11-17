@@ -13,7 +13,7 @@
   const EL3 = '0 1px 3px rgb(0 0 0/.3),0 4px 8px 3px rgb(0 0 0/.15)';
   const STYLES = `
     .shield{position:fixed;inset:0;pointer-events:auto;cursor:none;background:transparent}
-    .cap{position:fixed;left:50%;bottom:30px;translate:-50% 0;box-sizing:border-box;max-width:min(780px,84vw);padding:12px 20px;
+    .cap{position:fixed;left:50%;bottom:30px;translate:-50% 0;box-sizing:border-box;width:max-content;max-width:min(780px,calc(100vw - 32px));padding:12px 20px;
       border-radius:12px;background:color-mix(in srgb,var(--md-sys-color-inverse-surface) 94%,transparent);
       color:var(--md-sys-color-inverse-on-surface);font:400 18px/26px ${FONT};letter-spacing:.15px;text-align:center;
       box-shadow:${EL3};transition:opacity .25s cubic-bezier(.2,0,0,1),translate .25s cubic-bezier(.2,0,0,1)}
@@ -22,6 +22,8 @@
     .cap .ch:empty,.cap .tx:empty{display:none}
     .cap:has(.tx:empty) .ch{margin:0}
     .tx{transition:opacity .2s cubic-bezier(.2,0,0,1)}
+    @media (max-width:600px){.cap{font-size:16px;line-height:24px;letter-spacing:.5px;padding:10px 16px}}
+    .cap.dodge{opacity:.12}
     .hide{opacity:0!important}
     .cap.hide{translate:-50% 10px}
     .bar{position:fixed;left:0;right:0;bottom:0;height:4px;background:var(--md-sys-color-secondary-container)}
@@ -63,11 +65,47 @@
       tokens.then(css => { style.textContent = css; });
     }
     document.documentElement.appendChild(host);
-    try { host.showPopover(); } catch {}
-    // The demonstrate overlay (highlights and the drawn pointer) must stay above the stage.
-    const overlay = document.querySelector('demonstrate-overlay');
-    if (overlay?.matches(':popover-open')) { try { overlay.hidePopover(); overlay.showPopover(); } catch {} }
+    raise();
   }
+
+  // The top layer paints in opening order: a modal dialog or popover the page opens later covers the
+  // stage, so the stage goes back on top, and the demonstrate overlay (highlights, drawn pointer) above it.
+  function raise() {
+    if (!host?.isConnected) return;
+    for (const el of [host, document.querySelector('demonstrate-overlay')]) {
+      if (!el || (el !== host && !el.matches(':popover-open'))) continue;
+      try { if (el.matches(':popover-open')) el.hidePopover(); el.showPopover(); } catch {}
+    }
+  }
+  // The caption makes way: it moves to the top while a highlight sits under it, and fades while the drawn
+  // pointer works underneath it (e.g. a dialog's footer buttons). A parked pointer does not count.
+  let last = '', movedAt = 0, top = false;
+  function dodge() {
+    if (!els.cap) return;
+    const p = globalThis.__demonstrateGestures?.pointer, at = p?.active ? p.at : null;
+    const key = at ? at.map(Math.round).join() : '';
+    if (key !== last) { last = key; movedAt = Date.now(); }
+    const shown = stage.active && !els.cap.classList.contains('hide');
+    const r = els.cap.getBoundingClientRect(), gap = 30, h = r.height;
+    // Where the caption sits at the bottom, whatever its current position.
+    const base = { left: r.left, right: r.right, top: innerHeight - gap - h, bottom: innerHeight - gap };
+    const hits = (b, m = 0) => b.x < base.right + m && b.x + b.w > base.left - m && b.y < base.bottom + m && b.y + b.h > base.top - m;
+    const wantTop = shown && (globalThis.__demonstrateBoxes || []).some(b => hits(b, 12));
+    if (wantTop !== top) { top = wantTop; els.cap.style.translate = top ? `-50% ${-(innerHeight - 2 * gap - h)}px` : ''; }
+    let over = false;
+    if (shown && at && Date.now() - movedAt < 1500) {
+      const c = top ? { left: r.left, right: r.right, top: gap, bottom: gap + h } : base;
+      over = at[0] > c.left - 48 && at[0] < c.right + 48 && at[1] > c.top - 48 && at[1] < c.bottom + 24;
+    }
+    els.cap.classList.toggle('dodge', over);
+  }
+  setInterval(dodge, 100);
+
+  let raising = 0;
+  const later = () => { cancelAnimationFrame(raising); raising = requestAnimationFrame(raise); };
+  new MutationObserver(ms => { if (stage.active && ms.some(m => m.target !== host && m.target.localName !== 'demonstrate-overlay')) later(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['open'], subtree: true });
+  addEventListener('toggle', e => { if (stage.active && e.newState === 'open' && e.target !== host && e.target.localName !== 'demonstrate-overlay') later(); }, true);
 
   // Real input never reaches the page while recording; Esc stops the recording.
   const block = e => {

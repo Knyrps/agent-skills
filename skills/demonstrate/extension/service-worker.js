@@ -553,12 +553,19 @@ async function recordTour(m) {
     await navigate(tab.id, first);
   }
   await S.set({ tour: null, tourIndex: -1, highlights: [], explanation: '', step: '' });
+  // `zoom` (0.25–2) zooms the page for the recording, e.g. 0.8 on a 125 % screen shows the page at its
+  // 1:1 desktop layout. Chrome keeps zoom per site, so the previous level is restored afterwards.
+  const zoom = m.zoom ? Math.min(2, Math.max(0.25, +m.zoom)) : 0;
+  const zoomBefore = zoom ? await chrome.tabs.getZoom(tab.id) : 0;
+  if (zoom) { await chrome.tabs.setZoom(tab.id, zoom); await new Promise(r => setTimeout(r, 300)); }
   const staged = await stageWindow(tab, opts.size);
-  video = { tabId: tab.id, tour, opts, ...staged, step: -1, abort: false, discard: false, failure: '', finishing: false,
+  video = { tabId: tab.id, tour, opts, ...staged, zoomBefore, step: -1, abort: false, discard: false, failure: '', finishing: false,
     loading: false, onCamera: false, stage: {} };
   await S.set({ video: { state: 'starting', steps: tour.steps.length, step: -1, width: staged.width, height: staged.height } });
   runVideo(video);
-  return { ok: true, width: staged.width, height: staged.height, viewport: staged.viewport, exact: staged.exact,
+  const z = zoom || 1;
+  return { ok: true, width: staged.width, height: staged.height, exact: staged.exact,
+    viewport: { width: Math.round(staged.viewport.width / z), height: Math.round(staged.viewport.height / z) },
     estimatedMs: estimateMs(tour, { ...opts, intro: opts.cards }) };
 }
 
@@ -728,6 +735,7 @@ async function runVideo(v) {
     await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
     await S.set({ pointerAt: null });
     await restoreWindow(v.restore);
+    if (v.zoomBefore) await chrome.tabs.setZoom(v.tabId, v.zoomBefore).catch(() => {});
     video = null;
     await S.set({ video: null, step: '', explanation: '', highlights: [] });
   }

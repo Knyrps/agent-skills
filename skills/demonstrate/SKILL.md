@@ -108,7 +108,7 @@ Then one tour step per visible change, in the app's natural order.
 
 ## Review video
 
-`record_tour({ tour, name?, size?, pace?, captions?, cards?, out? })` plays a scripted tour by itself and
+`record_tour({ tour, name?, size?, pace?, captions?, cards?, zoom?, out? })` plays a scripted tour by itself and
 records the tab as MP4 with captions, chapter labels, progress bar, intro/section/outro cards, a drawn
 cursor or finger for every action, a `.vtt` and a chapter list. It returns at once; the watcher then gets
 `videoReady { path, vtt, chapters, durationMs, … }` or `videoError { step, error }`. Read

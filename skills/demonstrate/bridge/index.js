@@ -30,7 +30,7 @@ async function ensureBrowser({ force = false } = {}) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 const opt = name => { const i = rest.indexOf('--' + name); return i >= 0 ? rest[i + 1] : undefined; };
-const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out', '--gesture', '--direction', '--to', '--url',
+const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out', '--zoom', '--gesture', '--direction', '--to', '--url',
   '--session', '--label']);
 const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
 const positional = rest.filter((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
@@ -75,7 +75,7 @@ async function runCli() {
     case 'record': {
       if (!(await browserVersion())) await ensureBrowser();
       return call('POST', '/cmd', { cmd: 'recordTour', tour: JSON.parse(fs.readFileSync(positional[0], 'utf8')),
-        name: opt('name'), size: opt('size'), pace: opt('pace') && +opt('pace'), out: opt('out'), captions: !rest.includes('--no-captions'), cards: !rest.includes('--no-cards') });
+        name: opt('name'), size: opt('size'), pace: opt('pace') && +opt('pace'), out: opt('out'), zoom: opt('zoom') && +opt('zoom'), captions: !rest.includes('--no-captions'), cards: !rest.includes('--no-cards') });
     }
     case 'record-stop': return call('POST', '/cmd', { cmd: 'recordStop' });
     case 'record-cancel': return call('POST', '/cmd', { cmd: 'recordStop', discard: true });
@@ -113,7 +113,7 @@ async function runMcp() {
     explanation: { type: 'string', description: '2-5 sentences shown in the side panel' },
     url: { type: 'string', description: 'Navigate here first; omit to continue on the current page' },
     actions: { type: 'array', items: { type: 'object' }, description: '{click|fill|waitFor|hover|doubleClick|rightClick|longPress|swipe|drag|scroll: css, '
-      + 'text?, value? (fill), to? (drag/swipe end css), direction? (swipe), ms? (longPress/hover), after?: ms}, {scrollBy: px|{x,y}, in?: css}, '
+      + 'text?, value? (fill), to? (drag/swipe end css), by? (drag offset [dx, dy] in px or "40%" of in), direction? (swipe), ms? (longPress/hover), touch? (finger instead of cursor), after?: ms}, {scrollBy: px|{x,y}, in?: css}, '
       + '{press: key, on?: css} or {wait: ms}. In a video a drawn cursor or finger performs them visibly.' },
     section: { type: 'string', description: 'Video only: a section name; a section slide appears when it changes' },
     highlights: { type: 'array', description: 'Same fields as highlight() incl. gesture/direction/to; the first replaces, the rest are kept', items: { type: 'object' } },
@@ -145,6 +145,7 @@ async function runMcp() {
       pace: { type: 'number', description: 'Scales reading time (default 1)' },
       captions: { type: 'boolean', description: 'Captions in the picture and a .vtt from each step\'s caption/explanation (default true)' },
       cards: { type: 'boolean', description: 'Intro card, section slides and outro card with the chapter list (default true)' },
+      zoom: { type: 'number', description: 'Page zoom while recording, e.g. 0.8 to show the 1:1 desktop layout on a 125 % screen; restored afterwards' },
       out: { type: 'string', description: 'Also copy the video and sidecars to this file or folder' },
     } } },
     { name: 'stop_recording', description: 'Stop the video being recorded. discard=true deletes it; otherwise the part recorded so far is '
@@ -212,7 +213,7 @@ async function runMcp() {
         case 'status': return done(await call('GET', '/status'));
         case 'load_tour': return done(await cmd({ cmd: 'loadTour', tour: a.tour, start: +(a.start || 0) }));
         case 'record_tour': return done(await cmd({ cmd: 'recordTour', tour: a.tour, name: a.name, size: a.size,
-          pace: a.pace, captions: a.captions, cards: a.cards, out: a.out }));
+          pace: a.pace, captions: a.captions, cards: a.cards, zoom: a.zoom, out: a.out }));
         case 'stop_recording': return done(await cmd({ cmd: 'recordStop', discard: !!a.discard }));
         case 'request_demo': return done(await cmd({ cmd: 'requestDemo', prompt: String(a.prompt || '') }));
         case 'goto_step': return done(await cmd({ cmd: 'gotoStep', index: +a.index }));
