@@ -11,18 +11,39 @@ const steps = n => { n = Math.max(0, n); return `${n} step${n === 1 ? '' : 's'}`
 })();
 
 // Without a tour, step label or video the panel is just the channel to the agent: Annotate, Record, message.
+// Chrome's tab group colours, for the dot next to a session's name.
+const GROUP = { grey: '#5f6368', blue: '#1a73e8', red: '#d93025', yellow: '#f9ab00', green: '#188038', pink: '#d01884',
+  purple: '#a142f4', cyan: '#007b83', orange: '#fa903e' };
+
+// The session whose tab is in front, if any: the panel shows it and sends to it.
+let frontTabId = null;
+async function frontSession() {
+  const { sessionTabs = {}, sessions = [] } = await S.get(['sessionTabs', 'sessions']);
+  const id = Object.keys(sessionTabs).find(k => sessionTabs[k].tabId === frontTabId);
+  if (!id) return null;
+  const live = sessions.find(x => x.id === id);
+  return { id, name: live?.name || sessionTabs[id].name, color: sessionTabs[id].color, listening: !!live?.listening, live: !!live };
+}
+
 async function render() {
-  const s = await S.get(['step', 'waiting', 'listener', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning', 'explanation', 'video']);
+  const s = await S.get(['step', 'steps', 'waiting', 'listener', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning',
+    'tourTab', 'explanation', 'video']);
   const pending = (s.outbox || []).length;
   $('conn-text').textContent = (s.connected ? 'Connected' : 'Offline') + (pending ? ` · ${pending} pending` : '');
   $('conn').classList.toggle('ok', !!s.connected);
-  const who = s.listener || 'the agent';
+  const me = await frontSession();
+  const who = me?.name || s.listener || 'the agent';
+  const listening = me ? me.listening : s.waiting;
   $('listen-text').textContent = !s.connected ? 'Bridge offline · input is kept'
-    : s.waiting ? `${who} is listening` : s.listener ? `Saved until ${who} listens` : 'No agent listening · input is kept';
-  $('listen').classList.toggle('on', !!(s.connected && s.waiting));
-  $('tour').hidden = !(s.tour || s.step || s.video);
-  $('step').textContent = s.step || '—';
-  $('step').hidden = !!s.video && !s.step;
+    : me && !me.live ? `${who} has ended · input goes to the latest agent`
+      : listening ? `${who} is listening` : me || s.listener ? `Saved until ${who} listens` : 'No agent listening · input is kept';
+  $('listen').classList.toggle('on', !!(s.connected && listening));
+  $('listen').style.setProperty('--session', me ? GROUP[me.color] || '' : '');
+  const onTour = !!s.tour && (s.tourTab == null || s.tourTab === frontTabId);
+  const label = s.video || onTour ? s.step : (s.steps || {})[me?.id || ''] || '';
+  $('tour').hidden = !(onTour || label || s.video);
+  $('step').textContent = label || '—';
+  $('step').hidden = !!s.video && !label;
   if (s.video) $('annotate').disabled = $('rec').disabled = true; else renderRecording();
   $('explanation').textContent = s.explanation || '';
   $('explanation').hidden = !s.explanation;
@@ -41,7 +62,7 @@ async function render() {
     return;
   }
   $('step-kicker').textContent = 'Current step';
-  if (s.tour) {
+  if (onTour) {
     // A scripted tour runs here; the agent is only needed for questions.
     $('back').disabled = !!s.tourRunning || (s.tourIndex ?? 0) <= 0;
     $('next').disabled = !!s.tourRunning;
@@ -50,18 +71,20 @@ async function render() {
     return;
   }
   $('back').disabled = $('next').disabled = false;
-  $('status').textContent = s.waiting ? 'The agent is waiting for you.' : 'The agent is working…';
-  $('busy').toggleAttribute('data-on', !!(s.connected && !s.waiting));
+  $('status').textContent = listening ? `${who} is waiting for you.` : `${who} is working…`;
+  $('busy').toggleAttribute('data-on', !!(s.connected && !listening));
 }
 
 async function refreshTab() {
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   tabUrl = t?.url || '';
+  if (frontTabId !== (t?.id ?? null)) { frontTabId = t?.id ?? null; render(); renderActivity(); }
+  const placeholder = tabUrl.startsWith(chrome.runtime.getURL('tab.html'));
   const { hostState: hs = {}, connected } = await S.get(['hostState', 'connected']);
   const ok = hostAllowed(tabUrl, [...(await loadConfig()).allowlist, ...(hs.allow || []), ...(hs.loopback || []), ...(hs.granted || [])]);
   let host = '', web = false;
   try { const u = new URL(tabUrl); host = u.hostname; web = /^https?:$/.test(u.protocol); } catch {}
-  $('notice').hidden = ok;
+  $('notice').hidden = ok || placeholder;
   $('notice-text').textContent = web
     ? `${host} is not allowed, so the agent can't point, mark or record here.`
     : 'This page is not a website, so the agent can\'t point, mark or record here.';
@@ -75,7 +98,10 @@ async function refreshTab() {
 let activityTimer = 0;
 async function renderActivity() {
   clearTimeout(activityTimer);
-  const { activity: a } = await S.get('activity');
+  // The session in front, else whichever session acted last.
+  const { activities = {} } = await S.get('activities');
+  const me = await frontSession();
+  const a = me ? activities[me.id] : Object.values(activities).sort((x, y) => y.ts - x.ts)[0];
   const age = a ? Date.now() - a.ts : Infinity;
   $('activity').hidden = age > 30000;
   if (age > 30000) return;
@@ -225,7 +251,7 @@ chrome.storage.onChanged.addListener((c, area) => {
   if (c.recording || c.recordingDraft || c.annotationDraft || c.demoRequest) renderRecording();
   if (c.hostState || c.connected) refreshTab();
   if (c.hostQuestions) renderHostAsk();
-  if (c.activity) renderActivity();
+  if (c.activities || c.sessionTabs) renderActivity();
 });
 renderHostAsk();
 renderActivity();

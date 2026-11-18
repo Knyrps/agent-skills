@@ -19,7 +19,7 @@ after(async () => { await driver.reset(); fs.rmSync(dir, { recursive: true, forc
 
 test('window-level tools are not offered', async () => {
   const names = (await driver.list()).map(t => t.name);
-  assert.deepEqual(names.sort(), ['browser_click', 'browser_navigate', 'browser_tabs']);
+  assert.deepEqual(names.sort(), ['browser_click', 'browser_evaluate', 'browser_navigate', 'browser_snapshot', 'browser_tabs']);
   assert.equal((await driver.call('browser_close')).isError, true);
   assert.equal((await driver.call('browser_run_code_unsafe')).isError, true);
 });
@@ -52,6 +52,23 @@ test('a closed browser connection is replaced and the call retried once', async 
   assert.equal(r.isError, undefined);
   assert.match(out(r), /^clicked on http:\/\/localhost\/app pid \d+$/);
   assert.notEqual(out(r).split('pid ')[1], firstPid, 'a new Playwright MCP process');
+});
+
+test('with session tabs, calls go to the session\'s own tab, found once, even among tabs with the same URL', async () => {
+  const shop = 'http://localhost/shop';
+  process.env.FAKE_TABS = JSON.stringify([{ title: 'panel', url: 'chrome-extension://abc/panel.html' },
+    { title: 'A', url: shop, mark: '11' }, { title: 'B', url: shop, mark: '22' }]);
+  const mine = createDriver({ outputDir: dir, command: [process.execPath, fake], tab: async () => ({ ok: true, tabId: 22, url: shop }) });
+  try {
+    assert.equal((await mine.list()).some(t => t.name === 'browser_tabs'), false, 'switching tabs would reach other sessions');
+    assert.match(out(await mine.call('browser_snapshot')), /^tab 2 /);
+    // Already on its tab: no further select, which would bring the tab to the front.
+    const again = out(await mine.call('browser_snapshot'));
+    const before = +again.split('selects ')[1];
+    assert.equal(+out(await mine.call('browser_snapshot')).split('selects ')[1], before);
+    const none = createDriver({ outputDir: dir, command: [process.execPath, fake], tab: async () => ({ ok: false, error: 'a video is being recorded by app 2' }) });
+    try { assert.match(out(await none.call('browser_snapshot')), /video is being recorded by app 2/); } finally { await none.reset(); }
+  } finally { await mine.reset(); delete process.env.FAKE_TABS; }
 });
 
 test('each call that goes ahead is described for the panel', () => {

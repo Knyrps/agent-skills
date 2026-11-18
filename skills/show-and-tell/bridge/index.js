@@ -116,7 +116,9 @@ async function runMcp() {
       await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
     },
     // Hosts that are not allowed are put to the user in the side panel; the call waits for the answer.
-    guard: (url, why) => call('POST', '/host/check', { url, why, ask: true }).catch(e => ({ ok: false, error: e.message })),
+    guard: (url, why) => call('POST', '/host/check', { url, why, ask: true, session: SESSION }).catch(e => ({ ok: false, error: e.message })),
+    // Each session works in its own tab, so parallel sessions don't navigate under each other.
+    tab: () => call('POST', '/tab', { session: SESSION, label: LABEL }).catch(e => ({ ok: false, error: e.message })),
     // The panel shows what the agent does in the browser, also when nothing visible changes.
     onActivity: text => { call('POST', '/activity', { text, session: SESSION, label: LABEL }).catch(() => {}); } });
 
@@ -229,7 +231,10 @@ async function runMcp() {
           await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
           return done(r);
         }
-        case 'status': return done(await call('GET', '/status'));
+        case 'status': {
+          const s = await call('GET', '/status');
+          return done({ ...s, you: s.sessions?.find(x => x.id === SESSION)?.name || LABEL });
+        }
         case 'load_tour': return done(await cmd({ cmd: 'loadTour', tour: a.tour, start: +(a.start || 0) }));
         case 'record_tour': return done(await cmd({ cmd: 'recordTour', tour: a.tour, name: a.name, size: a.size,
           pace: a.pace, captions: a.captions, cards: a.cards, zoom: a.zoom, hidpi: a.hidpi, out: a.out }));

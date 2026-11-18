@@ -73,6 +73,34 @@ test('delivered input stays readable for an hour', async () => {
   assert.equal(q.recent.every(a => !('deliveredAt' in a)), true);
 });
 
+test('sessions from the same folder get distinct names and colours', async () => {
+  await call('POST', '/hello', { session: 'one', label: 'app' });
+  await call('POST', '/hello', { session: 'two', label: 'app' });
+  const s = (await call('GET', '/status')).sessions;
+  const one = s.find(x => x.id === 'one'), two = s.find(x => x.id === 'two');
+  assert.equal(one.name, 'app');
+  assert.equal(two.name, 'app 2');
+  assert.notEqual(one.color, two.color);
+});
+
+test('input from a session\'s tab reaches that session, not the one that drove last', async () => {
+  await call('POST', '/claim', { session: 'one', label: 'app' }); // "one" drove last
+  const one = wait('one', 1), two = wait('two');
+  await sleep(50);
+  ext.send(JSON.stringify({ type: 'action', id: crypto.randomUUID(), action: { type: 'question', text: 'for two', to: 'two', ts: Date.now() } }));
+  const r = await two;
+  assert.equal(r.actions[0].text, 'for two');
+  assert.equal('to' in r.actions[0], false);
+  assert.equal((await one).actions.length, 0);
+});
+
+test('input for a session that is not listening yet waits for it', async () => {
+  ext.send(JSON.stringify({ type: 'action', id: crypto.randomUUID(), action: { type: 'question', text: 'later', to: 'two', ts: Date.now() } }));
+  const one = wait('one', 1);
+  assert.equal((await one).actions.length, 0, 'not handed to another session');
+  assert.equal((await wait('two')).actions[0].text, 'later');
+});
+
 test('cancel can target one session', async () => {
   const g = wait('gamma', 5), d = wait('delta', 5);
   await sleep(50);

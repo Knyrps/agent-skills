@@ -26,6 +26,15 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
   the panel. A separate plain `playwright` server, if the host has one, is your private browser the
   user does not see; use it only for work the user should not watch.
 
+## Your own tab
+
+Several agent sessions can share the browser. Each works in its own tab, grouped and named after it
+(`status` → `you`, e.g. "app 2" when another session runs in the same folder). Everything you do (`browser_*`,
+highlights, tours, `request_demo`, videos) happens in that tab; there is no switching to other tabs
+(`browser_tabs` is not offered). Showing something brings your tab to the front. What the user sends while
+your tab is in front comes to you. Only one tour and one video run at a time: if another session's is
+running, you get a busy error; wait or tell the user.
+
 ## Working where the user watches
 
 The user follows the shared browser; the panel shows each `browser_*` call ("clicking …", "requesting
@@ -56,7 +65,8 @@ The user can send at any time. You hear it through a **watcher**, a background s
 - When it completes it carries `{"actions": [...]}`: handle them (next section), then start the watcher again.
   A completion with `timeout` or `cancelled` and no actions: start it again and say nothing.
 - Keep it running while you chat; never cancel it to answer a chat message.
-- The panel sends to the session that drove the browser last and shows "<session> is listening".
+- The panel sends to the session whose tab is in front (else the one that drove the browser last) and
+  shows "<session> is listening".
 - No background jobs in this harness: when the user says they sent, marked or recorded something, call
   `get_queue` (`recent: true` also returns the last hour's delivered items).
 

@@ -82,8 +82,8 @@ async function permit(url, why) {
 }
 
 // All hosts a tour visits, asked up front so a tour or video does not stop halfway.
-async function permitTour(tour, why) {
-  const tab = await activeTab();
+async function permitTour(tour, why, tab) {
+  tab ||= await activeTab();
   const urls = [...new Set([...(tour?.steps || []).map(s => s.url).filter(Boolean), ...(tour?.steps?.[0]?.url ? [] : [tab?.url].filter(Boolean))])];
   for (const u of urls) { const e = await permit(u, why); if (e) return e; }
   return '';
@@ -132,8 +132,9 @@ function send(m) {
 
 // ------------------------------------------------------------------ outbox (nothing is lost)
 
-async function enqueue(action) {
-  const item = { id: crypto.randomUUID(), action: { ...action, ts: Date.now() } };
+// `to`: the session the input belongs to (its tab, tour or video); empty = whoever drove the browser last.
+async function enqueue(action, to = '') {
+  const item = { id: crypto.randomUUID(), action: { ...action, ts: Date.now(), ...(to && { to }) } };
   await serial(async () => {
     const { outbox = [] } = await S.get('outbox');
     outbox.push(item);
@@ -153,28 +154,119 @@ const ack = id => serial(async () => {
   await S.set({ outbox: outbox.filter(x => x.id !== id) });
 });
 
+// ------------------------------------------------------------------ one tab per agent session
+// Every session works in its own tab, grouped and named after it ("app", "app 2", …) in its colour. The
+// first session takes the tab in front if no session owns it; later ones get a new tab. The panel shows,
+// and sends to, the session whose tab is in front. Commands without a session (the CLI) use that tab.
+
+const sessionTabs = () => S.get('sessionTabs').then(r => r.sessionTabs || {});
+async function sessionOfTab(tabId) {
+  for (const [sid, e] of Object.entries(await sessionTabs())) if (e.tabId === tabId) return sid;
+  return '';
+}
+
+async function groupTab(tab, name, color) {
+  try {
+    const groupId = tab.groupId >= 0 ? tab.groupId : await chrome.tabs.group({ tabIds: tab.id, createProperties: { windowId: tab.windowId } });
+    await chrome.tabGroups.update(groupId, { title: name, color });
+    return groupId;
+  } catch { return -1; }
+}
+
+// The session's tab: its own if still open, else the front tab if nobody owns it, else a new one.
+function sessionTab(m, { create = true } = {}) {
+  return serial(async () => {
+    const map = await sessionTabs();
+    const e = map[m.session];
+    if (e) {
+      const t = await chrome.tabs.get(e.tabId).catch(() => null);
+      if (t) {
+        if (m.sessionName && (e.name !== m.sessionName || e.color !== m.color)) {
+          await groupTab(t, m.sessionName, m.color);
+          map[m.session] = { ...e, name: m.sessionName, color: m.color };
+          await S.set({ sessionTabs: map });
+        }
+        return t;
+      }
+    }
+    if (!create) return null;
+    const owned = new Set(Object.values(map).map(x => x.tabId));
+    const front = await activeTab();
+    let t = front && !owned.has(front.id) && !front.url.startsWith('chrome-extension://') && front.groupId < 0 ? front : null;
+    t ||= await chrome.tabs.create({ windowId: front?.windowId, active: true,
+      url: chrome.runtime.getURL('tab.html') + '?s=' + encodeURIComponent(m.session) + '&n=' + encodeURIComponent(m.sessionName || '') });
+    const name = m.sessionName || 'agent', color = m.color || 'blue';
+    await groupTab(t, name, color);
+    map[m.session] = { tabId: t.id, name, color };
+    await S.set({ sessionTabs: map });
+    return chrome.tabs.get(t.id);
+  });
+}
+
+// The tab a command acts on, brought to the front when the user is meant to look at it.
+async function tabFor(m, { show = false } = {}) {
+  const t = m.session ? await sessionTab(m) : await activeTab();
+  if (t && show && !t.active) { await chrome.tabs.update(t.id, { active: true }); await chrome.windows.update(t.windowId, { focused: true }).catch(() => {}); }
+  return t;
+}
+
+chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
+  const map = await sessionTabs();
+  const sid = Object.keys(map).find(k => map[k].tabId === tabId);
+  if (sid) { delete map[sid]; await S.set({ sessionTabs: map }); }
+}));
+
 // ------------------------------------------------------------------ bridge -> extension
 
 async function onBridge(m) {
   if (m.type === 'ack') return ack(m.id);
   if (m.type === 'pong') return;
   if (m.cmd === 'setStep') {
-    // A loaded tour labels its own steps; the bridge re-sends its last label on every reconnect.
-    if ((await S.get('tour')).tour) return;
-    return S.set({ step: String(m.label || '') });
+    // A session's tour labels its own steps; the bridge re-sends every label on reconnect.
+    const { tour, tourSession = '' } = await S.get(['tour', 'tourSession']);
+    if (tour && tourSession === (m.session || '')) return;
+    return serial(async () => {
+      const { steps = {} } = await S.get('steps');
+      if (m.label) steps[m.session || ''] = String(m.label); else delete steps[m.session || ''];
+      await S.set({ steps });
+    });
   }
-  if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting, listener: String(m.listener || '') });
+  if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting, listener: String(m.listener || ''), sessions: m.sessions || [] });
   if (m.cmd === 'hosts') return setHostState(m);
-  if (m.cmd === 'activity') return S.set({ activity: { text: String(m.text || ''), who: String(m.who || ''), ts: Date.now() } });
+  if (m.cmd === 'activity') {
+    const a = { text: String(m.text || ''), who: String(m.who || ''), session: String(m.session || ''), ts: Date.now() };
+    return serial(async () => {
+      const { activities = {} } = await S.get('activities');
+      activities[a.session] = a;
+      for (const k of Object.keys(activities)) if (a.ts - activities[k].ts > 60000) delete activities[k];
+      await S.set({ activities });
+    });
+  }
   if (!m.rid) return;
   let result;
   try { result = await command(m); } catch (e) { result = { ok: false, error: String(e?.message || e) }; }
   send({ type: 'result', rid: m.rid, ...result });
 }
 
+// A tour belongs to the session that loaded it; another session's tour is left alone.
+async function tourBusy(m) {
+  const { tour, tourSession = '' } = await S.get(['tour', 'tourSession']);
+  if (!tour || tourSession === (m.session || '')) return '';
+  const name = (await sessionTabs())[tourSession]?.name || 'another agent session';
+  return `${name} is running a tour in this browser; wait until it ends`;
+}
+
 async function command(m) {
-  if (video && !['state', 'recordStop', 'setStep', 'askHost'].includes(m.cmd)) return { ok: false, error: 'a video is being recorded; wait for videoReady or call recordStop' };
+  if (video && !['state', 'recordStop', 'setStep', 'askHost'].includes(m.cmd)) {
+    const who = video.session && video.session !== m.session ? ` by ${(await sessionTabs())[video.session]?.name || 'another session'}` : '';
+    return { ok: false, error: `a video is being recorded${who}; ${who ? 'wait until it is done' : 'wait for videoReady or call recordStop'}` };
+  }
   switch (m.cmd) {
+    // The bridge asks for the session's tab before each browser_* call.
+    case 'sessionTab': {
+      const t = await sessionTab(m);
+      return t ? { ok: true, tabId: t.id, url: t.pendingUrl || t.url } : { ok: false, error: 'could not open a tab for this session' };
+    }
     // The bridge asks on behalf of the browser_* tools; it records the grant itself.
     case 'askHost': {
       const decision = await askUser(String(m.host), m.why, m.who);
@@ -182,15 +274,22 @@ async function command(m) {
       return { ok: true, decision };
     }
     case 'recordTour': {
-      const e = await permitTour(m.tour, 'record a video there');
-      return e ? { ok: false, error: e } : recordTour(m);
+      const busy = await tourBusy(m);
+      if (busy) return { ok: false, error: busy };
+      const tab = await tabFor(m, { show: true });
+      const e = await permitTour(m.tour, 'record a video there', tab);
+      return e ? { ok: false, error: e } : recordTour(m, tab);
     }
-    case 'recordStop': return recordStop(m);
-    case 'highlight': return highlight(m);
+    case 'recordStop':
+      if (video?.session && m.session && video.session !== m.session) return { ok: false, error: 'this video belongs to another session' };
+      return recordStop(m);
+    case 'highlight': return highlight({ ...m, session: m.session || '', tab: await tabFor(m, { show: true }) });
+    // A session clears its own highlights only.
     case 'clearHighlights':
       await serial(async () => {
         const { highlights = [] } = await S.get('highlights');
-        await S.set({ highlights: m.id ? highlights.filter(h => h.id !== m.id) : [] });
+        const mine = h => !m.session || h.session === m.session;
+        await S.set({ highlights: highlights.filter(h => !mine(h) || (m.id && h.id !== m.id)) });
       });
       return { ok: true };
     case 'hideOverlays':
@@ -198,31 +297,41 @@ async function command(m) {
       return { ok: true, hidden: !!m.hidden };
     // Steps can take longer than the bridge waits for a reply: start them and report failures as stepError.
     case 'loadTour': {
-      const e = await permitTour(m.tour, 'run a tour there');
+      const busy = await tourBusy(m);
+      if (busy) return { ok: false, error: busy };
+      const tab = await tabFor(m, { show: true });
+      const e = await permitTour(m.tour, 'run a tour there', tab);
       if (e) return { ok: false, error: e };
-      await S.set({ tour: validTour(m.tour), tourIndex: -1, tourRunning: false });
+      await S.set({ tour: validTour(m.tour), tourIndex: -1, tourRunning: false, tourSession: m.session || '', tourTab: tab?.id ?? null });
       gotoStep(m.start ?? 0, { replay: true });
       return { ok: true, steps: m.tour.steps.length };
     }
-    case 'gotoStep':
+    case 'gotoStep': {
+      const busy = await tourBusy(m);
+      if (busy) return { ok: false, error: busy };
       gotoStep(+m.index, { replay: true });
       return { ok: true };
-    case 'endTour':
-      await S.set({ tour: null, tourIndex: -1, explanation: '', step: '', highlights: [], tourRunning: false });
+    }
+    case 'endTour': {
+      const busy = await tourBusy(m);
+      if (busy) return { ok: false, error: busy };
+      await clearSessionHighlights((await S.get('tourSession')).tourSession || '');
+      await S.set({ tour: null, tourIndex: -1, explanation: '', step: '', tourRunning: false, tourSession: '', tourTab: null });
       return { ok: true };
+    }
     // The agent asks the user to show something: the panel shows the prompt and recording starts.
     case 'requestDemo': {
       const id = 'r' + Date.now().toString(36);
-      const tab = await activeTab();
+      const tab = await tabFor(m, { show: true });
       const denied = tab ? await permit(tab.url, 'see what you do there') : '';
       if (denied) return { ok: false, error: denied };
-      const r = await startRecording();
+      const r = await startRecording(tab);
       if (r.error) return { ok: false, error: r.error };
-      await S.set({ demoRequest: { id, prompt: String(m.prompt || '') }, recordingDraft: null });
+      await S.set({ demoRequest: { id, prompt: String(m.prompt || ''), session: m.session || '' }, recordingDraft: null });
       return { ok: true, requestId: id };
     }
     case 'state': {
-      const tab = await activeTab();
+      const tab = m.session ? (await sessionTab(m, { create: false })) || await activeTab() : await activeTab();
       return { ok: true, panelOpen: panels.size > 0, ...(video && { video: (await S.get('video')).video }),
         tab: tab && { url: tab.url, title: tab.title, allowed: await allowed(tab.url) } };
     }
@@ -232,7 +341,13 @@ async function command(m) {
 
 const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
 
-async function highlight({ item = {}, keep, tab }) {
+// Highlights belong to a session and its tab; replacing or clearing them leaves other sessions' alone.
+const clearSessionHighlights = session => serial(async () => {
+  const { highlights = [] } = await S.get('highlights');
+  await S.set({ highlights: highlights.filter(h => (h.session || '') !== session) });
+});
+
+async function highlight({ item = {}, keep, tab, session = '' }) {
   if (!item.selector) return { ok: false, error: 'selector is required' };
   tab ||= await activeTab();
   if (!tab) return { ok: false, error: 'no active tab' };
@@ -256,12 +371,16 @@ async function highlight({ item = {}, keep, tab }) {
     direction: item.direction ? String(item.direction) : '',
     to: item.to ? String(item.to) : '',
     pageKey: pageKey(tab.url),
+    tabId: tab.id,
+    session,
   };
   if (h.gesture && !GESTURES.includes(h.gesture)) return { ok: false, error: `unknown gesture "${h.gesture}"; use one of ${GESTURES.join(', ')}` };
   if (h.direction && !['left', 'right', 'up', 'down', 'in', 'out'].includes(h.direction)) return { ok: false, error: 'direction must be left, right, up, down, in or out' };
   await serial(async () => {
     const { highlights = [] } = await S.get('highlights');
-    await S.set({ highlights: (keep ? highlights.filter(x => x.id !== h.id) : []).concat(h) });
+    const others = highlights.filter(x => (x.session || '') !== session);
+    const mine = keep ? highlights.filter(x => (x.session || '') === session && x.id !== h.id) : [];
+    await S.set({ highlights: [...others, ...mine, h] });
   });
   const probe = await chrome.tabs.sendMessage(tab.id, { cmd: 'probe', id: h.id, scroll: item.scroll !== false })
     .catch(e => ({ found: null, note: 'page not ready yet (' + e.message + '); the highlight appears once it loads' }));
@@ -282,26 +401,27 @@ function validTour(tour) {
 let running = false;
 
 async function gotoStep(index, { replay }) {
-  const { tour } = await S.get('tour');
+  const { tour, tourSession: owner = '', tourTab } = await S.get(['tour', 'tourSession', 'tourTab']);
   if (!tour) return { ok: false, error: 'no tour loaded' };
   if (running) return { ok: false, error: 'a step is still running' };
   const steps = tour.steps;
   if (index >= steps.length) {
-    await enqueue({ type: 'tourEnd', step: steps.length - 1 });
+    await enqueue({ type: 'tourEnd', step: steps.length - 1 }, owner);
     return { ok: true, ended: true };
   }
   index = Math.max(0, index);
   const step = steps[index];
   running = true;
   await S.set({ tourIndex: index, tourRunning: true, step: `${index + 1}/${steps.length} – ${step.title}`,
-    explanation: step.explanation || '', highlights: [] });
+    explanation: step.explanation || '' });
+  await clearSessionHighlights(owner);
   try {
     if (step.agent) {
-      await enqueue({ type: 'agentStep', step: index, title: step.title });
+      await enqueue({ type: 'agentStep', step: index, title: step.title }, owner);
       return { ok: true, step: index, agent: true };
     }
-    const tab = await activeTab();
-    if (!tab) throw new Error('no active tab');
+    const tab = tourTab != null ? await chrome.tabs.get(tourTab).catch(() => null) : await activeTab();
+    if (!tab) throw new Error('the tour\'s tab was closed');
     // Going back (or jumping) replays from the last navigation, so the page state matches the step.
     let from = index;
     if (replay) while (from > 0 && !steps[from].url) from--;
@@ -312,14 +432,14 @@ async function gotoStep(index, { replay }) {
     }
     for (const [i, h] of (step.highlights || []).entries()) {
       await run(tab.id, [{ waitFor: h.selector, text: h.text, after: 0 }], index);
-      const r = await highlight({ item: { id: h.id || 'h' + i, ...h }, keep: i > 0 });
+      const r = await highlight({ item: { id: h.id || 'h' + i, ...h }, keep: i > 0, tab: await chrome.tabs.get(tab.id), session: owner });
       if (!r.ok) throw new Error(`step ${index + 1} highlight: ${r.error}`);
       if (r.found === false) throw new Error(`step ${index + 1} highlight not found: ${h.selector}`);
     }
     return { ok: true, step: index };
   } catch (e) {
     const error = String(e?.message || e);
-    await enqueue({ type: 'stepError', step: index, error });
+    await enqueue({ type: 'stepError', step: index, error }, owner);
     return { ok: false, step: index, error };
   } finally {
     running = false;
@@ -629,14 +749,14 @@ async function restoreWindow(r) {
   else await chrome.windows.update(r.id, { state: r.state }).catch(() => {});
 }
 
-async function recordTour(m) {
+async function recordTour(m, tab) {
   if (video) return { ok: false, error: 'a video is already being recorded' };
   const tour = validTour(m.tour);
   const agentStep = tour.steps.findIndex(s => s.agent);
   if (agentStep >= 0) return { ok: false, error: `step ${agentStep + 1} is an agent step; videos need fully scripted tours` };
   const opts = { name: m.name || tour.title || '', size: m.size || 'auto', pace: Math.min(3, Math.max(0.3, +m.pace || 1)),
     captions: m.captions !== false, cards: m.cards !== false, hidpi: m.hidpi !== false, out: m.out || '' };
-  const tab = await activeTab();
+  tab ||= await activeTab();
   if (!tab) return { ok: false, error: 'no active tab' };
   // The first page has to be loaded to measure the viewport; this load is not recorded.
   const first = tour.steps.find(s => s.url)?.url;
@@ -644,7 +764,8 @@ async function recordTour(m) {
     if (!first) return { ok: false, error: `the active tab is not on an allowlisted host: ${tab.url}` };
     await navigate(tab.id, first);
   }
-  await S.set({ tour: null, tourIndex: -1, highlights: [], explanation: '', step: '' });
+  await S.set({ tour: null, tourIndex: -1, explanation: '', step: '', tourSession: '', tourTab: null });
+  await clearSessionHighlights(m.session || '');
   // `zoom` (0.25–2) zooms the page for the recording, e.g. 0.8 on a 125 % screen shows the page at its
   // 1:1 desktop layout. Chrome keeps zoom per site, so the previous level is restored afterwards.
   const zoom = m.zoom ? Math.min(2, Math.max(0.25, +m.zoom)) : 0;
@@ -656,7 +777,7 @@ async function recordTour(m) {
     await new Promise(r => setTimeout(r, 1000));
     staged = { ...(await stageWindow(tab, opts.size)), restore: staged.restore };
   }
-  video = { tabId: tab.id, tour, opts, ...staged, zoomBefore, step: -1, abort: false, discard: false, failure: '', finishing: false,
+  video = { tabId: tab.id, session: m.session || '', tour, opts, ...staged, zoomBefore, step: -1, abort: false, discard: false, failure: '', finishing: false,
     loading: false, onCamera: false, stage: {} };
   await S.set({ video: { state: 'starting', steps: tour.steps.length, step: -1, width: staged.width, height: staged.height } });
   runVideo(video);
@@ -759,7 +880,8 @@ async function runVideo(v) {
       const s = steps[i];
       v.step = i;
       await panelVideo(v, 'recording');
-      await S.set({ step: `${i + 1}/${steps.length} – ${s.title}`, explanation: s.explanation || '', highlights: [] });
+      await S.set({ step: `${i + 1}/${steps.length} – ${s.title}`, explanation: s.explanation || '' });
+      await clearSessionHighlights(v.session);
       v.onCamera = s.video !== false;
       if (!v.onCamera) await videoCmd({ cmd: 'pause' });
       // A new section swaps the card in place (intro → section), so no page flashes between two cards;
@@ -768,7 +890,7 @@ async function runVideo(v) {
       if (newSection) {
         section = s.section;
         await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
-        await S.set({ highlights: [] });
+        await clearSessionHighlights(v.session);
         await stage(v, { caption: null, lower: null,
           card: { kind: 'section', title: s.section, kicker: `Section ${sections.indexOf(s.section) + 1} of ${sections.length}` } });
       } else await stage(v, { card: !v.onCamera || v.stage.card?.kind === 'intro' ? v.stage.card : null, caption: null, lower: null });
@@ -791,7 +913,7 @@ async function runVideo(v) {
       const tab = await chrome.tabs.get(v.tabId);
       for (const [k, h] of (s.highlights || []).entries()) {
         await run(v.tabId, [{ waitFor: h.selector, text: h.text, after: 0 }], i);
-        const r = await highlight({ item: { id: h.id || 'h' + k, ...h }, keep: k > 0, tab });
+        const r = await highlight({ item: { id: h.id || 'h' + k, ...h }, keep: k > 0, tab, session: v.session });
         if (!r.ok) throw new Error(`step ${i + 1} highlight: ${r.error}`);
         if (r.found === false) throw new Error(`step ${i + 1} highlight not found: ${h.selector}`);
       }
@@ -799,7 +921,7 @@ async function runVideo(v) {
         // Stay paused until the next on-camera step has set its card or captions; resuming here would
         // record the bare page for a moment. The pointer used off camera goes away too.
         await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
-        await S.set({ highlights: [] });
+        await clearSessionHighlights(v.session);
         v.held = true;
         continue;
       }
@@ -817,7 +939,7 @@ async function runVideo(v) {
     if (!v.abort && opts.cards) {
       const fmt = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
       await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
-      await S.set({ highlights: [] });
+      await clearSessionHighlights(v.session);
       await stage(v, { caption: null, lower: null, card: { kind: 'outro', title, chapters: chapters.map(c => ({ time: fmt(c.t), title: c.title })) } });
       if (v.held) { v.held = false; await videoCmd({ cmd: 'resume' }); }
       await dwell(v, Math.max(3000, 500 * chapters.length) * pace);
@@ -832,15 +954,15 @@ async function runVideo(v) {
   try {
     if (v.failure || v.discard) {
       if (videoPort) await videoCmd({ cmd: 'stop', discard: true }, 30000).catch(() => {});
-      await enqueue(v.failure ? { type: 'videoError', step: v.step, error: v.failure } : { type: 'videoDiscarded', step: v.step });
+      await enqueue(v.failure ? { type: 'videoError', step: v.step, error: v.failure } : { type: 'videoDiscarded', step: v.step }, v.session);
     } else {
       // The bridge queues videoReady itself once the file is complete.
-      await videoCmd({ cmd: 'stop', meta: { title, chapters, cues: opts.captions ? cues : [],
+      await videoCmd({ cmd: 'stop', meta: { to: v.session, title, chapters, cues: opts.captions ? cues : [],
         steps: steps.map(s => s.title), width: v.width, height: v.height, mimeType, out: opts.out,
         ...(partial && { partial: true }) } }, 120000);
     }
   } catch (e) {
-    await enqueue({ type: 'videoError', step: v.step, error: 'finishing the video failed: ' + (e?.message || e) });
+    await enqueue({ type: 'videoError', step: v.step, error: 'finishing the video failed: ' + (e?.message || e) }, v.session);
   } finally {
     await chrome.offscreen.closeDocument().catch(() => {});
     await chrome.tabs.sendMessage(v.tabId, { cmd: 'stage', end: true }).catch(() => {});
@@ -849,7 +971,8 @@ async function runVideo(v) {
     await restoreWindow(v.restore);
     if (v.zoomBefore) await chrome.tabs.setZoom(v.tabId, v.zoomBefore).catch(() => {});
     video = null;
-    await S.set({ video: null, step: '', explanation: '', highlights: [] });
+    await clearSessionHighlights(v.session);
+    await S.set({ video: null, step: '', explanation: '' });
   }
 }
 
@@ -869,7 +992,6 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
 
 async function handle(m, sender) {
   switch (m.type) {
-    case 'hello': return { allowed: await allowed(sender.tab?.url || m.url) };
     case 'videoStop': return video ? recordStop(m) : { ok: false };
     // Only the panel answers: the user's click, never a bridge command.
     case 'hostDecision': {
@@ -888,11 +1010,15 @@ async function handle(m, sender) {
     case 'annotate': case 'recStart':
       if (video) return { error: 'A video is being recorded.' };
       return m.type === 'recStart' ? startRecording() : handleAnnotate();
+    case 'hello': return { allowed: await allowed(sender.tab?.url || m.url), tabId: sender.tab?.id ?? null };
+    // Messages and Next/Back go to the session whose tab is in front.
     case 'action': {
-      const local = await tourAction(m.action);
-      if (local) return local;
-      const { tourIndex = -1, tour } = await S.get(['tourIndex', 'tour']);
-      return enqueue(tour ? { ...m.action, step: tourIndex } : m.action);
+      const front = await activeTab();
+      const { tourIndex = -1, tour, tourTab, tourSession = '' } = await S.get(['tourIndex', 'tour', 'tourTab', 'tourSession']);
+      const onTour = tour && (tourTab == null || tourTab === front?.id);
+      if (onTour) { const local = await tourAction(m.action); if (local) return local; }
+      const to = onTour ? tourSession : front ? await sessionOfTab(front.id) : '';
+      return enqueue(onTour ? { ...m.action, step: tourIndex } : m.action, to);
     }
     case 'recStep': {
       if (!sender.tab) return {};
@@ -909,32 +1035,37 @@ async function handle(m, sender) {
       const { recording, demoRequest } = await S.get(['recording', 'demoRequest']);
       if (!recording || m.discard) {
         await S.set({ recording: null, demoRequest: null });
-        if (demoRequest) await enqueue({ type: 'demoDeclined', requestId: demoRequest.id, prompt: demoRequest.prompt });
+        if (demoRequest) await enqueue({ type: 'demoDeclined', requestId: demoRequest.id, prompt: demoRequest.prompt }, demoRequest.session);
         return { ok: true, discarded: true };
       }
       await S.set({ recording: null, recordingDraft: { title: 'show-and-tell recording', startedAt: recording.startedAt,
-        duration: Date.now() - recording.startedAt, steps: recording.steps } });
+        duration: Date.now() - recording.startedAt, steps: recording.steps, tabId: recording.tabId } });
       return { ok: true };
     }
+    // Recordings and marks go to the session that asked for them, else to the one owning their tab.
     case 'recSend': {
-      const { recordingDraft, demoRequest, tourIndex = -1, tour } = await S.get(['recordingDraft', 'demoRequest', 'tourIndex', 'tour']);
+      const { recordingDraft, demoRequest, tourIndex = -1, tour, tourTab } = await S.get(['recordingDraft', 'demoRequest', 'tourIndex', 'tour', 'tourTab']);
       if (!recordingDraft) return { error: 'There is no recording.' };
       await S.set({ recordingDraft: null, demoRequest: null });
+      const { tabId, ...rec } = recordingDraft;
+      const to = demoRequest?.session || await sessionOfTab(tabId);
       return enqueue({ type: 'recording', text: m.text || '', url: m.url,
         ...(demoRequest && { requestId: demoRequest.id, prompt: demoRequest.prompt }),
-        ...(tour && { step: tourIndex }), recording: recordingDraft });
+        ...(tour && tourTab === tabId && { step: tourIndex }), recording: rec }, to);
     }
     case 'recDrop': {
       const { demoRequest } = await S.get('demoRequest');
       await S.set({ recordingDraft: null, demoRequest: null });
-      if (demoRequest) await enqueue({ type: 'demoDeclined', requestId: demoRequest.id, prompt: demoRequest.prompt });
+      if (demoRequest) await enqueue({ type: 'demoDeclined', requestId: demoRequest.id, prompt: demoRequest.prompt }, demoRequest.session);
       return { ok: true };
     }
     case 'annotationSend': {
-      const { annotationDraft, tourIndex = -1, tour } = await S.get(['annotationDraft', 'tourIndex', 'tour']);
+      const { annotationDraft, tourIndex = -1, tour, tourTab } = await S.get(['annotationDraft', 'tourIndex', 'tour', 'tourTab']);
       if (!annotationDraft) return { error: 'There is no annotation.' };
       await S.set({ annotationDraft: null });
-      return enqueue({ type: 'annotation', text: m.text || '', ...(tour && { step: tourIndex }), ...annotationDraft });
+      const { tabId, ...draft } = annotationDraft;
+      return enqueue({ type: 'annotation', text: m.text || '', ...(tour && tourTab === tabId && { step: tourIndex }), ...draft },
+        await sessionOfTab(tabId));
     }
     case 'annotationDrop':
       await S.set({ annotationDraft: null });
@@ -949,7 +1080,7 @@ async function handleAnnotate() {
   const result = await chrome.tabs.sendMessage(tab.id, { cmd: 'annotate' });
   if (!result) return { cancelled: true };
   try {
-    const annotationDraft = await renderAnnotation(tab, result);
+    const annotationDraft = { ...(await renderAnnotation(tab, result)), tabId: tab.id };
     await S.set({ annotationDraft });
     return { ok: true, count: result.annotations.length };
   } finally {
@@ -957,8 +1088,8 @@ async function handleAnnotate() {
   }
 }
 
-async function startRecording() {
-  const tab = await activeTab();
+async function startRecording(tab) {
+  tab ||= await activeTab();
   if (!tab || !(await allowed(tab.url))) return { error: 'This page is not on the allowlist.' };
   await S.set({ recording: { startedAt: Date.now(), tabId: tab.id, steps: [
     { type: 'setViewport', width: tab.width, height: tab.height },

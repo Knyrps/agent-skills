@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 // Playwright code could open any site and slip past the host check.
 export const HIDDEN = new Set(['browser_close', 'browser_resize', 'browser_run_code_unsafe']);
 // Pages the tools may act on without a host check.
-const BLANK = /^(about:blank|chrome:\/\/newtab\/?)$/;
+const BLANK = /^(about:blank|chrome:\/\/newtab\/?|chrome-extension:\/\/[a-p]{32}\/tab\.html(\?.*)?)$/;
 const STALE = /has been closed|Target closed|not connected|ECONNREFUSED|Browser closed|disconnected/i;
 
 function playwrightCli() {
@@ -64,9 +64,13 @@ export function describe(name, args = {}, page = '') {
 
 // guard(url, why) -> { ok, error }: whether the tools may work on that page (it may ask the user).
 // onActivity(text): told before each call that goes ahead, for the panel's activity line.
+// tab() -> { ok, tabId, url, error }: this session's own tab (the extension creates it on first use).
+// Without it the calls go to the first app tab (single-session use, tests).
 export function createDriver({ cdp, outputDir, before = async () => {}, guard = async () => ({ ok: true }),
-  onActivity = () => {}, command } = {}) {
-  let client = null, connecting = null, tools = null;
+  onActivity = () => {}, tab = null, command } = {}) {
+  let client = null, connecting = null, tools = null, confirmed = null; // confirmed: Chrome tab id the child is on
+  // With session tabs, switching tabs would act on (and bring up) another session's tab.
+  const hidden = new Set([...HIDDEN, ...(tab ? ['browser_tabs'] : [])]);
 
   async function connect() {
     if (client) return client;
@@ -90,21 +94,50 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
   async function reset() {
     const c = client;
     client = null;
+    confirmed = null;
     await c?.close().catch(() => {});
   }
 
   // The tool list, fetched once; empty (with a log line) when Playwright MCP cannot start.
   async function list(log = () => {}) {
     if (tools) return tools;
-    try { tools = (await (await connect()).listTools()).tools.filter(t => !HIDDEN.has(t.name)); }
+    try { tools = (await (await connect()).listTools()).tools.filter(t => !hidden.has(t.name)); }
     catch (e) { log('browser_* tools unavailable: ' + (e.message || e)); return []; }
     return tools;
   }
 
-  async function selectAppTab(c) {
+  async function listTabs(c) {
     const r = await c.callTool({ name: 'browser_tabs', arguments: { action: 'list' } });
     if (r.isError && STALE.test(text(r))) throw new Error(text(r));
-    const tabs = parseTabs(text(r));
+    return parseTabs(text(r));
+  }
+  const select = (c, index) => c.callTool({ name: 'browser_tabs', arguments: { action: 'select', index } });
+
+  // Playwright's select brings a tab to the front, so it happens only when this child is not on the
+  // session's tab yet (first call, after a reconnect, after the user closed the tab). Several tabs with
+  // the same URL are told apart by the tab id the content script writes onto <html>.
+  async function selectSessionTab(c) {
+    let mine = await tab();
+    for (let i = 0; i < 8; i++) {
+      if (!mine?.ok) return { error: mine?.error || 'this session has no tab in the browser' };
+      const tabs = await listTabs(c), same = tabs.filter(t => t.url === mine.url);
+      const current = same.find(t => t.current);
+      if (current && (same.length === 1 || confirmed === mine.tabId)) { confirmed = mine.tabId; return { url: mine.url }; }
+      if (same.length === 1) { await select(c, same[0].index); confirmed = mine.tabId; return { url: mine.url }; }
+      for (const t of same) {
+        await select(c, t.index);
+        const r = await c.callTool({ name: 'browser_evaluate', arguments: { function: '() => document.documentElement.getAttribute("data-show-and-tell-tab")' } });
+        if (text(r).includes(`"${mine.tabId}"`)) { confirmed = mine.tabId; return { url: mine.url }; }
+      }
+      // The tab is still loading or Playwright has not seen it yet.
+      await new Promise(r => setTimeout(r, 300));
+      mine = await tab();
+    }
+    return { error: 'could not find this session\'s tab; call start_browser and try again' };
+  }
+
+  async function selectAppTab(c) {
+    const tabs = await listTabs(c);
     const app = url => !url.startsWith('chrome-extension://') && !(url.startsWith('chrome://') && !BLANK.test(url));
     const current = tabs.find(t => t.current && app(t.url));
     if (current) return current.url;
@@ -128,7 +161,12 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
 
   async function attempt(name, args) {
     const c = await connect();
-    const page = name === 'browser_tabs' ? '' : await selectAppTab(c);
+    let page = '';
+    if (tab) {
+      const r = await selectSessionTab(c);
+      if (r.error) return { isError: true, content: [{ type: 'text', text: r.error }] };
+      page = r.url;
+    } else if (name !== 'browser_tabs') page = await selectAppTab(c);
     const denied = await check(name, args, page);
     if (denied) return denied;
     try { onActivity(describe(name, args, page)); } catch {}
@@ -136,7 +174,7 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
   }
 
   async function call(name, args = {}) {
-    if (HIDDEN.has(name)) return { isError: true, content: [{ type: 'text', text: `${name} is not available on the shared browser` }] };
+    if (hidden.has(name)) return { isError: true, content: [{ type: 'text', text: `${name} is not available on the shared browser` }] };
     await before();
     let r;
     try { r = await attempt(name, args); }

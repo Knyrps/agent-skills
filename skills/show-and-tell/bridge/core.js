@@ -36,6 +36,8 @@ const SHOTS = path.join(DATA, 'shots');
 export const VIDEOS = path.join(DATA, 'videos');
 const VIDEO_DAYS = 14;
 const HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+// Chrome tab group colours, one per live session.
+const COLORS = ['blue', 'green', 'purple', 'orange', 'pink', 'cyan', 'red', 'yellow', 'grey'];
 
 export const log = (...m) => console.error('[show-and-tell]', ...m);
 
@@ -48,7 +50,7 @@ export function startOwner({ standalone = false } = {}) {
     pruneShots();
     pruneVideos();
     const videos = new Map(); // id -> { fd, part, name, ext }
-    const state = { step: '', panelOpen: false };
+    const state = { steps: new Map(), panelOpen: false }; // steps: session -> its set_step label
     const exts = new Set();
     const waiters = new Set();
     const replies = new Map();
@@ -60,22 +62,46 @@ export function startOwner({ standalone = false } = {}) {
     // Routing: panel input goes to one agent session, the one that drove the browser last (`owner`), and
     // only to that session's watcher. While it has no watcher the input stays queued. An owner that has
     // neither a watcher nor sent a heartbeat for 90 s is dropped, and the next waiting session takes over.
-    const sessions = new Map(); // session id -> { label, seen }
+    // Each session also has its own tab in the browser (a named, coloured tab group); input from that tab
+    // goes to that session. Sessions from the same folder get distinct names: "app", "app 2", …
+    const sessions = new Map(); // session id -> { label, name, color, seen }
     let owner = null, recent = [], announced = '';
+    const alive = s => Date.now() - s.seen < 90000 || [...waiters].some(w => w.session === s.id);
     const touch = (id, label) => {
       if (!id) return;
       const s = sessions.get(id);
-      sessions.set(id, { label: label || s?.label || id, seen: Date.now() });
+      const unique = (base, self) => {
+        const live = [...sessions.values()].filter(x => x !== self && alive(x));
+        let name = base;
+        for (let n = 2; live.some(x => x.name === name); n++) name = `${base} ${n}`;
+        return name;
+      };
+      if (s) {
+        s.seen = Date.now();
+        // First seen without a label (e.g. a status call): the real one replaces the fallback.
+        if (label && s.auto) Object.assign(s, { label: String(label), name: unique(String(label), s), auto: false });
+        return;
+      }
+      const live = [...sessions.values()].filter(alive);
+      const used = new Set(live.map(x => x.color));
+      const color = COLORS.find(c => !used.has(c)) || COLORS[sessions.size % COLORS.length];
+      const base = String(label || 'agent');
+      sessions.set(id, { id, label: base, name: unique(base, null), color, auto: !label, seen: Date.now() });
     };
+    const nameOf = id => sessions.get(id)?.name || '';
     const ownerAlive = () => [...waiters].some(w => w.session === owner) || Date.now() - (sessions.get(owner)?.seen || 0) < 90000;
     function recipients() {
       if (owner && !ownerAlive()) owner = null;
       if (!owner) owner = [...waiters].find(w => w.session)?.session || null;
       return owner ? [...waiters].filter(w => w.session === owner) : [...waiters];
     }
+    // `waiting`/`listener`: who gets input from a tab no session owns. `sessions`: every live session, so
+    // the panel can show the one whose tab is in front.
     const listener = () => {
       const r = recipients();
-      return { waiting: r.length > 0, listener: owner ? sessions.get(owner)?.label || owner : '' };
+      return { waiting: r.length > 0, listener: owner ? nameOf(owner) || owner : '',
+        sessions: [...sessions.values()].filter(alive).map(s => ({ id: s.id, name: s.name, color: s.color,
+          listening: [...waiters].some(w => w.session === s.id) })) };
     };
     // Tells the panel who receives its input and whether that session is listening right now.
     const announce = () => {
@@ -105,7 +131,7 @@ export function startOwner({ standalone = false } = {}) {
     setInterval(pushHosts, 5000).unref();
     const asking = new Map(); // host -> pending question, so parallel calls ask once
     const pushState = c => {
-      c.send(JSON.stringify({ cmd: 'setStep', label: state.step }));
+      for (const [session, label] of state.steps) c.send(JSON.stringify({ cmd: 'setStep', label, session }));
       c.send(JSON.stringify({ cmd: 'setWaiting', ...listener() }));
       c.send(JSON.stringify({ cmd: 'hosts', ...hosts.state() }));
     };
@@ -130,15 +156,24 @@ export function startOwner({ standalone = false } = {}) {
       if (queue.length !== before) persist();
     };
 
+    // Input from a session's tab (`to`) waits for that session; input from other tabs, or for a session
+    // that has gone away, takes the owner route above.
     function flush() {
       expire();
-      const to = recipients();
-      if (!queue.length || !to.length) return;
-      const body = { actions: queue };
-      recent.push(...queue.map(a => ({ ...a, deliveredAt: Date.now() })));
-      queue = [];
+      if (!queue.length || !waiters.size) return;
+      const general = recipients(), deliveries = new Map(), keep = [];
+      for (const a of queue) {
+        const target = a.to && sessions.get(a.to);
+        const to = target && alive(target) ? [...waiters].filter(w => w.session === a.to) : general;
+        if (!to.length) { keep.push(a); continue; }
+        const { to: _, ...plain } = a;
+        for (const w of to) deliveries.set(w, [...(deliveries.get(w) || []), plain]);
+        recent.push({ ...plain, deliveredAt: Date.now() });
+      }
+      if (!deliveries.size) return;
+      queue = keep;
       persist();
-      setWaiters(() => { for (const w of to) { clearTimeout(w.timer); json(w.res, 200, body); waiters.delete(w); } });
+      setWaiters(() => { for (const [w, actions] of deliveries) { clearTimeout(w.timer); json(w.res, 200, { actions }); waiters.delete(w); } });
     }
 
     async function onAction(conn, msg) {
@@ -198,7 +233,7 @@ export function startOwner({ standalone = false } = {}) {
         videos.delete(id);
         fs.closeSync(v.fd);
         const out = finishVideo(v, meta);
-        push({ type: 'videoReady', ...out });
+        push({ type: 'videoReady', ...out, ...(meta.to && { to: String(meta.to) }) });
         return json(res, 200, out);
       }
       return json(res, 404, { error: 'not found' });
@@ -230,8 +265,9 @@ export function startOwner({ standalone = false } = {}) {
       }
       if (route === 'GET /status') return json(res, 200, { ok: true, pid: process.pid, standalone, version: VERSION,
         extensionConnected: exts.size > 0, panelOpen: exts.size > 0 && state.panelOpen,
-        step: state.step, queued: queue.length, waiters: waiters.size,
-        owner: owner && { session: owner, label: sessions.get(owner)?.label || owner }, listening: listener().waiting,
+        steps: Object.fromEntries([...state.steps].map(([s, l]) => [nameOf(s) || s, l])), queued: queue.length, waiters: waiters.size,
+        owner: owner && { session: owner, label: nameOf(owner) || owner }, listening: listener().waiting,
+        sessions: listener().sessions,
         watching: [...new Set([...waiters].map(w => w.session).filter(Boolean))] });
       if (route === 'GET /queue') {
         expire();
@@ -273,7 +309,7 @@ export function startOwner({ standalone = false } = {}) {
         if (r.ok || !r.host || !body.ask) return json(res, 200, r);
         let q = asking.get(r.host);
         if (!q) {
-          q = requestExt({ cmd: 'askHost', host: r.host, why: String(body.why || ''), who: sessions.get(owner)?.label || '' }, 130000)
+          q = requestExt({ cmd: 'askHost', host: r.host, why: String(body.why || ''), who: nameOf(body.session) || nameOf(owner) }, 130000)
             .then(a => a.decision || 'no', e => (exts.size ? 'timeout' : 'offline:' + e.message))
             .finally(() => asking.delete(r.host));
           asking.set(r.host, q);
@@ -294,18 +330,31 @@ export function startOwner({ standalone = false } = {}) {
         try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
         touch(body.session, body.label);
         broadcast({ cmd: 'activity', text: String(body.text || '').slice(0, 200),
-          who: sessions.get(body.session)?.label || String(body.label || ''), ts: Date.now() });
+          who: nameOf(body.session) || String(body.label || ''), session: String(body.session || ''), ts: Date.now() });
         return json(res, 200, { ok: true });
+      }
+      // The session's own tab (created and grouped on first use), for its browser_* calls.
+      if (route === 'POST /tab') {
+        let body = {};
+        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
+        if (!body.session) return json(res, 400, { error: 'session is required' });
+        claim(body.session, body.label);
+        const s = sessions.get(body.session);
+        try { return json(res, 200, await requestExt({ cmd: 'sessionTab', session: s.id, sessionName: s.name, color: s.color }, 20000)); }
+        catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       }
       if (route === 'POST /cmd') {
         let body;
         try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'bad json' }); }
-        // Whoever drives the browser receives what the user sends from it.
+        // Whoever drives the browser receives what the user sends from tabs no session owns. The extension
+        // gets the session's name and colour for its tab group.
         if (body.session && body.cmd !== 'state') claim(body.session, body.sessionLabel);
-        delete body.session; delete body.sessionLabel;
+        if (body.session) { touch(body.session, body.sessionLabel); Object.assign(body, { sessionName: nameOf(body.session), color: sessions.get(body.session).color }); }
+        delete body.sessionLabel;
         if (body.cmd === 'setStep') {
-          state.step = String(body.label || '');
-          broadcast({ cmd: 'setStep', label: state.step });
+          const label = String(body.label || '');
+          if (label) state.steps.set(body.session || '', label); else state.steps.delete(body.session || '');
+          broadcast({ cmd: 'setStep', label, session: body.session || '' });
           return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
         }
         if (!['highlight', 'clearHighlights', 'hideOverlays', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });

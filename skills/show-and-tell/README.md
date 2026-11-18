@@ -10,6 +10,8 @@ share one browser window:
   - **Record**: captures what you do in the page (clicks, typing, keys, scrolling, swipes, navigation).
   - **Message** and **Send**, with the annotation or recording attached.
   The agent hears it through a background watcher; the panel shows which session is listening.
+- **Several agents at once**: each session works in its own named, coloured tab group, and the panel talks
+  to the session whose tab is in front.
 - **Guided tours** with Back / Next, and **review videos** (MP4 with captions, chapter labels, progress bar,
   intro/section/outro cards and a drawn cursor or finger) are layers on top.
 
@@ -121,6 +123,7 @@ Open any page on `http://localhost:<port>/` in the demo browser, then:
 | Clear | `node <skill>/bridge clear` | Highlights removed |
 | Buffering | Stop the bridge, click **Next**, start the bridge, run `wait` | The buffered `next` is delivered |
 | Allowed hosts | Open `https://example.com/` yourself | The panel says it is not allowed and offers "Allow this session" / "Always allow"; after a click, Annotate works without a reload |
+| Two sessions | Start two agents in the same folder; let both open a page with show-and-tell's `browser_navigate`, then switch between their tabs and send a message | Each works in its own tab group ("app", "app 2", different colours) and neither navigates the other's tab. The panel header names the session whose tab is in front, and the message reaches only that session |
 | Host question | `node <skill>/bridge highlight h1 --url https://example.com/` (not allowed yet) | The panel asks "Allow the agent here?"; **No** returns `the user did not allow example.com`, **This session** opens the page. `localhost` pages never ask |
 | Cancel | `wait` in one terminal, `node <skill>/bridge cancel` in another | The wait prints `{"actions":[],"cancelled":true}` |
 | Gestures | `node <skill>/bridge highlight button --gesture double-tap --label Here --url http://localhost:<port>/`, then with `--gesture swipe --direction left --keep` on another element | The page opens; a finger dot taps twice with a ripple; the swipe shows a dotted path and a trail. An unknown gesture name returns the list of valid ones |

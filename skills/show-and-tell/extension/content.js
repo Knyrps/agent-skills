@@ -125,9 +125,13 @@
   const busy = () => G.pointer.active || !!globalThis.__showAndTellStage?.active;
 
   // Idle on hosts that are not allowed; the worker sends "recheck" once the user allows this host.
-  let started = false;
+  // The tab id goes onto <html> too: it tells apart tabs with the same URL that different agent sessions use.
+  let started = false, myTab = null;
   const hello = () => chrome.runtime.sendMessage({ type: 'hello', url: location.href })
-    .then(r => { if (r?.allowed && !started) { started = true; init(); } }).catch(() => {});
+    .then(r => {
+      if (r?.tabId != null) { myTab = r.tabId; document.documentElement.setAttribute('data-show-and-tell-tab', String(r.tabId)); }
+      if (r?.allowed && !started) { started = true; init(); }
+    }).catch(() => {});
   hello();
   chrome.runtime.onMessage.addListener(m => { if (m?.cmd === 'recheck' && !started) hello(); return false; });
 
@@ -288,7 +292,8 @@
     kick();
   }
 
-  const visible = () => (hidden ? [] : highlights.filter(h => h.pageKey === here()));
+  // Highlights of this tab only: another session may show something on the same page in its own tab.
+  const visible = () => (hidden ? [] : highlights.filter(h => h.pageKey === here() && (h.tabId == null || h.tabId === myTab)));
 
   function kick() {
     if (suspended) return;
@@ -452,7 +457,7 @@
 
   async function probe(m) {
     await load();
-    const h = highlights.find(x => x.id === m.id);
+    const h = highlights.find(x => x.id === m.id && (x.tabId == null || x.tabId === myTab));
     if (!h) return { found: false, error: 'unknown highlight id' };
     if (h.pageKey !== here()) return { found: false, error: 'highlight belongs to another page' };
     cache.delete(h.id);
