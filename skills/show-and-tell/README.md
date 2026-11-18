@@ -19,7 +19,8 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
                      ▼
            Chrome for Testing  (CDP 127.0.0.1:9334, own profile)
            ├─ extension: side panel (browser UI) + in-page highlight, annotation and recorder layer
-           └─ playwright-demo MCP attaches via --cdp-endpoint (lazily, on its first call)
+           └─ Playwright MCP, a child of the bridge, attaches via --cdp-endpoint; its browser_* tools
+              are offered by the same MCP server
 ```
 
 | Path | What |
@@ -30,7 +31,7 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
 | `extension/config.json` | Host allowlist and bridge URL; `config.local.json` (git-ignored) adds hosts and video branding |
 | `extension/gestures.js`, `stage.js` | Gesture glyphs and the drawn pointer; the video stage (captions, cards, input shield) |
 | `references/video.md` | How the agent writes review videos |
-| `bridge/` | MCP server, bridge server and CLI (`index.js`). Its only dependency is `@modelcontextprotocol/sdk` |
+| `bridge/` | MCP server, bridge server and CLI (`index.js`); `driver.js` runs Playwright MCP on the shared browser. Dependencies: `@modelcontextprotocol/sdk`, `@playwright/mcp` |
 | `config/` | MCP config snippets per agent host |
 | `vendor-src/` | Rebuilds `extension/vendor/` (Material Web bundle, M3 colour tokens). Not needed at runtime |
 
@@ -67,13 +68,12 @@ whatever Chromium is listening on that port.
 
    Hosts change these paths now and then; the host's own docs win.
 
-3. **MCP servers.** Register two stdio servers in the agent host:
-   - `show-and-tell`: `node <skill>/bridge/index.js`
-   - `playwright-demo`: `npx -y @playwright/mcp@latest --cdp-endpoint http://127.0.0.1:9334 --ignore-https-errors`
+3. **MCP server.** Register one stdio server in the agent host: `show-and-tell`: `node <skill>/bridge/index.js`.
+   It also offers Playwright MCP's `browser_*` tools for the shared browser.
 
    Ready-made snippets for OpenCode, Claude Code, VS Code and Codex are in `config/`. Keep any existing
-   `playwright` server as it is: it launches its own browser, while `playwright-demo` attaches to the
-   demo browser.
+   `playwright` server as it is: that is the agent's private browser. An older `playwright-demo` entry
+   (attached to port 9334) is no longer needed; remove it.
 
 4. **Allowlist.** The panel, highlights, annotation and recording only work on hosts listed in
    `extension/config.json` (default `localhost` and `*.dev.local`; `*.example.com` = that host and all
@@ -121,18 +121,16 @@ Open any page on `http://localhost:<port>/` in the demo browser, then:
 | Cancel | `wait` in one terminal, `node <skill>/bridge cancel` in another | The wait prints `{"actions":[],"cancelled":true}` |
 | Gestures | `node <skill>/bridge highlight button --gesture double-tap --label Here --url http://localhost:<port>/`, then with `--gesture swipe --direction left --keep` on another element | The page opens; a finger dot taps twice with a ripple; the swipe shows a dotted path and a trail. An unknown gesture name returns the list of valid ones |
 | Video | `node <skill>/bridge record tour.json --name test`, then `wait --timeout 300` | 3-2-1 countdown in the panel, the window shrinks to a 1:1 size, intro card, chapter labels, captions, a gliding cursor; Esc in the page or **Stop and save** keeps a partial video. `videoReady` has `path`, `vtt`, `chapters` and the window is restored |
-| Tests | `npm test` in `bridge` | Routing, MP4 converter and timing rules pass |
+| Tests | `npm test` in `bridge` | Routing, browser_* forwarding, MP4 converter and timing rules pass |
 
-## Verify playwright-demo drives this browser
+## Verify the browser_* tools drive this browser
 
 1. Start the browser and open `http://localhost:<port>/` in it by hand.
-2. Ask the agent to run `browser_tabs` (list) on **playwright-demo**.
-3. The list must contain your localhost tab and `chrome-extension://jedpjgmldnhcfdejimlabhppmffdijei/panel.html`.
-   `node <skill>/scripts/browser.mjs status` lists the same pages.
-4. Have the agent navigate the localhost tab with playwright-demo. The page must change in the window
+2. Ask the agent to run show-and-tell's `browser_snapshot`. It must describe your localhost page, not the
+   side panel, without selecting a tab first.
+3. Have the agent navigate with show-and-tell's `browser_navigate`. The page must change in the window
    you are watching.
 
-`ECONNREFUSED 127.0.0.1:9334` means the demo browser is not running: call `start_browser` and retry.
 A separate window with an empty `about:blank` means the agent used the plain `playwright` server.
 
 ## Rebuild the vendored UI library

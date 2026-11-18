@@ -20,8 +20,11 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
   Each also exists as a CLI: `node "<skill>/bridge" <start|status|highlight <css> [--label t] [--gesture g]
   [--direction d] [--to css] [--url u] [--style s] [--keep]|clear|hide|show|queue [--recent]|wait|cancel|request <prompt>|
   step <label>|tour <file>|goto <n>|end|record <file> [--name n] [--size s]|record-stop|record-cancel>`.
-- **playwright-demo MCP** drives the same browser when you need more than `highlight` can do (reading the
-  page, filling forms). Never the plain `playwright` server: its browser is invisible to the user.
+- **`browser_*` tools** of the same MCP (Playwright MCP, attached to this browser) drive the page when you
+  need more than `highlight` can do: `browser_snapshot`, `browser_click`, `browser_type`,
+  `browser_evaluate`, `browser_navigate`, … They start the browser if needed and act in the app tab, never
+  the panel. A separate plain `playwright` server, if the host has one, is your private browser the
+  user does not see; use it only for work the user should not watch.
 
 ## Guardrail: allowlisted hosts
 
@@ -88,15 +91,11 @@ Every item in `actions` has a `type` (and `step` while a tour runs):
    - `highlights`: as `highlight()`; the first replaces, the rest are added.
    - `agent: true` only for steps you must do by hand: act, `set_step("n/N – title")`, highlight, explain,
      then `goto_step(n+1)` when `next` arrives.
-   Verify selectors first (playwright-demo `browser_evaluate`); a missing one becomes `stepError`.
+   Verify selectors first (`browser_evaluate`); a missing one becomes `stepError`.
 3. **Start**: `start_browser` (start the watcher), check `bridge.panelOpen`, then `load_tour({ tour })` and
    tell the user in one line that the tour runs in the panel.
 4. **React**: `stepError` → fix the step, `load_tour` with `start: step`. `tourEnd` → `end_tour` and a short
    summary. Questions and marks during a tour refer to the current `step`.
-
-When playwright-demo is needed, select the app tab first: the panel is a tab too, usually index 0.
-`browser_tabs({action:"list"})`, select the tab whose URL is not `chrome-extension://`, and check with
-`browser_evaluate(() => location.href)`. Repeat after `start_browser` restarted the browser.
 
 ## Demonstrating code changes
 
@@ -123,8 +122,8 @@ Call `hide_overlays(true)` before a screenshot that should show the plain page, 
 - `extensionConnected: false`: `start_browser` again; the extension reconnects within ~15 s and replays
   what the user sent meanwhile.
 - `bridge not running`: the MCP is not attached; the CLI (`start`, `wait`) works on its own.
-- playwright-demo `ECONNREFUSED 127.0.0.1:9334`: the browser is not running; `start_browser`, retry.
-- A playwright-demo locator times out on a visible element: the current tab is the panel; select the app tab.
+- A `browser_*` call says the browser is closed: it reconnects once by itself; if it still fails,
+  `start_browser` and retry.
 - One browser serves one tour or video at a time. If `status` shows a step you did not set, another
   session is using it: ask the user first.
 - Chrome for Testing missing: `npx playwright install chromium`, or set `DEMO_BROWSER_PATH`.

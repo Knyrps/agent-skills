@@ -1,18 +1,13 @@
 // Merge into ~/.config/opencode/opencode.json(c). Replace <skill> with the absolute skill path.
-// Keep an existing "playwright" server as it is: it launches its own browser, while "playwright-demo"
-// attaches to the demo browser.
+// Keep an existing "playwright" server as it is: that is the agent's private browser. An older
+// "playwright-demo" entry (port 9334) can go: show-and-tell offers those browser_* tools itself.
 {
   "mcp": {
-    // Bridge between the agent and the side panel; owns 127.0.0.1:47613 and starts the demo browser.
+    // Bridge between the agent and the side panel; owns 127.0.0.1:47613, starts the shared browser and
+    // drives it through Playwright MCP (browser_* tools).
     "show-and-tell": {
       "type": "local",
       "command": ["node", "<skill>/bridge/index.js"],
-      "enabled": true
-    },
-    // Attaches to the demo browser lazily, on its first tool call.
-    "playwright-demo": {
-      "type": "local",
-      "command": ["npx", "-y", "@playwright/mcp@latest", "--cdp-endpoint", "http://127.0.0.1:9334", "--ignore-https-errors"],
       "enabled": true
     }
   }

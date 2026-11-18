@@ -1,0 +1,93 @@
+// Drives the shared browser through Playwright MCP, run as a child process attached over CDP. Its
+// browser_* tools are offered under this server, so one MCP entry covers pointing and driving. Before a
+// call the shared browser is started if needed and the app tab is selected (the side panel is a tab
+// too); after a browser restart the stale connection is replaced once.
+import path from 'node:path';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+// Closing or resizing would act on the user's window and the side panel; the user owns those.
+export const HIDDEN = new Set(['browser_close', 'browser_resize']);
+const STALE = /has been closed|Target closed|not connected|ECONNREFUSED|Browser closed|disconnected/i;
+
+function playwrightCli() {
+  const pkg = require.resolve('@playwright/mcp/package.json');
+  return path.join(path.dirname(pkg), require(pkg).bin['playwright-mcp']);
+}
+
+const text = r => (r?.content || []).map(c => c.text || '').join('\n');
+
+// Tabs as Playwright MCP lists them: "- 0: (current) [Title](https://…)".
+export function parseTabs(listing) {
+  return [...listing.matchAll(/^- (\d+): (\(current\) )?\[.*?\]\((.*)\)\s*$/gm)]
+    .map(m => ({ index: +m[1], current: !!m[2], url: m[3] }));
+}
+
+export function createDriver({ cdp, outputDir, before = async () => {}, command } = {}) {
+  let client = null, connecting = null, tools = null;
+
+  async function connect() {
+    if (client) return client;
+    connecting ||= (async () => {
+      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+      const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+      fs.mkdirSync(outputDir, { recursive: true });
+      const [cmd, ...args] = command || [process.execPath, playwrightCli(), '--cdp-endpoint', cdp,
+        '--ignore-https-errors', '--output-dir', outputDir];
+      const c = new Client({ name: 'show-and-tell', version: '1.0.0' });
+      // The full environment: the SDK's default passes only a few variables, which would drop proxy
+      // settings and NODE_EXTRA_CA_CERTS.
+      await c.connect(new StdioClientTransport({ command: cmd, args, cwd: outputDir, stderr: 'ignore', env: { ...process.env } }));
+      c.onclose = () => { if (client === c) client = null; };
+      client = c;
+      return c;
+    })().finally(() => { connecting = null; });
+    return connecting;
+  }
+
+  async function reset() {
+    const c = client;
+    client = null;
+    await c?.close().catch(() => {});
+  }
+
+  // The tool list, fetched once; empty (with a log line) when Playwright MCP cannot start.
+  async function list(log = () => {}) {
+    if (tools) return tools;
+    try { tools = (await (await connect()).listTools()).tools.filter(t => !HIDDEN.has(t.name)); }
+    catch (e) { log('browser_* tools unavailable: ' + (e.message || e)); return []; }
+    return tools;
+  }
+
+  async function selectAppTab(c) {
+    const r = await c.callTool({ name: 'browser_tabs', arguments: { action: 'list' } });
+    if (r.isError && STALE.test(text(r))) throw new Error(text(r));
+    const tabs = parseTabs(text(r));
+    const app = url => !url.startsWith('chrome-extension://') && !url.startsWith('chrome://');
+    if (tabs.find(t => t.current && app(t.url))) return;
+    const target = tabs.find(t => app(t.url));
+    if (target) await c.callTool({ name: 'browser_tabs', arguments: { action: 'select', index: target.index } });
+  }
+
+  async function attempt(name, args) {
+    const c = await connect();
+    if (name !== 'browser_tabs') await selectAppTab(c);
+    return c.callTool({ name, arguments: args });
+  }
+
+  async function call(name, args = {}) {
+    if (HIDDEN.has(name)) return { isError: true, content: [{ type: 'text', text: `${name} is not available on the shared browser` }] };
+    await before();
+    let r;
+    try { r = await attempt(name, args); }
+    catch (e) { if (!STALE.test(String(e.message || e)) && client) throw e; r = { isError: true, content: [{ type: 'text', text: String(e.message || e) }] }; }
+    if (r.isError && STALE.test(text(r))) {
+      await reset();
+      r = await attempt(name, args);
+    }
+    return r;
+  }
+
+  return { list, call, reset };
+}

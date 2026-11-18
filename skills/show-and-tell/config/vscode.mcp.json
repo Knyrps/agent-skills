@@ -4,11 +4,6 @@
       "type": "stdio",
       "command": "node",
       "args": ["<skill>/bridge/index.js"]
-    },
-    "playwright-demo": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest", "--cdp-endpoint", "http://127.0.0.1:9334", "--ignore-https-errors"]
     }
   }
 }

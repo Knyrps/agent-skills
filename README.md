@@ -22,7 +22,8 @@ you are running in.
      Chromium is not installed yet;
    - link <skill> into this host's personal skills folder as "show-and-tell" (symlink, or a junction
      on Windows), using the host's documented location;
-   - register the two MCP servers "show-and-tell" and "playwright-demo" in this host's MCP config, using
+   - register the MCP server "show-and-tell" in this host's MCP config (an old "playwright-demo" entry
+     on port 9334 can be removed: show-and-tell now includes those tools), using
      the matching snippet in <skill>/config/ with <skill> replaced by the absolute path. Merge into
      the existing config; do not change or remove other servers, including an existing "playwright".
 3. Ask me which dev hosts the tours should run on and add them to the allowlist in

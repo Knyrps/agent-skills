@@ -8,7 +8,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { call, ensureOwnerLoop, startOwner, log, PORT } from './core.js';
+import { call, ensureOwnerLoop, startOwner, log, PORT, CDP_PORT, DATA } from './core.js';
+import { createDriver } from './driver.js';
 import { start as startBrowser, browserVersion } from '../scripts/browser.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -107,6 +108,13 @@ async function runMcp() {
       todo: 'Start this command now as a background shell job (no waiting on it); it wakes you when the user sends something from the browser.' };
   };
   const done = async body => reply({ ...body, watcher: await watcher() });
+  // browser_* tools: Playwright MCP on the shared browser. Using them starts the browser and claims the
+  // panel for this session, like the tools above.
+  const driver = createDriver({ cdp: `http://127.0.0.1:${CDP_PORT}`, outputDir: path.join(DATA, 'playwright'),
+    before: async () => {
+      if (!(await browserVersion())) await ensureBrowser();
+      await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
+    } });
 
   const STEPS = { type: 'array', items: { type: 'object', required: ['title'], properties: {
     title: { type: 'string' },
@@ -123,9 +131,9 @@ async function runMcp() {
     video: { type: 'boolean', description: 'Video only: false runs the step off camera, e.g. a login' },
   } } };
   const TOOLS = [
-    { name: 'start_browser', description: 'Start the demo browser (Chrome for Testing with the show-and-tell extension, CDP 127.0.0.1:9334) '
-      + 'if it is not running, open the side panel, and wait until the extension is connected. Idempotent. Call it first in every tour, '
-      + 'before any playwright-demo tool.',
+    { name: 'start_browser', description: 'Start the shared browser (Chrome for Testing with the show-and-tell extension, CDP 127.0.0.1:9334) '
+      + 'if it is not running, open the side panel, and wait until the extension is connected. Idempotent. Call it first in every tour; '
+      + 'the browser_* tools also start it on their own.',
     inputSchema: { type: 'object', properties: {} } },
     { name: 'load_tour', description: 'Hand the whole tour to the browser. Next/Back then run there without the agent '
       + '(navigation, actions, highlights, explanation in the side panel). Only questions, picks, agent steps, step errors '
@@ -200,14 +208,20 @@ async function runMcp() {
 
   const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'load_tour', 'request_demo', 'record_tour']);
   const server = new Server({ name: 'show-and-tell', version: '1.3.0' }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...TOOLS, ...(await driver.list(log)).map(t =>
+    ({ ...t, description: 'Shared show-and-tell browser (the one the user sees): ' + (t.description || '') }))] }));
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const a = req.params.arguments || {};
+    if (req.params.name.startsWith('browser_')) {
+      try { return await driver.call(req.params.name, a); }
+      catch (e) { return reply({ ok: false, error: String(e.message || e) }); }
+    }
     try {
       if (AUTOSTART.has(req.params.name) && !(await browserVersion())) await ensureBrowser();
       switch (req.params.name) {
         case 'start_browser': {
           const r = await ensureBrowser({ force: true });
+          if (r.browser) await driver.reset(); // a new browser process: Playwright reattaches on next use
           await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
           return done(r);
         }
