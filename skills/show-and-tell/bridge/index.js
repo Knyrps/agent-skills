@@ -116,7 +116,9 @@ async function runMcp() {
       await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
     },
     // Hosts that are not allowed are put to the user in the side panel; the call waits for the answer.
-    guard: (url, why) => call('POST', '/host/check', { url, why, ask: true }).catch(e => ({ ok: false, error: e.message })) });
+    guard: (url, why) => call('POST', '/host/check', { url, why, ask: true }).catch(e => ({ ok: false, error: e.message })),
+    // The panel shows what the agent does in the browser, also when nothing visible changes.
+    onActivity: text => { call('POST', '/activity', { text, session: SESSION, label: LABEL }).catch(() => {}); } });
 
   const STEPS = { type: 'array', items: { type: 'object', required: ['title'], properties: {
     title: { type: 'string' },

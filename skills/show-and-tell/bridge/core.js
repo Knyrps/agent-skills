@@ -289,6 +289,14 @@ export function startOwner({ standalone = false } = {}) {
             : `could not ask about ${r.host}: ${decision.replace(/^offline:/, '')}`;
         return json(res, 200, { ok: false, host: r.host, decision, error });
       }
+      if (route === 'POST /activity') {
+        let body = {};
+        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
+        touch(body.session, body.label);
+        broadcast({ cmd: 'activity', text: String(body.text || '').slice(0, 200),
+          who: sessions.get(body.session)?.label || String(body.label || ''), ts: Date.now() });
+        return json(res, 200, { ok: true });
+      }
       if (route === 'POST /cmd') {
         let body;
         try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'bad json' }); }

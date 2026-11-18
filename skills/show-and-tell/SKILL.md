@@ -26,6 +26,17 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
   the panel. A separate plain `playwright` server, if the host has one, is your private browser the
   user does not see; use it only for work the user should not watch.
 
+## Working where the user watches
+
+The user follows the shared browser; the panel shows each `browser_*` call ("clicking …", "requesting
+data through the page"). Keep it followable:
+- Showing or reproducing something: use the visible UI (navigate, click, type), so the page shows it.
+- Reading a lot of data (logs, lists, JSON): calling the app's own API with `fetch` inside
+  `browser_evaluate` is fine and uses the user's session, but nothing changes on screen. Say so in chat first
+  ("I'm reading the logs through Grafana's API in your tab").
+- Keep such requests small (short time ranges, `limit`): a call that runs longer than about a minute is
+  cut off by the MCP client. Split long ranges instead of retrying the same query.
+
 ## Guardrail: allowed hosts
 
 The shared browser holds the user's sign-ins, so every tool here (pointing, tours, videos and `browser_*`)

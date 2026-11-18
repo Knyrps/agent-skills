@@ -27,8 +27,45 @@ export function parseTabs(listing) {
     .map(m => ({ index: +m[1], current: !!m[2], url: m[3] }));
 }
 
+const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
+const quote = s => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > 40 ? `"${s.slice(0, 39)}…"` : s ? `"${s}"` : ''; };
+
+// What the user sees in the panel while a browser_* call runs, e.g. "clicking "Run query" on munin…".
+export function describe(name, args = {}, page = '') {
+  const el = quote(args.element) || 'an element';
+  const what = {
+    browser_navigate: () => `opening ${args.url}`,
+    browser_navigate_back: () => 'going back',
+    browser_snapshot: () => 'reading the page',
+    browser_take_screenshot: () => 'taking a screenshot',
+    browser_click: () => `${args.doubleClick ? 'double-clicking' : 'clicking'} ${el}`,
+    browser_hover: () => `pointing at ${el}`,
+    browser_type: () => `typing into ${el}`,
+    browser_fill_form: () => 'filling in a form',
+    browser_select_option: () => `choosing in ${el}`,
+    browser_press_key: () => `pressing ${args.key}`,
+    browser_drag: () => `dragging ${quote(args.startElement) || 'an element'}`,
+    browser_drop: () => `dropping onto ${el}`,
+    browser_file_upload: () => 'uploading a file',
+    browser_handle_dialog: () => 'answering a dialog',
+    browser_wait_for: () => 'waiting for the page',
+    browser_find: () => 'searching the page',
+    browser_console_messages: () => 'reading console messages',
+    browser_network_requests: () => 'reading network requests',
+    browser_network_request: () => 'reading a network request',
+    browser_emulate_media: () => 'changing display settings',
+    browser_tabs: () => (args.action === 'list' ? 'listing tabs' : `${args.action === 'new' ? 'opening' : args.action === 'close' ? 'closing' : 'switching'} a tab`),
+    // Page code that calls fetch reads data with the user's session without anything visible changing.
+    browser_evaluate: () => (/\bfetch\s*\(|XMLHttpRequest/.test(String(args.function || '')) ? 'requesting data through the page (fetch)' : 'running code in the page'),
+  }[name]?.() || name.replace(/^browser_/, '').replace(/_/g, ' ');
+  const host = name === 'browser_navigate' ? '' : hostOf(page);
+  return host ? `${what} on ${host}` : what;
+}
+
 // guard(url, why) -> { ok, error }: whether the tools may work on that page (it may ask the user).
-export function createDriver({ cdp, outputDir, before = async () => {}, guard = async () => ({ ok: true }), command } = {}) {
+// onActivity(text): told before each call that goes ahead, for the panel's activity line.
+export function createDriver({ cdp, outputDir, before = async () => {}, guard = async () => ({ ok: true }),
+  onActivity = () => {}, command } = {}) {
   let client = null, connecting = null, tools = null;
 
   async function connect() {
@@ -94,6 +131,7 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
     const page = name === 'browser_tabs' ? '' : await selectAppTab(c);
     const denied = await check(name, args, page);
     if (denied) return denied;
+    try { onActivity(describe(name, args, page)); } catch {}
     return c.callTool({ name, arguments: args });
   }
 

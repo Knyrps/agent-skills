@@ -60,6 +60,18 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
   --md-text-button-pressed-label-text-color: var(--md-sys-color-on-error-container);
 }
 
+/* What the agent is doing in the browser right now (browser_* calls), also when nothing visible changes. */
+.activity {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 12px; border-radius: 12px;
+  background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container);
+  transition: opacity .3s;
+}
+.activity svg { flex: none; margin-top: 1px; }
+.activity-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.activity .muted { color: inherit; opacity: .75; white-space: nowrap; margin-top: 2px; }
+.activity.old { opacity: .6; }
+
 /* The agent asks to work on a host that is not allowed (M3 dialog look, inline). */
 .host-ask {
   display: flex; flex-direction: column; gap: 8px;

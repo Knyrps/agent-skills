@@ -165,6 +165,7 @@ async function onBridge(m) {
   }
   if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting, listener: String(m.listener || '') });
   if (m.cmd === 'hosts') return setHostState(m);
+  if (m.cmd === 'activity') return S.set({ activity: { text: String(m.text || ''), who: String(m.who || ''), ts: Date.now() } });
   if (!m.rid) return;
   let result;
   try { result = await command(m); } catch (e) { result = { ok: false, error: String(e?.message || e) }; }

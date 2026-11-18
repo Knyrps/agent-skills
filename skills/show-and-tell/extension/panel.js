@@ -71,6 +71,21 @@ async function refreshTab() {
   renderRecording();
 }
 
+// The agent's latest browser action; it fades after 5 s and goes after 30 s without another one.
+let activityTimer = 0;
+async function renderActivity() {
+  clearTimeout(activityTimer);
+  const { activity: a } = await S.get('activity');
+  const age = a ? Date.now() - a.ts : Infinity;
+  $('activity').hidden = age > 30000;
+  if (age > 30000) return;
+  $('activity-who').textContent = a.who ? a.who + ' is' : 'The agent is';
+  $('activity-text').textContent = a.text;
+  $('activity-age').textContent = age < 2000 ? 'now' : `${Math.round(age / 1000)} s ago`;
+  $('activity').classList.toggle('old', age > 5000);
+  activityTimer = setTimeout(renderActivity, 1000);
+}
+
 // The agent wants to work on a host that is not allowed; the user decides here.
 async function renderHostAsk() {
   const { hostQuestions: qs = [] } = await S.get('hostQuestions');
@@ -210,8 +225,10 @@ chrome.storage.onChanged.addListener((c, area) => {
   if (c.recording || c.recordingDraft || c.annotationDraft || c.demoRequest) renderRecording();
   if (c.hostState || c.connected) refreshTab();
   if (c.hostQuestions) renderHostAsk();
+  if (c.activity) renderActivity();
 });
 renderHostAsk();
+renderActivity();
 renderRecording();
 chrome.tabs.onActivated.addListener(refreshTab);
 chrome.tabs.onUpdated.addListener((_id, info) => { if (info.url || info.status === 'complete') refreshTab(); });

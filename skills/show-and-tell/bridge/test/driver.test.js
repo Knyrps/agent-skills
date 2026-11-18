@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createDriver, parseTabs } from '../driver.js';
+import { createDriver, parseTabs, describe } from '../driver.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sat-driver-'));
 const flag = path.join(dir, 'crash');
@@ -52,6 +52,15 @@ test('a closed browser connection is replaced and the call retried once', async 
   assert.equal(r.isError, undefined);
   assert.match(out(r), /^clicked on http:\/\/localhost\/app pid \d+$/);
   assert.notEqual(out(r).split('pid ')[1], firstPid, 'a new Playwright MCP process');
+});
+
+test('each call that goes ahead is described for the panel', () => {
+  assert.equal(describe('browser_click', { element: 'Run query button' }, 'https://munin.zz:3000/explore'), 'clicking "Run query button" on munin.zz');
+  assert.equal(describe('browser_evaluate', { function: 'async () => (await fetch("/api/x")).json()' }, 'https://munin.zz/'),
+    'requesting data through the page (fetch) on munin.zz');
+  assert.equal(describe('browser_evaluate', { function: '() => document.title' }, 'http://localhost/'), 'running code in the page on localhost');
+  assert.equal(describe('browser_navigate', { url: 'https://munin.zz/' }, 'http://localhost/'), 'opening https://munin.zz/');
+  assert.equal(describe('browser_something_new', {}, ''), 'something new');
 });
 
 test('tab listing is parsed', () => {
