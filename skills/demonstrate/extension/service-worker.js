@@ -679,9 +679,11 @@ async function runVideo(v) {
         await S.set({ highlights: [] });
         await stage(v, { caption: null, lower: null,
           card: { kind: 'section', title: s.section, kicker: `Section ${sections.indexOf(s.section) + 1} of ${sections.length}` } });
-      } else await stage(v, { card: v.onCamera && v.stage.card?.kind === 'intro' ? v.stage.card : null, caption: null, lower: null });
+      } else await stage(v, { card: !v.onCamera || v.stage.card?.kind === 'intro' ? v.stage.card : null, caption: null, lower: null });
       if (s.url && i > 0) await navigate(v.tabId, s.url);
       await settle(v);
+      // After off-camera steps the recording resumes only now, with this step's card already in place.
+      if (v.onCamera && v.held) { v.held = false; await videoCmd({ cmd: 'resume' }); }
       if (newSection) await dwell(v, 1600 * pace);
       const t = v.onCamera ? await now() : 0;
       if (v.onCamera) {
@@ -701,7 +703,14 @@ async function runVideo(v) {
         if (!r.ok) throw new Error(`step ${i + 1} highlight: ${r.error}`);
         if (r.found === false) throw new Error(`step ${i + 1} highlight not found: ${h.selector}`);
       }
-      if (!v.onCamera) { await videoCmd({ cmd: 'resume' }); continue; }
+      if (!v.onCamera) {
+        // Stay paused until the next on-camera step has set its card or captions; resuming here would
+        // record the bare page for a moment. The pointer used off camera goes away too.
+        await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
+        await S.set({ highlights: [] });
+        v.held = true;
+        continue;
+      }
       // Captions: the first page has been up since the step began; the rest follow at reading pace.
       const { pages, times, total } = v.timing;
       const spent = (await now()) - t;
@@ -718,6 +727,7 @@ async function runVideo(v) {
       await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
       await S.set({ highlights: [] });
       await stage(v, { caption: null, lower: null, card: { kind: 'outro', title, chapters: chapters.map(c => ({ time: fmt(c.t), title: c.title })) } });
+      if (v.held) { v.held = false; await videoCmd({ cmd: 'resume' }); }
       await dwell(v, Math.max(3000, 500 * chapters.length) * pace);
     }
   } catch (e) {
