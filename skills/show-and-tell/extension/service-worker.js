@@ -15,7 +15,79 @@ chrome.runtime.onInstalled.addListener(() => connect());
 
 let lock = Promise.resolve();
 const serial = fn => { const p = lock.then(fn); lock = p.catch(() => {}); return p; };
-const allowed = async url => hostAllowed(url, (await loadConfig()).allowlist);
+// ------------------------------------------------------------------ allowed hosts
+// Config patterns, plus what the bridge pushes: the hosts file's loopback names, current config files and
+// this session's grants. Other hosts need the user's answer in the panel; the agent can only ask.
+// "This session" grants also live here (until the browser restarts) and go back to a restarted bridge.
+let hostState = { allow: [], loopback: [], granted: [] }, localGrants = [];
+const hostsReady = S.get(['hostState', 'localGrants']).then(r => {
+  if (r.hostState) hostState = r.hostState;
+  localGrants = r.localGrants || [];
+});
+const allowed = async url => {
+  await hostsReady;
+  const { allow, loopback, granted } = hostState;
+  return hostAllowed(url, [...(await loadConfig()).allowlist, ...allow, ...loopback, ...granted, ...localGrants]);
+};
+const resendGrants = async () => { await hostsReady; for (const host of localGrants) send({ type: 'hostGrant', host, mode: 'session' }); };
+const hostOf = url => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } };
+
+async function setHostState(next) {
+  hostState = { allow: next.allow || [], loopback: next.loopback || [], granted: next.granted || [] };
+  await S.set({ hostState: { ...hostState, granted: [...new Set([...hostState.granted, ...localGrants])] } });
+}
+
+// Records a grant here at once (the bridge confirms with its next push) and wakes pages on that host,
+// whose content script stayed idle.
+async function grantHost(host, mode, { tell = true } = {}) {
+  await hostsReady;
+  if (!localGrants.includes(host)) {
+    localGrants = [...localGrants, host];
+    await S.set({ localGrants });
+    await setHostState(hostState);
+  }
+  if (tell) send({ type: 'hostGrant', host, mode });
+  for (const t of await chrome.tabs.query({})) {
+    if (hostOf(t.url || '') === host) chrome.tabs.sendMessage(t.id, { cmd: 'recheck' }).catch(() => {});
+  }
+}
+
+// One question per host at a time, shown in the panel; resolves "session", "always", "no" or "timeout".
+const hostAsks = new Map(); // host -> { promise, resolve }
+async function askUser(host, why = '', who = '') {
+  if (hostAsks.has(host)) return hostAsks.get(host).promise;
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  const id = 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  hostAsks.set(host, { promise, resolve, id });
+  const list = async fn => serial(async () => { const { hostQuestions = [] } = await S.get('hostQuestions'); await S.set({ hostQuestions: fn(hostQuestions) }); });
+  who ||= (await S.get('listener')).listener || '';
+  await list(q => [...q, { id, host, why, who }]);
+  const timer = setTimeout(() => resolve('timeout'), 120000);
+  const decision = await promise;
+  clearTimeout(timer);
+  hostAsks.delete(host);
+  await list(q => q.filter(x => x.id !== id));
+  return decision;
+}
+
+// Allowed, or allowed after asking the user. Returns an error text when not.
+async function permit(url, why) {
+  if (await allowed(url)) return '';
+  const host = hostOf(url);
+  if (!host) return `not an http(s) page: ${url}`;
+  const decision = await askUser(host, why);
+  if (decision === 'session' || decision === 'always') { await grantHost(host, decision); return ''; }
+  return decision === 'no' ? `the user did not allow ${host}` : `the user did not answer the question about ${host} in the side panel`;
+}
+
+// All hosts a tour visits, asked up front so a tour or video does not stop halfway.
+async function permitTour(tour, why) {
+  const tab = await activeTab();
+  const urls = [...new Set([...(tour?.steps || []).map(s => s.url).filter(Boolean), ...(tour?.steps?.[0]?.url ? [] : [tab?.url].filter(Boolean))])];
+  for (const u of urls) { const e = await permit(u, why); if (e) return e; }
+  return '';
+}
 
 // ------------------------------------------------------------------ bridge connection
 
@@ -36,6 +108,7 @@ async function connect() {
     clearInterval(ping);
     ping = setInterval(() => send({ type: 'ping' }), 20000); // traffic keeps the worker alive
     send({ type: 'panel', open: panels.size > 0 });
+    resendGrants();
     flushOutbox();
   };
   sock.onmessage = e => {
@@ -91,6 +164,7 @@ async function onBridge(m) {
     return S.set({ step: String(m.label || '') });
   }
   if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting, listener: String(m.listener || '') });
+  if (m.cmd === 'hosts') return setHostState(m);
   if (!m.rid) return;
   let result;
   try { result = await command(m); } catch (e) { result = { ok: false, error: String(e?.message || e) }; }
@@ -98,9 +172,18 @@ async function onBridge(m) {
 }
 
 async function command(m) {
-  if (video && !['state', 'recordStop', 'setStep'].includes(m.cmd)) return { ok: false, error: 'a video is being recorded; wait for videoReady or call recordStop' };
+  if (video && !['state', 'recordStop', 'setStep', 'askHost'].includes(m.cmd)) return { ok: false, error: 'a video is being recorded; wait for videoReady or call recordStop' };
   switch (m.cmd) {
-    case 'recordTour': return recordTour(m);
+    // The bridge asks on behalf of the browser_* tools; it records the grant itself.
+    case 'askHost': {
+      const decision = await askUser(String(m.host), m.why, m.who);
+      if (decision === 'session' || decision === 'always') await grantHost(String(m.host), decision, { tell: false });
+      return { ok: true, decision };
+    }
+    case 'recordTour': {
+      const e = await permitTour(m.tour, 'record a video there');
+      return e ? { ok: false, error: e } : recordTour(m);
+    }
     case 'recordStop': return recordStop(m);
     case 'highlight': return highlight(m);
     case 'clearHighlights':
@@ -113,10 +196,13 @@ async function command(m) {
       await S.set({ overlaysHidden: !!m.hidden });
       return { ok: true, hidden: !!m.hidden };
     // Steps can take longer than the bridge waits for a reply: start them and report failures as stepError.
-    case 'loadTour':
+    case 'loadTour': {
+      const e = await permitTour(m.tour, 'run a tour there');
+      if (e) return { ok: false, error: e };
       await S.set({ tour: validTour(m.tour), tourIndex: -1, tourRunning: false });
       gotoStep(m.start ?? 0, { replay: true });
       return { ok: true, steps: m.tour.steps.length };
+    }
     case 'gotoStep':
       gotoStep(+m.index, { replay: true });
       return { ok: true };
@@ -126,6 +212,9 @@ async function command(m) {
     // The agent asks the user to show something: the panel shows the prompt and recording starts.
     case 'requestDemo': {
       const id = 'r' + Date.now().toString(36);
+      const tab = await activeTab();
+      const denied = tab ? await permit(tab.url, 'see what you do there') : '';
+      if (denied) return { ok: false, error: denied };
       const r = await startRecording();
       if (r.error) return { ok: false, error: r.error };
       await S.set({ demoRequest: { id, prompt: String(m.prompt || '') }, recordingDraft: null });
@@ -148,11 +237,13 @@ async function highlight({ item = {}, keep, tab }) {
   if (!tab) return { ok: false, error: 'no active tab' };
   // `url` opens the page first, so showing one thing needs no browser driving by the agent.
   if (item.url && tab.url !== item.url) {
-    if (!(await allowed(item.url))) return { ok: false, error: `not on an allowlisted host: ${item.url}` };
+    const denied = await permit(String(item.url), 'show you something there');
+    if (denied) return { ok: false, error: denied };
     await navigate(tab.id, String(item.url));
     tab = await chrome.tabs.get(tab.id);
   }
-  if (!(await allowed(tab.url))) return { ok: false, error: `active tab is not on an allowlisted host: ${tab.url}` };
+  const denied = await permit(tab.url, 'show you something there');
+  if (denied) return { ok: false, error: denied };
   const h = {
     id: String(item.id || 'h' + Date.now().toString(36)),
     selector: String(item.selector),
@@ -779,6 +870,20 @@ async function handle(m, sender) {
   switch (m.type) {
     case 'hello': return { allowed: await allowed(sender.tab?.url || m.url) };
     case 'videoStop': return video ? recordStop(m) : { ok: false };
+    // Only the panel answers: the user's click, never a bridge command.
+    case 'hostDecision': {
+      const q = hostAsks.get(String(m.host));
+      if (!q || !['session', 'always', 'no'].includes(m.decision)) return { ok: false };
+      q.resolve(m.decision);
+      return { ok: true };
+    }
+    case 'hostAllow': {
+      const host = hostOf(m.url || '');
+      if (!host || !['session', 'always'].includes(m.mode)) return { ok: false };
+      if (m.mode === 'always' && ws?.readyState !== WebSocket.OPEN) return { error: 'The bridge is offline, so "Always" cannot be saved now.' };
+      await grantHost(host, m.mode);
+      return { ok: true, host };
+    }
     case 'annotate': case 'recStart':
       if (video) return { error: 'A video is being recorded.' };
       return m.type === 'recStart' ? startRecording() : handleAnnotate();

@@ -46,11 +46,32 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 .notice {
-  display: flex; gap: 8px; align-items: flex-start;
-  padding: 12px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 12px 4px; border-radius: 12px;
   background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container);
 }
+.notice-row { display: flex; gap: 8px; align-items: flex-start; }
 .notice svg { flex: none; margin-top: 1px; }
+.notice-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; }
+.notice md-text-button {
+  --md-text-button-label-text-color: var(--md-sys-color-on-error-container);
+  --md-text-button-hover-label-text-color: var(--md-sys-color-on-error-container);
+  --md-text-button-focus-label-text-color: var(--md-sys-color-on-error-container);
+  --md-text-button-pressed-label-text-color: var(--md-sys-color-on-error-container);
+}
+
+/* The agent asks to work on a host that is not allowed (M3 dialog look, inline). */
+.host-ask {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 20px 20px 12px; border-radius: 28px;
+  background: var(--md-sys-color-surface-container-high); color: var(--md-sys-color-on-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .3), 0 2px 6px 2px rgb(0 0 0 / .15);
+}
+.host-ask-head { display: flex; align-items: center; gap: 8px; color: var(--md-sys-color-secondary); }
+.host-ask-head svg { width: 20px; height: 20px; }
+.host-name { overflow-wrap: anywhere; }
+#host-ask-text { color: var(--md-sys-color-on-surface-variant); }
+.host-ask-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 .ask { display: flex; flex-direction: column; gap: 10px; }
 .ask md-filled-tonal-button, .ask #send { align-self: flex-start; }

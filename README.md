@@ -26,8 +26,8 @@ you are running in.
      on port 9334 can be removed: show-and-tell now includes those tools), using
      the matching snippet in <skill>/config/ with <skill> replaced by the absolute path. Merge into
      the existing config; do not change or remove other servers, including an existing "playwright".
-3. Ask me which dev hosts the tours should run on and add them to the allowlist in
-   <skill>/extension/config.json (keep "localhost").
+3. Don't touch the host allowlist: sites on this machine (localhost, hosts-file entries pointing to
+   127.0.0.1) work right away, and I allow any other host myself when the side panel asks.
 4. Verify with `node <skill>/bridge start`: the output must show extensionConnected: true and
    panelOpen: true, and a browser window with the show-and-tell side panel opens.
 5. Tell me what you changed and whether I need to restart or reload the agent so it picks up the new

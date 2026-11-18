@@ -7,8 +7,11 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-// Closing or resizing would act on the user's window and the side panel; the user owns those.
-export const HIDDEN = new Set(['browser_close', 'browser_resize']);
+// Closing or resizing would act on the user's window and the side panel; the user owns those. Raw
+// Playwright code could open any site and slip past the host check.
+export const HIDDEN = new Set(['browser_close', 'browser_resize', 'browser_run_code_unsafe']);
+// Pages the tools may act on without a host check.
+const BLANK = /^(about:blank|chrome:\/\/newtab\/?)$/;
 const STALE = /has been closed|Target closed|not connected|ECONNREFUSED|Browser closed|disconnected/i;
 
 function playwrightCli() {
@@ -24,7 +27,8 @@ export function parseTabs(listing) {
     .map(m => ({ index: +m[1], current: !!m[2], url: m[3] }));
 }
 
-export function createDriver({ cdp, outputDir, before = async () => {}, command } = {}) {
+// guard(url, why) -> { ok, error }: whether the tools may work on that page (it may ask the user).
+export function createDriver({ cdp, outputDir, before = async () => {}, guard = async () => ({ ok: true }), command } = {}) {
   let client = null, connecting = null, tools = null;
 
   async function connect() {
@@ -64,15 +68,32 @@ export function createDriver({ cdp, outputDir, before = async () => {}, command 
     const r = await c.callTool({ name: 'browser_tabs', arguments: { action: 'list' } });
     if (r.isError && STALE.test(text(r))) throw new Error(text(r));
     const tabs = parseTabs(text(r));
-    const app = url => !url.startsWith('chrome-extension://') && !url.startsWith('chrome://');
-    if (tabs.find(t => t.current && app(t.url))) return;
+    const app = url => !url.startsWith('chrome-extension://') && !(url.startsWith('chrome://') && !BLANK.test(url));
+    const current = tabs.find(t => t.current && app(t.url));
+    if (current) return current.url;
     const target = tabs.find(t => app(t.url));
     if (target) await c.callTool({ name: 'browser_tabs', arguments: { action: 'select', index: target.index } });
+    return target?.url || 'about:blank';
+  }
+
+  // The page a call acts on must be allowed; a navigation needs its target allowed instead (so the agent
+  // can always leave a page), and going back or managing tabs is not checked.
+  async function check(name, args, page) {
+    let url = page, why = 'work on this page';
+    if (name === 'browser_navigate') { url = String(args.url || ''); why = 'open this page'; }
+    else if (name === 'browser_tabs') { if (args.action !== 'new' || !args.url) return null; url = String(args.url); why = 'open this page'; }
+    else if (name === 'browser_navigate_back') return null;
+    if (BLANK.test(url)) return null;
+    const r = await guard(url, why);
+    return r?.ok ? null : { isError: true, content: [{ type: 'text', text: `Not allowed: ${r?.error || url}. `
+      + 'Ask the user to allow the host in the side panel; never edit the allowlist yourself.' }] };
   }
 
   async function attempt(name, args) {
     const c = await connect();
-    if (name !== 'browser_tabs') await selectAppTab(c);
+    const page = name === 'browser_tabs' ? '' : await selectAppTab(c);
+    const denied = await check(name, args, page);
+    if (denied) return denied;
     return c.callTool({ name, arguments: args });
   }
 

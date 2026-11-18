@@ -28,7 +28,8 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
 | `SKILL.md` | Instructions for the agent |
 | `scripts/browser.mjs` | `start` / `stop` / `status` / `panel` for the demo browser |
 | `extension/` | MV3 extension: side panel (Material Web), service worker (bridge socket, outbox, capture), content script (highlights, annotation, recorder) |
-| `extension/config.json` | Host allowlist and bridge URL; `config.local.json` (git-ignored) adds hosts and video branding |
+| `extension/config.json` | Bridge URL and shared host patterns; `config.local.json` (git-ignored) holds hosts you allowed and video branding |
+| `bridge/hosts.js` | Which hosts are allowed: loopback and the hosts file's loopback names, config patterns, your grants |
 | `extension/gestures.js`, `stage.js` | Gesture glyphs and the drawn pointer; the video stage (captions, cards, input shield) |
 | `references/video.md` | How the agent writes review videos |
 | `bridge/` | MCP server, bridge server and CLI (`index.js`); `driver.js` runs Playwright MCP on the shared browser. Dependencies: `@modelcontextprotocol/sdk`, `@playwright/mcp` |
@@ -75,10 +76,12 @@ whatever Chromium is listening on that port.
    `playwright` server as it is: that is the agent's private browser. An older `playwright-demo` entry
    (attached to port 9334) is no longer needed; remove it.
 
-4. **Allowlist.** The panel, highlights, annotation and recording only work on hosts listed in
-   `extension/config.json` (default `localhost` and `*.dev.local`; `*.example.com` = that host and all
-   subdomains). Add your dev hosts, then restart the browser (`node <skill>/scripts/browser.mjs stop`,
-   then `start`).
+4. **Allowed hosts.** Nothing to do for sites on this machine: `localhost`, loopback addresses and every
+   name your hosts file maps to `127.x` or `::1` (read live) are always allowed. For any other host the
+   side panel asks you when the agent first wants it, or when you open it yourself: **This session** or
+   **Always** (saved to the git-ignored `extension/config.local.json`). Patterns can also go there by hand,
+   e.g. `{ "allowlist": ["grafana.example.zz", "*.staging.example"] }` (`*.x` = x and all subdomains).
+   The rule covers the `browser_*` tools too; the agent can ask but never grant.
 
 Environment overrides: `DEMO_BROWSER_PATH` (any Chromium that honours `--load-extension`, for
 example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_DATA`
@@ -117,7 +120,8 @@ Open any page on `http://localhost:<port>/` in the demo browser, then:
 | Hide/show | `node <skill>/bridge hide`, then `show` | Highlights disappear and come back |
 | Clear | `node <skill>/bridge clear` | Highlights removed |
 | Buffering | Stop the bridge, click **Next**, start the bridge, run `wait` | The buffered `next` is delivered |
-| Allowlist | Open `http://127.0.0.1:<port>/` | Panel shows the "not on the allowlist" notice. `highlight` returns an error |
+| Allowed hosts | Open `https://example.com/` yourself | The panel says it is not allowed and offers "Allow this session" / "Always allow"; after a click, Annotate works without a reload |
+| Host question | `node <skill>/bridge highlight h1 --url https://example.com/` (not allowed yet) | The panel asks "Allow the agent here?"; **No** returns `the user did not allow example.com`, **This session** opens the page. `localhost` pages never ask |
 | Cancel | `wait` in one terminal, `node <skill>/bridge cancel` in another | The wait prints `{"actions":[],"cancelled":true}` |
 | Gestures | `node <skill>/bridge highlight button --gesture double-tap --label Here --url http://localhost:<port>/`, then with `--gesture swipe --direction left --keep` on another element | The page opens; a finger dot taps twice with a ripple; the swipe shows a dotted path and a trail. An unknown gesture name returns the list of valid ones |
 | Video | `node <skill>/bridge record tour.json --name test`, then `wait --timeout 300` | 3-2-1 countdown in the panel, the window shrinks to a 1:1 size, intro card, chapter labels, captions, a gliding cursor; Esc in the page or **Stop and save** keeps a partial video. `videoReady` has `path`, `vtt`, `chapters` and the window is restored |

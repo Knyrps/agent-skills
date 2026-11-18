@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { acceptUpgrade, rejectUpgrade } from './ws.js';
 import { defragment } from './mp4.js';
+import { createHosts } from './hosts.js';
 
 export const PORT = +(process.env.DEMO_BRIDGE_PORT || 47613);
 export const CDP_PORT = +(process.env.DEMO_CDP_PORT || 9334);
@@ -29,7 +30,7 @@ const QUEUE_FILE = path.join(DATA, 'queue.json');
 // owner hands the port over when a newer bridge asks (POST /yield), so an edit takes effect without
 // hunting down stale processes.
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
-export const VERSION = Math.max(...['core.js', 'index.js', 'ws.js', '../scripts/browser.mjs']
+export const VERSION = Math.max(...['core.js', 'index.js', 'ws.js', 'hosts.js', 'driver.js', '../scripts/browser.mjs']
   .map(f => { try { return fs.statSync(path.join(HERE, f)).mtimeMs; } catch { return 0; } }));
 const SHOTS = path.join(DATA, 'shots');
 export const VIDEOS = path.join(DATA, 'videos');
@@ -91,9 +92,22 @@ export function startOwner({ standalone = false } = {}) {
       flush();
     };
     setInterval(announce, 15000).unref();
+    // Allowed hosts: the extension gets the full picture on connect and whenever it changes (a config
+    // edit, a hosts-file edit, a grant), so it decides on its own even while the bridge is away.
+    const hosts = createHosts({ extDir: path.join(HERE, '..', 'extension') });
+    let hostsSent = '';
+    const pushHosts = (force = false) => {
+      const s = JSON.stringify({ cmd: 'hosts', ...hosts.state() });
+      if (!force && s === hostsSent) return;
+      hostsSent = s;
+      for (const c of exts) c.send(s);
+    };
+    setInterval(pushHosts, 5000).unref();
+    const asking = new Map(); // host -> pending question, so parallel calls ask once
     const pushState = c => {
       c.send(JSON.stringify({ cmd: 'setStep', label: state.step }));
       c.send(JSON.stringify({ cmd: 'setWaiting', ...listener() }));
+      c.send(JSON.stringify({ cmd: 'hosts', ...hosts.state() }));
     };
     // Commands that need an answer (highlight etc.) go to the most recently connected extension.
     const requestExt = (msg, ms = 8000) => new Promise((resolve, reject) => {
@@ -250,6 +264,31 @@ export function startOwner({ standalone = false } = {}) {
         if (route === 'POST /claim') claim(body.session, body.label); else { touch(body.session, body.label); announce(); }
         return json(res, 200, { ok: true, owner, listening: listener().waiting });
       }
+      // Is this URL allowed? With ask, the side panel asks the user (up to 2 min); only the user's answer,
+      // which arrives over the extension's socket, can grant a host. Callers cannot grant one here.
+      if (route === 'POST /host/check') {
+        let body = {};
+        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
+        const r = hosts.check(String(body.url || ''));
+        if (r.ok || !r.host || !body.ask) return json(res, 200, r);
+        let q = asking.get(r.host);
+        if (!q) {
+          q = requestExt({ cmd: 'askHost', host: r.host, why: String(body.why || ''), who: sessions.get(owner)?.label || '' }, 130000)
+            .then(a => a.decision || 'no', e => (exts.size ? 'timeout' : 'offline:' + e.message))
+            .finally(() => asking.delete(r.host));
+          asking.set(r.host, q);
+        }
+        const decision = await q;
+        if (decision === 'session' || decision === 'always') {
+          try { hosts.grant(r.host, decision); } catch {}
+          pushHosts();
+          return json(res, 200, { ok: true, host: r.host, granted: decision });
+        }
+        const error = decision === 'no' ? `the user did not allow ${r.host}`
+          : decision === 'timeout' ? `the user did not answer the question about ${r.host} in the side panel (is it open?)`
+            : `could not ask about ${r.host}: ${decision.replace(/^offline:/, '')}`;
+        return json(res, 200, { ok: false, host: r.host, decision, error });
+      }
       if (route === 'POST /cmd') {
         let body;
         try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'bad json' }); }
@@ -262,7 +301,7 @@ export function startOwner({ standalone = false } = {}) {
           return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
         }
         if (!['highlight', 'clearHighlights', 'hideOverlays', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
-        try { return json(res, 200, await requestExt(body, body.cmd === 'recordTour' || body.item?.url ? 150000 : 8000)); }
+        try { return json(res, 200, await requestExt(body, ['recordTour', 'highlight', 'loadTour', 'requestDemo'].includes(body.cmd) ? 150000 : 8000)); }
         catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       }
       if (route === 'POST /shutdown' && standalone) { json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 50); return; }
@@ -286,6 +325,8 @@ export function startOwner({ standalone = false } = {}) {
         if (msg.type === 'action' && msg.id && msg.action) onAction(conn, msg).catch(e => log('action failed', e));
         else if (msg.type === 'result' && msg.rid) { const { type, rid: r, ...rest } = msg; replies.get(r)?.(rest); }
         else if (msg.type === 'panel') state.panelOpen = !!msg.open;
+        // The user allowed a host from the panel (on their own, or answering the extension's question).
+        else if (msg.type === 'hostGrant') { try { hosts.grant(msg.host, msg.mode); } catch (e) { log(e.message); } pushHosts(true); }
         else if (msg.type === 'ping') conn.send('{"type":"pong"}');
       });
       conn.on('close', () => { exts.delete(conn); log('extension disconnected'); });

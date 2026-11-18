@@ -12,7 +12,7 @@ const ok = t => ({ content: [{ type: 'text', text: t }] });
 const tool = name => ({ name, description: name, inputSchema: { type: 'object', properties: {} } });
 
 const server = new Server({ name: 'fake', version: '1' }, { capabilities: { tools: {} } });
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: ['browser_click', 'browser_close', 'browser_resize', 'browser_tabs'].map(tool) }));
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: ['browser_click', 'browser_close', 'browser_navigate', 'browser_resize', 'browser_run_code_unsafe', 'browser_tabs'].map(tool) }));
 server.setRequestHandler(CallToolRequestSchema, async req => {
   const a = req.params.arguments || {};
   if (flag && fs.existsSync(flag)) { fs.rmSync(flag); return { isError: true, content: [{ type: 'text', text: 'Target page, context or browser has been closed' }] }; }

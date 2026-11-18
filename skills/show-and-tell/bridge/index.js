@@ -114,7 +114,9 @@ async function runMcp() {
     before: async () => {
       if (!(await browserVersion())) await ensureBrowser();
       await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
-    } });
+    },
+    // Hosts that are not allowed are put to the user in the side panel; the call waits for the answer.
+    guard: (url, why) => call('POST', '/host/check', { url, why, ask: true }).catch(e => ({ ok: false, error: e.message })) });
 
   const STEPS = { type: 'array', items: { type: 'object', required: ['title'], properties: {
     title: { type: 'string' },

@@ -124,8 +124,12 @@
   const G = globalThis.__showAndTellGestures; // gestures.js, loaded first
   const busy = () => G.pointer.active || !!globalThis.__showAndTellStage?.active;
 
-  chrome.runtime.sendMessage({ type: 'hello', url: location.href })
-    .then(r => { if (r?.allowed) init(); }).catch(() => {});
+  // Idle on hosts that are not allowed; the worker sends "recheck" once the user allows this host.
+  let started = false;
+  const hello = () => chrome.runtime.sendMessage({ type: 'hello', url: location.href })
+    .then(r => { if (r?.allowed && !started) { started = true; init(); } }).catch(() => {});
+  hello();
+  chrome.runtime.onMessage.addListener(m => { if (m?.cmd === 'recheck' && !started) hello(); return false; });
 
   function init() {
     load();

@@ -19,8 +19,23 @@ after(async () => { await driver.reset(); fs.rmSync(dir, { recursive: true, forc
 
 test('window-level tools are not offered', async () => {
   const names = (await driver.list()).map(t => t.name);
-  assert.deepEqual(names.sort(), ['browser_click', 'browser_tabs']);
+  assert.deepEqual(names.sort(), ['browser_click', 'browser_navigate', 'browser_tabs']);
   assert.equal((await driver.call('browser_close')).isError, true);
+  assert.equal((await driver.call('browser_run_code_unsafe')).isError, true);
+});
+
+test('the guard sees the page a call acts on, or a navigation target; a refusal stops the call', async () => {
+  const seen = [];
+  const guarded = createDriver({ outputDir: dir, command: [process.execPath, fake],
+    guard: async (url, why) => { seen.push([url, why]); return url.includes('remote') ? { ok: false, error: 'the user did not allow remote.zz' } : { ok: true }; } });
+  try {
+    assert.match(out(await guarded.call('browser_click', {})), /^clicked on http:\/\/localhost\/app/);
+    const no = await guarded.call('browser_navigate', { url: 'https://remote.zz/' });
+    assert.equal(no.isError, true);
+    assert.match(out(no), /^Not allowed: the user did not allow remote\.zz/);
+    assert.equal(out(await guarded.call('browser_navigate', { url: 'about:blank' })), 'ran browser_navigate');
+    assert.deepEqual(seen, [['http://localhost/app', 'work on this page'], ['https://remote.zz/', 'open this page']]);
+  } finally { await guarded.reset(); }
 });
 
 let firstPid;

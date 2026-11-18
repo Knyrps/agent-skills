@@ -57,13 +57,43 @@ async function render() {
 async function refreshTab() {
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   tabUrl = t?.url || '';
-  const ok = hostAllowed(tabUrl, (await loadConfig()).allowlist);
-  let host = tabUrl; try { host = new URL(tabUrl).host || tabUrl; } catch {}
+  const { hostState: hs = {}, connected } = await S.get(['hostState', 'connected']);
+  const ok = hostAllowed(tabUrl, [...(await loadConfig()).allowlist, ...(hs.allow || []), ...(hs.loopback || []), ...(hs.granted || [])]);
+  let host = '', web = false;
+  try { const u = new URL(tabUrl); host = u.hostname; web = /^https?:$/.test(u.protocol); } catch {}
   $('notice').hidden = ok;
-  $('notice-text').textContent = `This page (${host || 'empty'}) is not on the allowlist, so Annotate and Record are off here.`;
+  $('notice-text').textContent = web
+    ? `${host} is not allowed, so the agent can't point, mark or record here.`
+    : 'This page is not a website, so the agent can\'t point, mark or record here.';
+  $('notice-actions').hidden = !web;
+  $('allow-always').disabled = !connected;
   tabAllowed = ok;
   renderRecording();
 }
+
+// The agent wants to work on a host that is not allowed; the user decides here.
+async function renderHostAsk() {
+  const { hostQuestions: qs = [] } = await S.get('hostQuestions');
+  const q = qs[0];
+  $('host-ask').hidden = !q;
+  if (!q) return;
+  $('host-ask').dataset.host = q.host;
+  $('host-ask-title').textContent = q.host;
+  $('host-ask-text').textContent = `${q.who || 'The agent'} wants to ${q.why || 'work on this site'}. `
+    + 'It could then read and act on this site in the shared browser, with your sign-ins. "Always" saves it in config.local.json.';
+  $('host-ask-more').hidden = qs.length < 2;
+  $('host-ask-more').textContent = qs.length > 1 ? `${qs.length - 1} more waiting` : '';
+}
+const decide = decision => chrome.runtime.sendMessage({ type: 'hostDecision', host: $('host-ask').dataset.host, decision });
+$('host-no').addEventListener('click', () => decide('no'));
+$('host-session').addEventListener('click', () => decide('session'));
+$('host-always').addEventListener('click', () => decide('always'));
+const allowHere = async mode => {
+  const r = await chrome.runtime.sendMessage({ type: 'hostAllow', url: tabUrl, mode });
+  toast(r?.ok ? `${r.host} is allowed${mode === 'always' ? ' from now on' : ' until the browser restarts'}.` : r?.error || 'Could not allow this host.');
+};
+$('allow-session').addEventListener('click', () => allowHere('session'));
+$('allow-always').addEventListener('click', () => allowHere('always'));
 
 function toast(msg) {
   $('toast').textContent = msg;
@@ -178,7 +208,10 @@ chrome.storage.onChanged.addListener((c, area) => {
   if (area !== 'session') return;
   render();
   if (c.recording || c.recordingDraft || c.annotationDraft || c.demoRequest) renderRecording();
+  if (c.hostState || c.connected) refreshTab();
+  if (c.hostQuestions) renderHostAsk();
 });
+renderHostAsk();
 renderRecording();
 chrome.tabs.onActivated.addListener(refreshTab);
 chrome.tabs.onUpdated.addListener((_id, info) => { if (info.url || info.status === 'complete') refreshTab(); });

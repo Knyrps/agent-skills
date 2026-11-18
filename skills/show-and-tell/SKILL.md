@@ -26,11 +26,15 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
   the panel. A separate plain `playwright` server, if the host has one, is your private browser the
   user does not see; use it only for work the user should not watch.
 
-## Guardrail: allowlisted hosts
+## Guardrail: allowed hosts
 
-Everything works on allowlisted hosts only (`extension/config.json` plus the git-ignored
-`extension/config.local.json`, default `localhost`, `*.dev.local`). For another host, stop and ask the user to
-add it; never edit the allowlist yourself.
+The shared browser holds the user's sign-ins, so every tool here (pointing, tours, videos and `browser_*`)
+works only on allowed hosts. This machine is always allowed: `localhost`, loopback addresses and names the
+hosts file maps to loopback. Any other host, even a private one on another network, is asked in the side
+panel when you first use it ("No", "This session", "Always"); the call waits up to 2 minutes for the answer.
+- `Not allowed: the user did not allow …`: respect it; don't retry or look for a way around.
+- `… did not answer …`: tell the user in one line that the panel is asking, then retry once.
+- Never edit `extension/config.json` or `config.local.json` yourself; only the user grants hosts.
 
 ## The watcher: hearing the user
 
