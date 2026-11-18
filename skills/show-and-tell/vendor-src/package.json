@@ -1,5 +1,5 @@
 {
-  "name": "demonstrate-vendor",
+  "name": "show-and-tell-vendor",
   "private": true,
   "description": "Rebuilds extension/vendor/ (Material Web bundle + Material 3 color tokens). Not needed at runtime.",
   "type": "module",

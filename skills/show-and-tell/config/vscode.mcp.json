@@ -1,6 +1,6 @@
 {
   "servers": {
-    "demonstrate": {
+    "show-and-tell": {
       "type": "stdio",
       "command": "node",
       "args": ["<skill>/bridge/index.js"]

@@ -1,12 +1,12 @@
 ---
-name: demonstrate
+name: show-and-tell
 description: "Two-way pointing channel with the user on a live web page in a shared browser. You show things (highlights, labels, gesture illustrations like tap/swipe/drag) and the user shows you things (marks with notes, recorded clicks and gestures, messages) from a side panel. On top: guided tours with Next/Back and recorded review videos (MP4 with captions, chapters, cards). Use for 'show me', 'where is…', 'look at what I marked/sent/recorded', walkthroughs, demos, demonstrating code changes and customer review videos."
 ---
 
-# demonstrate
+# show-and-tell
 
 A Chrome for Testing window that you and the user share. You point at things in the page; the user points
-back through the **demonstrate side panel** (Annotate, Record, message). No tour is needed for either.
+back through the **show-and-tell side panel** (Annotate, Record, message). No tour is needed for either.
 Guided tours and videos are optional layers on top. The panel is browser UI and never in page screenshots.
 
 `<skill>` below is this skill's directory (the folder with this SKILL.md). Commands work in any shell.
@@ -15,7 +15,7 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
 
 - **Browser**: Chrome for Testing on its own profile, CDP `127.0.0.1:9334`, extension preloaded.
   `start_browser` launches it (idempotent) and opens the panel; it outlives the session.
-- **demonstrate MCP**: `start_browser`, `status`, `highlight`, `clear_highlights`, `hide_overlays`, `get_queue`,
+- **show-and-tell MCP**: `start_browser`, `status`, `highlight`, `clear_highlights`, `hide_overlays`, `get_queue`,
   `wait_for_action`, `request_demo`, `set_step`, `load_tour`, `goto_step`, `end_tour`, `record_tour`, `stop_recording`.
   Each also exists as a CLI: `node "<skill>/bridge" <start|status|highlight <css> [--label t] [--gesture g]
   [--direction d] [--to css] [--url u] [--style s] [--keep]|clear|hide|show|queue [--recent]|wait|cancel|request <prompt>|

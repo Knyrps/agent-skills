@@ -41,7 +41,7 @@ if (!cmd || cmd === 'mcp') await runMcp();
 else if (cmd === 'serve') { await ensureOwnerLoop(); setInterval(() => {}, 1 << 30); }
 else {
   try { out(await runCli()); process.exit(0); }
-  catch (e) { console.error('[demonstrate]', e.message); process.exit(1); }
+  catch (e) { console.error('[show-and-tell]', e.message); process.exit(1); }
 }
 
 async function runCli() {
@@ -123,7 +123,7 @@ async function runMcp() {
     video: { type: 'boolean', description: 'Video only: false runs the step off camera, e.g. a login' },
   } } };
   const TOOLS = [
-    { name: 'start_browser', description: 'Start the demo browser (Chrome for Testing with the demonstrate extension, CDP 127.0.0.1:9334) '
+    { name: 'start_browser', description: 'Start the demo browser (Chrome for Testing with the show-and-tell extension, CDP 127.0.0.1:9334) '
       + 'if it is not running, open the side panel, and wait until the extension is connected. Idempotent. Call it first in every tour, '
       + 'before any playwright-demo tool.',
     inputSchema: { type: 'object', properties: {} } },
@@ -199,7 +199,7 @@ async function runMcp() {
   ];
 
   const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'load_tour', 'request_demo', 'record_tour']);
-  const server = new Server({ name: 'demonstrate', version: '1.3.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'show-and-tell', version: '1.3.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const a = req.params.arguments || {};

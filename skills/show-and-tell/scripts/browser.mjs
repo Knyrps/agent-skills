@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // node scripts/browser.mjs start|stop|panel|status
-// Chrome for Testing runs as its own process on a dedicated profile with the demonstrate extension
+// Chrome for Testing runs as its own process on a dedicated profile with the show-and-tell extension
 // loaded and a CDP port open; the Playwright MCP (--cdp-endpoint) and the bridge attach to it. It
-// outlives every command. `start` is idempotent and also opens the demonstrate side panel.
+// outlives every command. `start` is idempotent and also opens the show-and-tell side panel.
 // Chrome for Testing, not branded Chrome: branded Chrome ignores --load-extension since v137.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -47,7 +47,7 @@ function findChromeForTesting() {
 const BROWSER = process.env.DEMO_BROWSER_PATH || findChromeForTesting();
 const BASE = `http://127.0.0.1:${PORT}`;
 
-const log = (...m) => console.error('[demonstrate]', ...m);
+const log = (...m) => console.error('[show-and-tell]', ...m);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const version = () => getJson(`${BASE}/json/version`, 1500).catch(() => null);
 
@@ -78,7 +78,7 @@ async function start() {
   let panel = false, panelError;
   try { await openPanel(); panel = true; } catch (e) { panelError = e.message; }
   return { ok: true, cdpEndpoint: BASE, reused, browser: BROWSER, profile: PROFILE, panel,
-    ...(panelError && { panelError, hint: 'click the demonstrate icon in the toolbar (puzzle menu) to open the side panel' }) };
+    ...(panelError && { panelError, hint: 'click the show-and-tell icon in the toolbar (puzzle menu) to open the side panel' }) };
 }
 
 // Chrome keeps an unpacked extension's service-worker script cached in the profile while the manifest
@@ -110,12 +110,12 @@ async function openPanel() {
   try {
     ({ targetId } = await browser.send('Target.createTarget', { url: `chrome-extension://${EXT_ID}/open-panel.html` }));
     let page;
-    for (let i = 0; i < 40 && page?.title !== 'demonstrate:ready'; i++) {
+    for (let i = 0; i < 40 && page?.title !== 'show-and-tell:ready'; i++) {
       await sleep(250);
       page = (await getJson(`${BASE}/json/list`)).find(t => t.id === targetId);
     }
-    if (page?.title !== 'demonstrate:ready') {
-      throw new Error('helper page did not load - is the demonstrate extension loaded (--load-extension)?');
+    if (page?.title !== 'show-and-tell:ready') {
+      throw new Error('helper page did not load - is the show-and-tell extension loaded (--load-extension)?');
     }
     const s = await cdpSession(page.webSocketDebuggerUrl);
     try {
@@ -123,9 +123,9 @@ async function openPanel() {
         await s.send('Input.dispatchMouseEvent', { type, x: 20, y: 20, button: 'left', clickCount: 1 });
       }
       for (let i = 0; i < 20; i++) {
-        const { result } = await s.send('Runtime.evaluate', { expression: 'document.title', returnByValue: true }).catch(() => ({ result: { value: 'demonstrate:opened' } }));
-        if (result.value === 'demonstrate:opened') return true;
-        if (result.value.startsWith('demonstrate:error')) throw new Error(result.value.slice(18));
+        const { result } = await s.send('Runtime.evaluate', { expression: 'document.title', returnByValue: true }).catch(() => ({ result: { value: 'show-and-tell:opened' } }));
+        if (result.value === 'show-and-tell:opened') return true;
+        if (result.value.startsWith('show-and-tell:error')) throw new Error(result.value.slice('show-and-tell:error '.length));
         await sleep(150);
       }
       throw new Error('side panel did not confirm opening');

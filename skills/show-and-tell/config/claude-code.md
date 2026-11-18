@@ -3,7 +3,7 @@
 Replace `<skill>` with the absolute skill path, then run:
 
 ```sh
-claude mcp add --scope user demonstrate -- node <skill>/bridge/index.js
+claude mcp add --scope user show-and-tell -- node <skill>/bridge/index.js
 claude mcp add --scope user playwright-demo -- npx -y @playwright/mcp@latest --cdp-endpoint http://127.0.0.1:9334 --ignore-https-errors
 ```
 

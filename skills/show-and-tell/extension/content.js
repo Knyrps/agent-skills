@@ -2,8 +2,8 @@
 // "Record" and runs "Annotate". Everything sits in a closed shadow root with pointer-events: none and is
 // only attached while something is visible. The controls themselves live in the side panel.
 (() => {
-  if (window.top !== window || window.__demonstrate) return;
-  window.__demonstrate = true;
+  if (window.top !== window || window.__showAndTell) return;
+  window.__showAndTell = true;
 
   const S = chrome.storage.session;
   const DEFAULT_COLOR = '#0b57d0'; // Chrome GM3 primary
@@ -121,8 +121,8 @@
   const nodes = new Map(); // highlight id -> { box, label, sig }
   const show = (el, on) => { el.style.display = on ? '' : 'none'; };
   const here = () => location.origin + location.pathname;
-  const G = globalThis.__demonstrateGestures; // gestures.js, loaded first
-  const busy = () => G.pointer.active || !!globalThis.__demonstrateStage?.active;
+  const G = globalThis.__showAndTellGestures; // gestures.js, loaded first
+  const busy = () => G.pointer.active || !!globalThis.__showAndTellStage?.active;
 
   chrome.runtime.sendMessage({ type: 'hello', url: location.href })
     .then(r => { if (r?.allowed) init(); }).catch(() => {});
@@ -292,7 +292,7 @@
     if (!needed) { unmount(); return; }
     mount();
     // a page dialog/popover opened after us would cover the overlay: move back to the top
-    if (host.matches(':popover-open') && document.querySelector('dialog[open]:modal, :popover-open:not(demonstrate-overlay)')) {
+    if (host.matches(':popover-open') && document.querySelector('dialog[open]:modal, :popover-open:not(show-and-tell-overlay)')) {
       try { host.hidePopover(); host.showPopover(); } catch {}
     }
     if (!raf) raf = requestAnimationFrame(frame);
@@ -300,7 +300,7 @@
 
   function mount() {
     if (!host) {
-      host = document.createElement('demonstrate-overlay');
+      host = document.createElement('show-and-tell-overlay');
       host.setAttribute('aria-hidden', 'true');
       host.setAttribute('style', HOST_STYLE);
       host.popover = 'manual';
@@ -321,7 +321,7 @@
     }
   }
 
-  function unmount() { globalThis.__demonstrateBoxes = []; if (host?.isConnected) host.remove(); }
+  function unmount() { globalThis.__showAndTellBoxes = []; if (host?.isConnected) host.remove(); }
 
   // ---------------------------------------------------------------- highlights
 
@@ -425,7 +425,7 @@
         rect: { x: r.left, y: r.top, w: r.width, h: r.height }, to: h.to ? centre(h.to) : null });
     }
     placeCallouts(callouts, boxes, W, H);
-    globalThis.__demonstrateBoxes = boxes; // the video stage moves its caption off highlighted elements
+    globalThis.__showAndTellBoxes = boxes; // the video stage moves its caption off highlighted elements
     G.sync(gestures);
     for (const [id, n] of nodes) if (!live.has(id)) { n.box.remove(); n.label.remove(); nodes.delete(id); }
     show(dim, !!holes);
@@ -1225,7 +1225,7 @@
   // text), else the element at its centre.
   const INTERACTIVE = 'a,button,input,select,textarea,label,img,svg,video,canvas,[role="button"],[role="link"],[role="tab"],[role="checkbox"],[role="option"],[role="menuitem"]';
   const ownText = el => [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
-  const pageElementAt = (x, y) => document.elementsFromPoint(x, y).find(el => el !== host && el.localName !== 'demonstrate-stage' && el !== document.documentElement && el !== document.body) || null;
+  const pageElementAt = (x, y) => document.elementsFromPoint(x, y).find(el => el !== host && el.localName !== 'show-and-tell-stage' && el !== document.documentElement && el !== document.body) || null;
 
   function refsOf(m) {
     if (m.kind === 'element') return [m.el];

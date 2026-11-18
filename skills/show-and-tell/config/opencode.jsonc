@@ -4,7 +4,7 @@
 {
   "mcp": {
     // Bridge between the agent and the side panel; owns 127.0.0.1:47613 and starts the demo browser.
-    "demonstrate": {
+    "show-and-tell": {
       "type": "local",
       "command": ["node", "<skill>/bridge/index.js"],
       "enabled": true

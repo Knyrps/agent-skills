@@ -6,7 +6,7 @@
 // replaces the primary colour.
 (() => {
   if (window.top !== window) return;
-  if (globalThis.__demonstrateStage) return;
+  if (globalThis.__showAndTellStage) return;
 
   const FONT = 'system-ui,"Segoe UI",Roboto,sans-serif';
   const EL2 = '0 1px 2px rgb(0 0 0/.3),0 2px 6px 2px rgb(0 0 0/.15)';
@@ -51,7 +51,7 @@
   function mount() {
     if (host?.isConnected) return;
     if (!host) {
-      host = document.createElement('demonstrate-stage');
+      host = document.createElement('show-and-tell-stage');
       host.setAttribute('style', 'all:initial!important;position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;'
         + 'margin:0!important;padding:0!important;border:0!important;background:transparent!important;overflow:visible!important;'
         + 'pointer-events:none!important;z-index:2147483646!important;');
@@ -69,10 +69,10 @@
   }
 
   // The top layer paints in opening order: a modal dialog or popover the page opens later covers the
-  // stage, so the stage goes back on top, and the demonstrate overlay (highlights, drawn pointer) above it.
+  // stage, so the stage goes back on top, and the show-and-tell overlay (highlights, drawn pointer) above it.
   function raise() {
     if (!host?.isConnected) return;
-    for (const el of [host, document.querySelector('demonstrate-overlay')]) {
+    for (const el of [host, document.querySelector('show-and-tell-overlay')]) {
       if (!el || (el !== host && !el.matches(':popover-open'))) continue;
       try { if (el.matches(':popover-open')) el.hidePopover(); el.showPopover(); } catch {}
     }
@@ -82,7 +82,7 @@
   let last = '', movedAt = 0, top = false;
   function dodge() {
     if (!els.cap) return;
-    const p = globalThis.__demonstrateGestures?.pointer, at = p?.active ? p.at : null;
+    const p = globalThis.__showAndTellGestures?.pointer, at = p?.active ? p.at : null;
     const key = at ? at.map(Math.round).join() : '';
     if (key !== last) { last = key; movedAt = Date.now(); }
     const shown = stage.active && !els.cap.classList.contains('hide');
@@ -90,7 +90,7 @@
     // Where the caption sits at the bottom, whatever its current position.
     const base = { left: r.left, right: r.right, top: innerHeight - gap - h, bottom: innerHeight - gap };
     const hits = (b, m = 0) => b.x < base.right + m && b.x + b.w > base.left - m && b.y < base.bottom + m && b.y + b.h > base.top - m;
-    const wantTop = shown && (globalThis.__demonstrateBoxes || []).some(b => hits(b, 12));
+    const wantTop = shown && (globalThis.__showAndTellBoxes || []).some(b => hits(b, 12));
     if (wantTop !== top) { top = wantTop; els.cap.style.translate = top ? `-50% ${-(innerHeight - 2 * gap - h)}px` : ''; }
     let over = false;
     if (shown && at && Date.now() - movedAt < 1500) {
@@ -103,9 +103,9 @@
 
   let raising = 0;
   const later = () => { cancelAnimationFrame(raising); raising = requestAnimationFrame(raise); };
-  new MutationObserver(ms => { if (stage.active && ms.some(m => m.target !== host && m.target.localName !== 'demonstrate-overlay')) later(); })
+  new MutationObserver(ms => { if (stage.active && ms.some(m => m.target !== host && m.target.localName !== 'show-and-tell-overlay')) later(); })
     .observe(document.documentElement, { attributes: true, attributeFilter: ['open'], subtree: true });
-  addEventListener('toggle', e => { if (stage.active && e.newState === 'open' && e.target !== host && e.target.localName !== 'demonstrate-overlay') later(); }, true);
+  addEventListener('toggle', e => { if (stage.active && e.newState === 'open' && e.target !== host && e.target.localName !== 'show-and-tell-overlay') later(); }, true);
 
   // Real input never reaches the page while recording; Esc stops the recording.
   const block = e => {
@@ -169,7 +169,7 @@
     for (const t of BLOCKED) removeEventListener(t, block, true);
   }
 
-  const stage = globalThis.__demonstrateStage = { active: true };
+  const stage = globalThis.__showAndTellStage = { active: true };
   for (const t of BLOCKED) addEventListener(t, block, { capture: true, passive: false });
   chrome.runtime.onMessage.addListener((m, _s, reply) => {
     if (m.cmd !== 'stage') return false;

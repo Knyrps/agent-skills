@@ -13,10 +13,16 @@ export const CDP_PORT = +(process.env.DEMO_CDP_PORT || 9334);
 export const EXT_ID = 'jedpjgmldnhcfdejimlabhppmffdijei'; // pinned by "key" in extension/manifest.json
 // Queue, shots and the browser profile: %LOCALAPPDATA% on Windows, Application Support on macOS,
 // $XDG_DATA_HOME (~/.local/share) elsewhere.
-export const DATA = process.env.DEMO_DATA || path.join({
+const DATA_ROOT = {
   win32: process.env.LOCALAPPDATA || os.homedir(),
   darwin: path.join(os.homedir(), 'Library', 'Application Support'),
-}[process.platform] || process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'demonstrate');
+}[process.platform] || process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+export const DATA = process.env.DEMO_DATA || path.join(DATA_ROOT, 'show-and-tell');
+// The skill was called "demonstrate": take over its folder once, so the browser profile (and its
+// sign-ins), saved videos and queued input survive the rename. Skipped while the old browser runs.
+if (!process.env.DEMO_DATA && !fs.existsSync(DATA)) {
+  try { fs.renameSync(path.join(DATA_ROOT, 'demonstrate'), DATA); } catch {}
+}
 const QUEUE_FILE = path.join(DATA, 'queue.json');
 
 // Every OpenCode session starts its own bridge; one owns the port. The newest code wins: an older
@@ -30,7 +36,7 @@ export const VIDEOS = path.join(DATA, 'videos');
 const VIDEO_DAYS = 14;
 const HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 
-export const log = (...m) => console.error('[demonstrate]', ...m);
+export const log = (...m) => console.error('[show-and-tell]', ...m);
 
 // ------------------------------------------------------------------ owner server
 
@@ -190,7 +196,7 @@ export function startOwner({ standalone = false } = {}) {
         if (!HOSTS.has(req.headers.host) || req.headers.origin !== `chrome-extension://${EXT_ID}`) return json(res, 403, { error: 'forbidden' });
         return videoRoute(req, res, url).catch(e => json(res, 500, { error: e.message }));
       }
-      if (!HOSTS.has(req.headers.host) || req.headers.origin || req.headers['x-demonstrate'] !== '1') {
+      if (!HOSTS.has(req.headers.host) || req.headers.origin || req.headers['x-show-and-tell'] !== '1') {
         return json(res, 403, { error: 'forbidden' });
       }
       const route = `${req.method} ${url.pathname}`;
@@ -420,7 +426,7 @@ export function call(method, pathname, body, { signal } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : null;
     const req = http.request({ host: '127.0.0.1', port: PORT, method, path: pathname, signal,
-      headers: { 'X-Demonstrate': '1', ...(payload && { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }) } },
+      headers: { 'X-Show-And-Tell': '1', ...(payload && { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }) } },
     res => {
       let s = ''; res.on('data', d => { s += d; });
       res.on('end', () => {

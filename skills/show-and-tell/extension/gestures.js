@@ -1,8 +1,8 @@
-// Gesture glyphs, shared with content.js through globalThis.__demonstrateGestures. Two uses: a highlight
+// Gesture glyphs, shared with content.js through globalThis.__showAndTellGestures. Two uses: a highlight
 // with a `gesture` shows a looping illustration on its element (nothing is performed), and scripted
 // actions in a video drive `pointer`, a drawn cursor or finger that moves, presses and leaves a trail.
 (() => {
-  if (window.top !== window || globalThis.__demonstrateGestures) return;
+  if (window.top !== window || globalThis.__showAndTellGestures) return;
 
   const NS = 'http://www.w3.org/2000/svg';
   const TOUCH = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch'];
@@ -273,6 +273,6 @@
     wheel(dir) { P.button = dir ? 'wheel' : ''; P.dir = dir; P.wheel = dir ? performance.now() : null; },
   };
 
-  globalThis.__demonstrateGestures = { KINDS: [...TOUCH, ...MOUSE], TOUCH, MOUSE, attach, sync, pointer,
+  globalThis.__showAndTellGestures = { KINDS: [...TOUCH, ...MOUSE], TOUCH, MOUSE, attach, sync, pointer,
     geometry, stateAt, timeline: TL };
 })();

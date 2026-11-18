@@ -40,7 +40,7 @@ async function connect() {
   };
   sock.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
-    onBridge(m).catch(err => console.warn('[demonstrate]', err));
+    onBridge(m).catch(err => console.warn('[show-and-tell]', err));
   };
   sock.onclose = () => {
     if (ws === sock) ws = null;
@@ -806,7 +806,7 @@ async function handle(m, sender) {
         if (demoRequest) await enqueue({ type: 'demoDeclined', requestId: demoRequest.id, prompt: demoRequest.prompt });
         return { ok: true, discarded: true };
       }
-      await S.set({ recording: null, recordingDraft: { title: 'demonstrate recording', startedAt: recording.startedAt,
+      await S.set({ recording: null, recordingDraft: { title: 'show-and-tell recording', startedAt: recording.startedAt,
         duration: Date.now() - recording.startedAt, steps: recording.steps } });
       return { ok: true };
     }

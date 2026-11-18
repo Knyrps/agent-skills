@@ -1,8 +1,8 @@
 {
-  "name": "demonstrate-bridge",
+  "name": "show-and-tell-bridge",
   "version": "1.0.0",
   "private": true,
-  "description": "MCP server + local bridge between the agent and the demonstrate browser extension",
+  "description": "MCP server + local bridge between the agent and the show-and-tell browser extension",
   "type": "module",
   "main": "index.js",
   "scripts": {

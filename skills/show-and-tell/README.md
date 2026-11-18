@@ -1,11 +1,11 @@
-# demonstrate
+# show-and-tell
 
 A two-way pointing channel between you and an AI coding agent on a live web page. You and the agent
 share one browser window:
 
 - **The agent shows you things**: highlights, labels and looping gesture illustrations (tap, swipe,
   drag, pinch, scroll …) on page elements.
-- **You show the agent things** from the **demonstrate side panel**, with or without a tour:
+- **You show the agent things** from the **show-and-tell side panel**, with or without a tour:
   - **Annotate**: click an element to mark it, or drag a frame, an arrow or a pen stroke, each with a note.
   - **Record**: captures what you do in the page (clicks, typing, keys, scrolling, swipes, navigation).
   - **Message** and **Send**, with the annotation or recording attached.
@@ -60,15 +60,15 @@ whatever Chromium is listening on that port.
 
    | Agent | Personal skills folder |
    | --- | --- |
-   | Claude Code | `~/.claude/skills/demonstrate` |
-   | OpenCode | `~/.config/opencode/skills/demonstrate` (also reads `~/.claude/skills` and `~/.agents/skills`) |
-   | VS Code (GitHub Copilot agent mode) | `~/.copilot/skills/demonstrate`, or `.github/skills/demonstrate` in a project |
-   | Codex CLI | `~/.codex/skills/demonstrate` |
+   | Claude Code | `~/.claude/skills/show-and-tell` |
+   | OpenCode | `~/.config/opencode/skills/show-and-tell` (also reads `~/.claude/skills` and `~/.agents/skills`) |
+   | VS Code (GitHub Copilot agent mode) | `~/.copilot/skills/show-and-tell`, or `.github/skills/show-and-tell` in a project |
+   | Codex CLI | `~/.codex/skills/show-and-tell` |
 
    Hosts change these paths now and then; the host's own docs win.
 
 3. **MCP servers.** Register two stdio servers in the agent host:
-   - `demonstrate`: `node <skill>/bridge/index.js`
+   - `show-and-tell`: `node <skill>/bridge/index.js`
    - `playwright-demo`: `npx -y @playwright/mcp@latest --cdp-endpoint http://127.0.0.1:9334 --ignore-https-errors`
 
    Ready-made snippets for OpenCode, Claude Code, VS Code and Codex are in `config/`. Keep any existing
@@ -82,8 +82,8 @@ whatever Chromium is listening on that port.
 
 Environment overrides: `DEMO_BROWSER_PATH` (any Chromium that honours `--load-extension`, for
 example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_DATA`
-(queue, screenshots and profile; default `%LOCALAPPDATA%\demonstrate` on Windows,
-`~/Library/Application Support/demonstrate` on macOS, `~/.local/share/demonstrate` on Linux).
+(queue, screenshots and profile; default `%LOCALAPPDATA%\show-and-tell` on Windows,
+`~/Library/Application Support/show-and-tell` on macOS, `~/.local/share/show-and-tell` on Linux).
 
 ## First start
 
@@ -93,9 +93,9 @@ node <skill>/bridge start   # expect "bridge": { "extensionConnected": true, "pa
 
 The agent does the same through the `start_browser` tool. `set_step`, `highlight`, `clear_highlights`
 and `hide_overlays` also start the browser if it is not running. If the side panel doesn't open by
-itself, click the demonstrate icon in the toolbar (puzzle menu).
+itself, click the show-and-tell icon in the toolbar (puzzle menu).
 
-When the agent host runs the demonstrate MCP, that process owns the bridge port. Without an agent, run
+When the agent host runs the show-and-tell MCP, that process owns the bridge port. Without an agent, run
 `node <skill>/bridge serve` in a second terminal.
 
 ## Manual test of every control
