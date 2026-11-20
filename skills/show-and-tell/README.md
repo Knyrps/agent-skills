@@ -106,7 +106,15 @@ When the agent host runs the show-and-tell MCP, that process owns the bridge por
 
 ## Manual test of every control
 
-Open any page on `http://localhost:<port>/` in the demo browser, then:
+`node <skill>/scripts/lab.mjs` serves a test page on `http://localhost:5191/` (and `/next`): every element
+reacts to real mouse, touch and keyboard input and to the skill's scripted actions, and a log at the bottom
+says whether each event was trusted. `node <skill>/scripts/real-input-check.mjs` then drives the lab and the
+side panel with real input (CDP `Input.*`, trusted like a person's) and checks every element and control:
+taps, double taps, long press, pinch, swipe, drag and drop, clicks, menus, typing, forms, dialogs, shortcuts,
+Annotate (including Esc while the panel has focus), Record, Send, throttling, the host question and notice,
+tour Next/Back and video Discard. It needs the browser, a bridge and the lab running.
+
+By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo browser, then:
 
 | Test | Do | Expect |
 | --- | --- | --- |

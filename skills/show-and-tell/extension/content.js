@@ -1313,6 +1313,12 @@
   function onMessage(m, _sender, reply) {
     if (m.cmd === 'annotate') { startAnnotate(reply); return true; }
     if (m.cmd === 'annotateClear') { finishAnnotate(null); return false; }
+    // Keys pressed while the side panel has focus (right after clicking Annotate) arrive from the panel.
+    if (m.cmd === 'annotateKey') {
+      if (annot) annotKey({ key: m.key, ctrlKey: !!m.ctrl, metaKey: false, preventDefault() {}, stopImmediatePropagation() {} });
+      reply({ ok: !!annot });
+      return false;
+    }
     if (m.cmd === 'probe') { probe(m).then(reply, e => reply({ found: false, error: String(e) })); return true; }
     if (m.cmd === 'pointerHide') { G.pointer.hide().then(() => reply({ ok: true })); return true; }
     if (m.cmd === 'ping') { reply({ ok: document.readyState !== 'loading' }); return false; }

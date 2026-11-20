@@ -171,6 +171,10 @@ svg { width: 18px; height: 18px; fill: currentColor; }
   --md-text-button-hover-icon-color: var(--md-sys-color-on-surface);
 }
 .grow { flex: 1; }
+#annotate.active {
+  --md-text-button-label-text-color: var(--md-sys-color-primary);
+  --md-text-button-icon-color: var(--md-sys-color-primary);
+}
 #rec.recording {
   --md-text-button-label-text-color: var(--md-sys-color-error);
   --md-text-button-icon-color: var(--md-sys-color-error);

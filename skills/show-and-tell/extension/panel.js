@@ -277,9 +277,23 @@ $('rec').addEventListener('click', async () => {
   window.focus();
   $('q').focus();
 });
+// While annotating, the panel still has focus after the click: Esc and Ctrl+Z pressed here go to the page.
+let annotatingNow = false;
+addEventListener('keydown', e => {
+  if (!annotatingNow) return;
+  const undo = e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey);
+  if (e.key !== 'Escape' && !undo) return;
+  e.preventDefault();
+  chrome.runtime.sendMessage({ type: 'annotateKey', key: e.key, ctrl: undo }).catch(() => {});
+}, true);
 $('annotate').addEventListener('click', async () => {
+  if (annotatingNow) return chrome.runtime.sendMessage({ type: 'annotateKey', key: 'Escape' }).catch(() => {});
   toast('In the page: click an element to mark it, or drag to draw. Then click "Done" (Esc cancels).');
-  const r = await chrome.runtime.sendMessage({ type: 'annotate' }).catch(e => ({ error: e.message }));
+  annotatingNow = true;
+  $('annotate').classList.add('active');
+  $('annotate-label').textContent = 'Cancel';
+  const r = await chrome.runtime.sendMessage({ type: 'annotate' }).catch(e => ({ error: e.message }))
+    .finally(() => { annotatingNow = false; $('annotate').classList.remove('active'); $('annotate-label').textContent = 'Annotate'; });
   if (r?.error) return toast('Error: ' + r.error);
   if (r?.cancelled) return toast('Annotation cancelled.');
   toast('Annotation attached. Add a message and send it.');

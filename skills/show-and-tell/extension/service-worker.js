@@ -1149,6 +1149,10 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
 async function handle(m, sender) {
   switch (m.type) {
     case 'videoStop': return video ? recordStop(m) : { ok: false };
+    case 'annotateKey': {
+      const t = await activeTab();
+      return t ? chrome.tabs.sendMessage(t.id, { cmd: 'annotateKey', key: m.key, ctrl: !!m.ctrl }).catch(() => ({ ok: false })) : { ok: false };
+    }
     // The panel's "Turn off" for the tab in front; the user can always end throttling.
     case 'throttleOff': { const t = await activeTab(); return t ? throttleOff(t.id) : { ok: false }; }
     // Only the panel answers: the user's click, never a bridge command.
