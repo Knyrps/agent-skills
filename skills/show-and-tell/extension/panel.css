@@ -92,6 +92,22 @@ svg { width: 18px; height: 18px; fill: currentColor; }
   --md-text-button-focus-label-text-color: var(--md-sys-color-on-tertiary-container);
   --md-text-button-pressed-label-text-color: var(--md-sys-color-on-tertiary-container);
 }
+/* A paused page, held requests or pause points that are set; like the throttle line, with a second line. */
+.pause {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 4px 4px 16px; border-radius: 12px;
+  background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container);
+}
+.pause[data-state="paused"] { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+.pause svg { flex: none; }
+.pause-text { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 4px 0; overflow-wrap: anywhere; }
+.pause md-text-button {
+  flex: none;
+  --md-text-button-label-text-color: currentColor;
+  --md-text-button-hover-label-text-color: currentColor;
+  --md-text-button-focus-label-text-color: currentColor;
+  --md-text-button-pressed-label-text-color: currentColor;
+}
 
 /* ---- conversation */
 .chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--gap); padding: 8px var(--edge) var(--gap); scroll-behavior: smooth; }

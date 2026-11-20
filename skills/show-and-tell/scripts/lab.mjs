@@ -124,6 +124,7 @@ md-outlined-text-field,md-outlined-select{width:100%}
 label.check{display:flex;align-items:center;gap:8px;cursor:pointer}
 md-slider{width:100%}
 .row{display:flex;flex-wrap:wrap;gap:8px}
+#items{margin:0;padding-left:20px}#items:empty{display:none}
 #menu-anchor{position:fixed;width:0;height:0}
 /* M3 terminal-style log on the inverse surface. */
 #log{grid-column:1/-1;height:160px;overflow:auto;padding:12px 16px;border-radius:12px;
@@ -355,6 +356,22 @@ $('#newtab-open').addEventListener('click', e => { window.open('/next?via=window
 $('#newtab-popup').addEventListener('click', e => { window.open('/next?via=popup', 'lab-popup', 'popup,width=720,height=520'); log('popup window', e); });
 $('#dlg-ok').addEventListener('click', e => { $('#dlg').close(); set('#dlg-box', 'Dialog confirmed'); log('dialog confirmed', e); });
 addEventListener('keydown', e => { if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); set('#keys-box', 'Ctrl+K pressed'); log('shortcut Ctrl+K', e); } });
+// Load data: a request with a loading state, for pausing a page between the click and the result.
+let loads = 0;
+function renderItems(items) {
+  const list = $('#items');
+  list.replaceChildren(...items.map(item => Object.assign(document.createElement('li'), { textContent: item.name + ' · ' + item.price })));
+  set('#load-box', items.length + ' items loaded');
+}
+async function loadItems(e) {
+  const run = ++loads;
+  set('#load-box', 'Loading…', false);
+  const res = await fetch('/api/items?run=' + run);
+  const data = await res.json();
+  renderItems(data.items);
+  log('items loaded', e);
+}
+$('#load').addEventListener('click', loadItems);
 `;
 
 const card = (id, title, hint, extra = '', cls = '') =>
@@ -383,6 +400,7 @@ const LAB = page('Gesture lab', [
   card('keys-box', 'Shortcut', 'Press Ctrl+K'),
   card('tabs-box', 'New tabs', 'Opens /next in a new tab or a popup window', '<div class="row"><md-outlined-button id="newtab-link" href="/next?via=link" target="_blank">Link</md-outlined-button>'
     + '<md-outlined-button id="newtab-open">window.open</md-outlined-button><md-outlined-button id="newtab-popup">Popup</md-outlined-button></div>', 'wide'),
+  card('load-box', 'Load data', 'Nothing loaded', '<div><md-outlined-button id="load">Load items</md-outlined-button></div><ul id="items" class="md-typescale-body-medium"></ul>', 'wide'),
   `<md-dialog id="dlg"><div slot="headline">Confirm</div><div slot="content">A modal dialog.</div>
     <div slot="actions"><md-text-button id="dlg-ok">OK</md-text-button></div></md-dialog>`,
   `<span id="menu-anchor"></span><md-menu id="menu" anchor="menu-anchor" positioning="fixed">
@@ -392,8 +410,10 @@ const LAB = page('Gesture lab', [
 
 const NEXT = page('Next page', card('second', 'Second page', 'For recordings that span pages.', '', 'wide'));
 
-// Static pages only (GET/HEAD). Any host name is accepted: the real-input check reaches the lab through a
-// *.nip.io name to test a host that is not allowed yet.
+const ITEMS = [['Caster', '12.40'], ['Wheel', '8.90'], ['Bracket', '3.20'], ['Axle', '5.75']].map(([name, price]) => ({ name, price }));
+
+// Static pages and one small JSON answer (GET/HEAD). Any host name is accepted: the real-input check reaches
+// the lab through a *.nip.io name to test a host that is not allowed yet.
 export function labHandler(q, r) {
   if (q.method !== 'GET' && q.method !== 'HEAD') { r.writeHead(405); return r.end(); }
   const p = new URL(q.url, 'http://x').pathname;
@@ -401,6 +421,11 @@ export function labHandler(q, r) {
     const [file, type] = FILES[p];
     r.writeHead(200, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-store' });
     return q.method === 'HEAD' ? r.end() : fs.createReadStream(file).pipe(r);
+  }
+  if (p === '/api/items') {
+    r.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    if (q.method === 'HEAD') return r.end();
+    return void setTimeout(() => r.end(JSON.stringify({ items: ITEMS })), 300);
   }
   if (p !== '/' && p !== '/next') { r.writeHead(404); return r.end(); }
   r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });

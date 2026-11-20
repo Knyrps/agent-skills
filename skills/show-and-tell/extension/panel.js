@@ -89,7 +89,7 @@ async function render() {
 async function refreshTab() {
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   tabUrl = t?.url || '';
-  if (frontTabId !== (t?.id ?? null)) { frontTabId = t?.id ?? null; render(); renderChat(true); renderThrottle(); }
+  if (frontTabId !== (t?.id ?? null)) { frontTabId = t?.id ?? null; render(); renderChat(true); renderThrottle(); renderPause(); }
   const placeholder = tabUrl.startsWith(chrome.runtime.getURL('tab.html'));
   const { hostState: hs = {}, connected } = await S.get(['hostState', 'connected']);
   const ok = hostAllowed(tabUrl, [...(await loadConfig()).allowlist, ...(hs.allow || []), ...(hs.loopback || []), ...(hs.granted || [])]);
@@ -190,6 +190,36 @@ async function renderThrottle() {
   $('throttle').hidden = !t;
   if (t) $('throttle-label').textContent = [t.network && `Network ${t.network}`, t.cpu && `CPU ${t.cpu}× slower`].filter(Boolean).join(' · ');
 }
+// The agent's pause points in the tab in front: the page stopped at one, requests held back, or points
+// that are set and waiting. The button always works, with or without the agent.
+let pausedNow = false;
+async function renderPause() {
+  const { pauses = {} } = await S.get('pauses');
+  const p = frontTabId != null ? pauses[frontTabId] : null;
+  $('pause').hidden = !p;
+  const was = pausedNow;
+  pausedNow = !!p?.paused;
+  if (was !== pausedNow) renderRecording();
+  if (!p) return;
+  const waiting = p.held ? `${p.held.count} request${p.held.count === 1 ? '' : 's'} waiting` : '';
+  const short = u => { try { const x = new URL(u); return x.pathname + x.search; } catch { return u; } };
+  const state = p.paused ? 'paused' : p.held ? 'held' : 'armed';
+  const [title, detail, action] = {
+    paused: () => ['Page paused', [p.paused.reason, p.paused.frames?.length && [!p.paused.reason.includes(p.paused.where) && p.paused.where, p.paused.fn && `${p.paused.fn}()`].filter(Boolean).join(' '), waiting], 'Resume'],
+    held: () => ['Holding requests', [short(p.held.urls[0] || ''), waiting], 'Release'],
+    armed: () => [p.points.length === 1 ? 'Pause point set' : 'Pause points set', p.points.map(x => x.label), 'Remove'],
+  }[state]();
+  $('pause').dataset.state = state;
+  $('pause-title').textContent = title;
+  $('pause-detail').textContent = detail.filter(Boolean).join(' · ');
+  $('pause-action').textContent = action;
+}
+$('pause-action').addEventListener('click', async () => {
+  const state = $('pause').dataset.state;
+  const r = await chrome.runtime.sendMessage({ type: state === 'armed' ? 'pauseClear' : 'pauseResume' }).catch(() => null);
+  if (!r?.ok) return toast('Could not do that. Reload the page to let it run again.');
+  toast(state === 'armed' ? 'Pause points removed.' : state === 'held' ? 'Requests released.' : 'The page runs again.');
+});
 $('new-tab').addEventListener('click', async () => {
   const r = await chrome.runtime.sendMessage({ type: 'newSessionTab' }).catch(e => ({ error: e.message }));
   if (!r?.ok) toast(r?.error || 'Could not open a tab in this group.');
@@ -283,12 +313,13 @@ async function renderRecording() {
   if (demoRequest) $('request-text').textContent = demoRequest.prompt;
   $('annot-chip-text').hidden = !annotationDraft;
   if (annotationDraft) $('annot-chip-text').label = `Annotation · ${annotationDraft.annotations.length}`;
-  $('annotate').disabled = !tabAllowed || !!recording;
+  // A paused page cannot be marked or recorded: it answers nothing until it runs again.
+  $('annotate').disabled = !tabAllowed || !!recording || pausedNow;
   const on = !!recording;
   $('rec').classList.toggle('recording', on);
   // setViewport and the starting page are not the user's steps.
   $('rec-label').textContent = on ? `Stop · ${recLabel(recording)}` : 'Record';
-  $('rec').disabled = !on && (!tabAllowed || !!recordingDraft);
+  $('rec').disabled = !on && (!tabAllowed || !!recordingDraft || pausedNow);
   $('rec-chip-text').hidden = !recordingDraft;
   if (recordingDraft) $('rec-chip-text').label = `Recording · ${recLabel(recordingDraft)}`;
   $('attachments').hidden = !annotationDraft && !recordingDraft;
@@ -356,6 +387,7 @@ chrome.storage.onChanged.addListener((c, area) => {
   if (c.hostQuestions) renderHostAsk();
   if (c.chats || c.sessionTabs || c.sessions || c.demoRequest || c.hostQuestions || c.thinking) renderChat();
   if (c.throttles) renderThrottle();
+  if (c.pauses) renderPause();
 });
 renderHostAsk();
 renderChat(true);

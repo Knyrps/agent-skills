@@ -27,6 +27,12 @@ share one browser window:
   intro/section/outro cards and a drawn cursor or finger) are layers on top. While a video records, the
   window keeps its recording size: resizing or maximizing it is undone at once.
 - **Throttling** of the network and CPU per tab, like DevTools, shown in the panel with a Turn off button.
+- **Pausing the page**: the agent can hold chosen requests while the page keeps running (to show a loading
+  state), or stop the page's JavaScript at a request, a line of code, a DOM change or an event, like DevTools
+  breakpoints, and read variables there without changing anything. The panel shows "Page paused" or
+  "Holding requests" with a **Resume** / **Release** button that works without the agent. Chrome's own
+  "Paused in debugger" overlay does not appear. Everything paused runs again when the tab loads another page
+  or closes, when the agent's session ends, and a minute after the last bridge is gone.
 
 ```
 agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node bridge wait` (background job)
@@ -46,6 +52,7 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
 | `extension/config.json` | Bridge URL and shared host patterns; `config.local.json` (git-ignored) holds hosts you allowed and video branding |
 | `bridge/hosts.js` | Which hosts are allowed: loopback and the hosts file's loopback names, config patterns, your grants |
 | `extension/gestures.js`, `stage.js` | Gesture glyphs and the drawn pointer; the video stage (captions, cards, input shield) |
+| `extension/pause.js` | Pause points and held requests, over the same debugger connection as throttling |
 | `references/video.md` | How the agent writes review videos |
 | `bridge/` | MCP server, bridge server and CLI (`index.js`); `driver.js` runs Playwright MCP on the shared browser. Dependencies: `@modelcontextprotocol/sdk`, `@playwright/mcp` |
 | `config/` | MCP config snippets per agent host |
@@ -171,6 +178,10 @@ By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo br
 | Allowed hosts | Open `https://example.com/` yourself | The panel says it is not allowed and offers "Allow this session" / "Always allow"; after a click, Annotate works without a reload |
 | Two sessions | Start two agents in the same folder; let both open a page with show-and-tell's `browser_navigate`, then switch between their tabs and send a message | Each works in its own tab group ("app", "app 2", different colours) and neither navigates the other's tab. The panel header names the session whose tab is in front, and the message reaches only that session |
 | Throttling | `node <skill>/bridge throttle 3g` on a localhost page, reload it, then `throttle off` (or the panel's **Turn off**) | The page loads slowly (about 2 s latency); the panel shows "Network throttled: 3G" while that tab is in front. `throttle offline` makes requests fail; `throttle --download 2000 --latency 300` sets custom values; `throttle --cpu 6` slows scripts about sixfold and the panel adds "CPU 6× slower" |
+| Hold a request | On the lab: `node <skill>/bridge pause request /api/items --hold`, click **Load items** (Load data card), then the panel's **Release** (or `node <skill>/bridge resume`) | The panel shows "Pause point set · holds requests to /api/items" with **Remove**. After the click the card stays on "Loading…", the rest of the page works, and the panel shows "Holding requests · /api/items?run=1 · 1 request waiting". **Release** lets it through ("4 items loaded") and a waiting session gets `resumed` with `by: "user"`. `--keep` holds every such request until `pause remove all` |
+| Pause at a line | `node <skill>/bridge pause line "renderItems(data.items)"`, click **Load items**, then `node <skill>/bridge inspect`, `inspect data.items.length`, `inspect "run = 5"`, `resume --step into`, `resume` | The output names the place (`(index):404`). After the click the page is frozen and the panel shows "Page paused · breakpoint at (index):404 · loadItems()" with **Resume**; no "Paused in debugger" overlay in the page, and Annotate and Record are off. `inspect` lists the call stack and the local variables (`run`, `res`, `data`), the expression gives `4`, the assignment is refused as read-only, the step stops in `renderItems`, and `resume` lets the items appear |
+| Other pause points | `pause request /api/items` (stops at the `fetch` call), `pause dom "#items"` (stops in `renderItems`), `pause event click` (stops in the page's click listener, not in the extension), `pause now`; with an agent: let it call `browser_click` on **Load items** with a point set, and `browser_snapshot` while paused | Each shows "Page paused" with its reason. The agent's click returns at once with "The page paused during browser_click: …", and calls on a paused page fail at once with "The page is paused: …" instead of hanging |
+| Pause clean-up | Pause the page, then one of: reload the tab; close the tab; end the agent's session; stop every bridge and wait a minute | The page runs again (after a reload, a kept point stays set) and the panel card disappears |
 | Host question | `node <skill>/bridge highlight h1 --url https://example.com/` (not allowed yet) | The panel asks "Allow the agent here?"; **No** returns `the user did not allow example.com`, **This session** opens the page. `localhost` pages never ask |
 | Cancel | `wait` in one terminal, `node <skill>/bridge cancel` in another | The wait prints `{"actions":[],"cancelled":true}` |
 | Gestures | `node <skill>/bridge highlight button --gesture double-tap --label Here --url http://localhost:<port>/`, then with `--gesture swipe --direction left --keep` on another element | The page opens; a finger dot taps twice with a ripple; the swipe shows a dotted path and a trail. An unknown gesture name returns the list of valid ones |

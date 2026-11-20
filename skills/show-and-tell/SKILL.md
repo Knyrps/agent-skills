@@ -16,11 +16,14 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
 - **Browser**: Chrome for Testing on its own profile, CDP `127.0.0.1:9334`, extension preloaded.
   `start_browser` launches it (idempotent) and opens the panel; it outlives the session.
 - **show-and-tell MCP**: `start_browser`, `status`, `highlight`, `clear_highlights`, `hide_overlays`, `get_queue`,
-  `wait_for_action`, `say`, `tabs`, `request_demo`, `throttle`, `set_step`, `load_tour`, `goto_step`, `end_tour`, `record_tour`,
+  `wait_for_action`, `say`, `tabs`, `request_demo`, `throttle`, `pause`, `resume`, `inspect_paused`, `set_step`,
+  `load_tour`, `goto_step`, `end_tour`, `record_tour`,
   `stop_recording`. Each also exists as a CLI: `node "<skill>/bridge" <start|status|highlight <css> [--label t]
   [--gesture g] [--direction d] [--to css] [--url u] [--style s] [--keep]|clear|hide|show|queue [--recent]|wait|cancel|
   say --session <id> <text|->|request <prompt>|throttle <preset|off> [--cpu n]|step <label>|tour <file>|goto <n>|end|
-  record <file> [--name n] [--size s]|record-stop|record-cancel>`.
+  record <file> [--name n] [--size s]|record-stop|record-cancel|
+  pause <request <url> [--hold]|dom <css> [--change c]|line <code> [--condition e]|event <name>|now|list|remove <id|all>>
+  [--keep] [--session <id>]|resume [--step over|into|out] [--what page|requests]|inspect [expression] [--frame n]>`.
 - **`browser_*` tools** of the same MCP (Playwright MCP, attached to this browser) drive the page when you
   need more than `highlight` can do: `browser_snapshot`, `browser_click`, `browser_type`,
   `browser_evaluate`, `browser_navigate`, … They start the browser if needed and act in the app tab, never
@@ -55,6 +58,44 @@ on its own; `preset: "off"` without `cpu` resets both. Use it to show or check l
 offline handling and slow devices. It stays on until off (the panel shows it, and the user can turn it off),
 so turn it off when you are done. In tours and videos a step's `network` and `cpu` fields do the same from
 that step on; they end with the tour or video.
+
+## Pausing the page
+
+`pause({ on, … })` stops your tab at a chosen moment, like a breakpoint in DevTools, so you or the user can
+look at a state that normally passes too fast: a spinner, a skeleton, a half-filled form, a value on its way
+through a function. Use it instead of changing the page for that (overriding `fetch` in `browser_evaluate`,
+`debugger` statements, sleeps).
+
+- **Hold a request, page keeps running**: `pause({ on: "request", url: "/api/items", hold: true })`. Requests
+  whose URL contains `url` wait; the page shows its loading state, and `browser_*`, `highlight` and
+  screenshots work as usual. This is the one for showing or checking loading states.
+- **Stop the page's JavaScript** (everything freezes, nothing repaints):
+  - `on: "request", url`: at the `fetch` or XHR call that sends a matching request (`url: ""` = any).
+  - `on: "line", text`: at the line where this code occurs in the loaded scripts, e.g. `text:
+    "renderResults(data"`. If it occurs several times you get the `matches`; pick with `url` and `line`.
+    `condition` pauses only when that expression is true there.
+  - `on: "dom", selector, change?`: when the element changes (`content`, `attributes`, `removed`; default
+    content or attributes). Elements inside a shadow root cannot be watched.
+  - `on: "event", event`: at the page's first listener of `click`, `submit`, `input`, ….
+  - `on: "now"`: at once.
+- A point is removed after its first pause; `once: false` keeps it. `pause()` lists what is set,
+  `pause({ remove: id | "all" })` removes.
+
+While the page is paused:
+
+- `browser_*` and `highlight` fail at once and say where it stopped; they cannot act on a paused page. A
+  `browser_*` call that itself triggers the pause returns "The page paused during …" with the place. A pause
+  the user or the page triggered arrives as a `paused` action.
+- `inspect_paused()` returns the call stack and the variables of the function it stopped in;
+  `inspect_paused({ expression, frame? })` reads one value. It is read-only: an expression that would change
+  something is refused.
+- `resume()` lets the page run and held requests go. `resume({ step: "over" | "into" | "out" })` runs to the
+  next line and pauses again; `resume({ what: "requests" | "page" })` releases only one of the two.
+
+The panel shows the user "Page paused" or "Holding requests" with a **Resume** / **Release** button, so they
+can end it themselves; you then get a `resumed` action. Say in chat or with `say` what they are looking at
+while it is paused, and resume when you are done. A pause also ends when the tab loads another page or
+closes, and when your session ends. Pause points work in your own tabs, on allowed hosts.
 
 ## When the user acts in your tab
 
@@ -138,6 +179,8 @@ add one line at most ("Answered in the panel."). Questions asked in your chat ar
   `demoDeclined`: the user discarded your request.
 - Tour and video events: `next`/`back`, `agentStep`, `stepError`, `tourEnd`, `videoReady`, `videoError`,
   `videoDiscarded` (sections below).
+- Pause events (see "Pausing the page"): `paused` (`reason`, `where`, `fn`, `frames`), `requestHeld` (`count`,
+  `urls`), `resumed` (`by: "user"` from the panel, or `"navigation"` when a new page replaced the paused one).
 
 `request_demo({ prompt })` asks the user to show you something; the panel starts recording for them.
 
@@ -186,6 +229,7 @@ Call `hide_overlays(true)` before a screenshot that should show the plain page, 
 - `bridge not running`: the MCP is not attached; the CLI (`start`, `wait`) works on its own.
 - A `browser_*` call says the browser is closed: it reconnects once by itself; if it still fails,
   `start_browser` and retry.
+- `The page is paused: …`: a pause point of yours stopped it; `inspect_paused` if you want to look, then `resume`.
 - One browser serves one tour or video at a time. If `status` shows a step you did not set, another
   session is using it: ask the user first.
 - Chrome for Testing missing: `npx playwright install chromium`, or set `DEMO_BROWSER_PATH`.

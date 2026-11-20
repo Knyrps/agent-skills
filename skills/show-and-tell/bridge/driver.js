@@ -66,8 +66,10 @@ export function describe(name, args = {}, page = '') {
 // onActivity(text): told before each call that goes ahead, for the panel's activity line.
 // tab() -> { ok, tabId, url, error }: this session's own tab (the extension creates it on first use).
 // Without it the calls go to the first app tab (single-session use, tests).
+// pauseWait(signal, now) -> the pause the session's page is in (see the pause tool), or null: resolves
+// when the page pauses, or at once with `now`.
 export function createDriver({ cdp, outputDir, before = async () => {}, guard = async () => ({ ok: true }),
-  onActivity = () => {}, tab = null, busy = async () => {}, command } = {}) {
+  onActivity = () => {}, tab = null, busy = async () => {}, pauseWait = null, command } = {}) {
   let client = null, connecting = null, tools = null, confirmed = null; // confirmed: Chrome tab id the child is on
   // With session tabs, switching tabs would act on (and bring up) another session's tab.
   const hidden = new Set([...HIDDEN, ...(tab ? ['browser_tabs'] : [])]);
@@ -120,21 +122,23 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
     let mine = await tab();
     for (let i = 0; i < 8; i++) {
       if (!mine?.ok) return { error: mine?.error || 'this session has no tab in the browser' };
+      if (mine.paused) return { paused: mine.paused }; // before anything asks the page
+      const armed = !!mine.armed;
       const tabs = await listTabs(c), same = tabs.filter(t => t.url === mine.url);
       const current = same.find(t => t.current);
-      if (current && (same.length === 1 || confirmed === mine.tabId)) { confirmed = mine.tabId; return { url: mine.url }; }
+      if (current && (same.length === 1 || confirmed === mine.tabId)) { confirmed = mine.tabId; return { url: mine.url, armed }; }
       if (same.length === 1) {
         await select(c, same[0].index);
         // Playwright had moved to another tab (it follows tabs the page opens); selecting back drops the
         // refs of the agent's last snapshot, so a ref error then gets an explanation.
         const drifted = confirmed === mine.tabId;
         confirmed = mine.tabId;
-        return { url: mine.url, drifted };
+        return { url: mine.url, drifted, armed };
       }
       for (const t of same) {
         await select(c, t.index);
         const r = await c.callTool({ name: 'browser_evaluate', arguments: { function: '() => document.documentElement.getAttribute("data-show-and-tell-tab")' } });
-        if (text(r).includes(`"${mine.tabId}"`)) { confirmed = mine.tabId; return { url: mine.url }; }
+        if (text(r).includes(`"${mine.tabId}"`)) { confirmed = mine.tabId; return { url: mine.url, armed }; }
       }
       // The tab is still loading or Playwright has not seen it yet.
       await new Promise(r => setTimeout(r, 300));
@@ -166,22 +170,52 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
       + 'Ask the user to allow the host in the side panel; never edit the allowlist yourself.' }] };
   }
 
+  // A page stopped at a breakpoint (the pause tool) answers nothing, so Playwright would wait until it runs
+  // again. A call on a paused page fails at once; a call that hits a breakpoint returns where it stopped.
+  const NEXT = ' Look at it with inspect_paused and continue with resume. To use the browser tools on a waiting state, hold the request instead: pause({ on: "request", url, hold: true }).';
+  const stoppedAt = p => `${p.reason}${p.reason.includes(p.where) ? '' : `, ${p.frames?.length ? 'at ' : ''}${p.where}`}${p.fn ? ` in ${p.fn}()` : ''}`;
+  const stack = p => (p.frames?.length > 1 ? `\nCall stack: ${p.frames.map(f => `${f.fn} (${f.at})`).join(' < ')}` : '');
+  let hung = null; // a call waiting for a paused page to run again
+
   async function attempt(name, args) {
     const c = await connect();
-    let page = '', drifted = false;
+    let page = '', drifted = false, armed = false;
     if (tab) {
       const r = await selectSessionTab(c);
+      if (r.paused) return { isError: true, content: [{ type: 'text', text: `The page is paused: ${stoppedAt(r.paused)}. ${name} cannot act on a paused page.${NEXT}` }] };
       if (r.error) return { isError: true, content: [{ type: 'text', text: r.error }] };
       page = r.url;
       drifted = !!r.drifted;
+      armed = !!r.armed && !!pauseWait;
     } else if (name !== 'browser_tabs') page = await selectAppTab(c);
     const denied = await check(name, args, page);
     if (denied) return denied;
     try { onActivity(describe(name, args, page)); } catch {}
+    // The call a pause cut short finishes first, so the two do not run into each other.
+    if (hung) await Promise.race([hung, new Promise(r => setTimeout(r, 5000))]);
     // Input in the tab during this window is the agent's own, not the user's.
     await busy(true);
     let r;
-    try { r = await c.callTool({ name, arguments: args }); } finally { await busy(false); }
+    if (!armed) {
+      try { r = await c.callTool({ name, arguments: args }); } finally { await busy(false); }
+    } else {
+      const running = c.callTool({ name, arguments: args });
+      const ac = new AbortController();
+      const stop = pauseWait(ac.signal);
+      const first = await Promise.race([running.then(r => ({ r }), e => ({ e })), stop.then(p => (p ? { p } : new Promise(() => {})))]);
+      if (first.p) {
+        // The call stays open until the page runs again; what it does then still counts as the agent's.
+        const h = hung = running.catch(() => {}).finally(() => { if (hung === h) hung = null; return busy(false); });
+        return { content: [{ type: 'text', text: `The page paused during ${name}: ${stoppedAt(first.p)}.${stack(first.p)}\n${name} finishes once the page runs again; its result is not returned.${NEXT}` }] };
+      }
+      ac.abort();
+      // It may have paused just as the call ended.
+      const late = (await stop) || (await pauseWait(undefined, true));
+      await busy(false);
+      if (first.e) throw first.e;
+      r = first.r;
+      if (late) r.content = [...(r.content || []), { type: 'text', text: `The page paused right after this call: ${stoppedAt(late)}.${stack(late)}${NEXT}` }];
+    }
     if (drifted && r?.isError && /Ref .* not found/i.test(text(r))) r.content = [{ type: 'text', text: 'A tab opened from your page meanwhile, so the refs of your last snapshot are no longer valid (your calls still act on your working tab). Take a new browser_snapshot and use its refs.' }, ...(r.content || [])];
     return r;
   }

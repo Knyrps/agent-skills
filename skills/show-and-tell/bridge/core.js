@@ -124,6 +124,50 @@ export function startOwner({ standalone = false } = {}) {
       list.push({ ...ev, ts: ev.ts || Date.now() });
       userLog.set(s, list.slice(-40));
     }
+    // Pause points (the `pause` tool): what the extension reports per tab. A session learns that its page
+    // paused from its running browser_* call (the driver waits on /pause/wait), else from its watcher.
+    const pauses = new Map(); // tabId -> { session, tabId, points, paused, held, told }
+    const pauseWaits = new Set(); // { session, res }
+    const pausedOf = s => [...pauses.values()].find(p => p.session === s && p.paused);
+    function tellPaused(p) {
+      if (p.told || !p.paused || !p.session) return;
+      const waits = [...pauseWaits].filter(w => w.session === p.session);
+      if (waits.length) {
+        p.told = true;
+        for (const w of waits) { pauseWaits.delete(w); json(w.res, 200, { paused: p.paused, tab: p.tabId }); }
+      } else if (!callState(p.session).running) {
+        p.told = true;
+        push({ type: 'paused', own: true, to: p.session, tab: p.tabId, ...p.paused,
+          hint: 'Look at it with inspect_paused and continue with resume; browser_* tools cannot act on a paused page.' });
+      } // else the session's own call is about to end; /busy tells it then
+    }
+    function onPauseState(m) {
+      if (m.tabId == null) return;
+      const session = String(m.session || ''), prev = pauses.get(m.tabId);
+      const next = { session, tabId: m.tabId, points: Array.isArray(m.points) ? m.points : [], paused: m.paused || null, held: m.held || null, told: false };
+      if (next.paused || next.points.length || next.held) pauses.set(m.tabId, next); else pauses.delete(m.tabId);
+      if (!session) return;
+      if (next.paused) {
+        // The pause and resume tools return what they caused themselves.
+        if (prev?.paused?.since === next.paused.since) next.told = prev.told;
+        else if (['agent', 'step', 'sync'].includes(m.by)) next.told = true;
+        else tellPaused(next);
+      }
+      if (!prev?.held && next.held && m.by !== 'sync') {
+        push({ type: 'requestHeld', own: true, to: session, tab: m.tabId, ...next.held,
+          hint: 'The page runs on and shows its waiting state, so browser_* tools work. Let the requests go with resume.' });
+      }
+      const ran = !!prev?.paused && !next.paused, released = !!prev?.held && !next.held;
+      // News nobody read yet is no longer true once the page runs again.
+      const stale = a => a.own && a.tab === m.tabId && ((a.type === 'paused' && !next.paused) || (a.type === 'requestHeld' && !next.held));
+      if (queue.some(stale)) { queue = queue.filter(a => !stale(a)); persist(); }
+      // Ended without the agent: by the user in the panel, or by a new page it did not open itself.
+      const told = m.by === 'user' || (m.by === 'navigation' && !callState(session).running);
+      if (told && (ran || released)) {
+        push({ type: 'resumed', own: true, to: session, tab: m.tabId, by: m.by, ...(ran && { page: true }), ...(released && { requests: prev.held.count }),
+          note: m.by === 'user' ? 'The user let it run again from the side panel.' : 'A new page loaded in the tab; what was paused or held belonged to the old one.' });
+      }
+    }
     const ownerAlive = () => [...waiters].some(w => w.session === owner) || Date.now() - (sessions.get(owner)?.seen || 0) < 90000;
     function recipients() {
       if (owner && !ownerAlive()) owner = null;
@@ -213,13 +257,15 @@ export function startOwner({ standalone = false } = {}) {
       const general = recipients(), deliveries = new Map(), keep = [];
       for (const a of queue) {
         const target = a.to && sessions.get(a.to);
+        // `own`: news about the session's own page (pause points), of no use to anyone else.
+        if (a.own && !(target && alive(target))) continue;
         const to = target && alive(target) ? [...waiters].filter(w => w.session === a.to) : general;
         if (!to.length) { keep.push(a); continue; }
-        const { to: _, ...plain } = a;
+        const { to: _, own: __, ...plain } = a;
         for (const w of to) deliveries.set(w, [...(deliveries.get(w) || []), plain]);
         recent.push({ ...plain, deliveredAt: Date.now() });
       }
-      if (!deliveries.size) return;
+      if (!deliveries.size && keep.length === queue.length) return;
       queue = keep;
       persist();
       setWaiters(() => { for (const [w, actions] of deliveries) { clearTimeout(w.timer); json(w.res, 200, { actions }); waiters.delete(w); } });
@@ -408,7 +454,19 @@ export function startOwner({ standalone = false } = {}) {
           const mark = requestExt({ cmd: 'agentBusy', session: body.session, on: !!body.on }, 500).catch(() => {});
           if (first) await mark;
         }
+        // The page paused just as the call ended, so the call could not report it.
+        if (last && pausedOf(body.session)) tellPaused(pausedOf(body.session));
         return json(res, 200, { ok: true });
+      }
+      // The driver waits here during a browser_* call: answered when the session's page pauses.
+      if (route === 'GET /pause/wait') {
+        const session = url.searchParams.get('session') || '', p = pausedOf(session);
+        if (p) { p.told = true; return json(res, 200, { paused: p.paused, tab: p.tabId }); }
+        if (url.searchParams.get('now')) return json(res, 200, {});
+        const w = { session, res };
+        pauseWaits.add(w);
+        res.on('close', () => pauseWaits.delete(w));
+        return;
       }
       // What the user did in the session's tab since the last time it asked; read once.
       if (route === 'GET /user-events') {
@@ -449,8 +507,9 @@ export function startOwner({ standalone = false } = {}) {
           broadcast({ cmd: 'setStep', label, session: body.session || '' });
           return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
         }
-        if (!['highlight', 'clearHighlights', 'hideOverlays', 'throttle', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop', 'tabs'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
-        try { return json(res, 200, await requestExt(body, ['recordTour', 'highlight', 'loadTour', 'requestDemo', 'tabs'].includes(body.cmd) ? 150000 : 8000)); }
+        if (!['highlight', 'clearHighlights', 'hideOverlays', 'throttle', 'pause', 'resume', 'inspectPaused', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop', 'tabs'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
+        const ms = ['recordTour', 'highlight', 'loadTour', 'requestDemo', 'tabs', 'pause'].includes(body.cmd) ? 150000 : ['resume', 'inspectPaused'].includes(body.cmd) ? 20000 : 8000;
+        try { return json(res, 200, await requestExt(body, ms)); }
         catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       }
       if (route === 'POST /shutdown' && standalone) { json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 50); return; }
@@ -475,6 +534,7 @@ export function startOwner({ standalone = false } = {}) {
         else if (msg.type === 'result' && msg.rid) { const { type, rid: r, ...rest } = msg; replies.get(r)?.(rest); }
         else if (msg.type === 'panel') state.panelOpen = !!msg.open;
         else if (msg.type === 'userEvent') onUserEvent(msg);
+        else if (msg.type === 'pauseState') onPauseState(msg);
         // After the port changed hands (the old owner was an agent's MCP process that exited), the extension
         // tells which sessions it has tabs for. Their processes are checked like any other, so a session
         // whose process is gone counts as ended; a running one says hello again within 30 s.
@@ -490,7 +550,8 @@ export function startOwner({ standalone = false } = {}) {
         else if (msg.type === 'hostGrant') { try { hosts.grant(msg.host, msg.mode); } catch (e) { log(e.message); } pushHosts(true); }
         else if (msg.type === 'ping') conn.send('{"type":"pong"}');
       });
-      conn.on('close', () => { exts.delete(conn); log('extension disconnected'); });
+      // A browser that is gone has nothing paused; one that reconnects says what is.
+      conn.on('close', () => { exts.delete(conn); if (!exts.size) pauses.clear(); log('extension disconnected'); });
     });
 
     server.once('error', reject);

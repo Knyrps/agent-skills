@@ -3,6 +3,7 @@
 // the side panel and the content scripts render from it.
 import { loadConfig, hostAllowed, pageKey } from './allow.js';
 import { stepTiming, estimateMs, pickSize, bitrate } from './video-plan.js';
+import { createPauser } from './pause.js';
 
 const S = chrome.storage.session;
 S.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }).catch(() => {}); // content scripts read highlights
@@ -98,7 +99,9 @@ async function permitTour(tour, why, tab) {
 
 // ------------------------------------------------------------------ bridge connection
 
-let ws = null, backoff = 1000, retry = null, ping = null;
+let ws = null, backoff = 1000, retry = null, ping = null, orphaned = null;
+// Without a bridge no agent is left to resume a page: after a minute offline everything paused runs again.
+const ORPHAN_MS = 60000;
 const panels = new Set();
 let video = null; // the recording in progress, see "video recording" below
 S.set({ video: null });
@@ -112,10 +115,12 @@ async function connect() {
   sock.onopen = () => {
     backoff = 1000;
     S.set({ connected: true });
+    clearTimeout(orphaned); orphaned = null;
     clearInterval(ping);
     ping = setInterval(() => send({ type: 'ping' }), 20000); // traffic keeps the worker alive
     send({ type: 'panel', open: panels.size > 0 });
     resendGrants();
+    pauser.resend();
     sessionTabs().then(map => send({ type: 'knownSessions', sessions: Object.entries(map).filter(([, e]) => e.pid && !e.ended)
       .map(([id, e]) => ({ id, name: e.name, color: e.color, pid: e.pid })) }));
     flushOutbox();
@@ -128,6 +133,7 @@ async function connect() {
     if (ws === sock) ws = null;
     clearInterval(ping);
     S.set({ connected: false, waiting: false });
+    orphaned ||= setTimeout(() => { orphaned = null; pauser.clearAll('bridge offline'); }, ORPHAN_MS);
     if (!retry) retry = setTimeout(() => { retry = null; connect(); }, backoff);
     backoff = Math.min(backoff * 2, 15000);
   };
@@ -531,6 +537,8 @@ async function onBridge(m) {
   }
   if (m.cmd === 'setWaiting') {
     await S.set({ waiting: !!m.waiting, listener: String(m.listener || ''), sessions: m.sessions || [], endedSessions: m.ended || [] });
+    // An ended session can no longer resume its page: everything it paused or held runs again.
+    for (const id of m.ended || []) pauser.clearSession(id);
     return sweepTabs(m.sessions || [], m.ended || []);
   }
   if (m.cmd === 'hosts') return setHostState(m);
@@ -569,10 +577,15 @@ async function command(m) {
   // (equally trusted) input from the user's. Allowed during a video too; it changes nothing on screen.
   if (m.cmd === 'agentBusy') {
     const tab = (await sessionTabs())[m.session];
-    if (tab) await chrome.tabs.sendMessage(tab.tabId, { cmd: 'agentBusy', on: !!m.on }).catch(() => {});
+    // A paused page answers nothing until it runs again.
+    if (tab && !pauser.paused(tab.tabId)) await chrome.tabs.sendMessage(tab.tabId, { cmd: 'agentBusy', on: !!m.on }).catch(() => {});
     return { ok: true };
   }
-  if (video && !['state', 'recordStop', 'setStep', 'askHost', 'tabs'].includes(m.cmd)) {
+  if (['highlight', 'hideOverlays', 'loadTour', 'gotoStep', 'requestDemo', 'recordTour'].includes(m.cmd)) {
+    const t = m.session ? await sessionTab(m, { create: false }).catch(() => null) : await activeTab();
+    if (t && pauser.paused(t.id)) return { ok: false, error: PAUSED };
+  }
+  if (video && !['state', 'recordStop', 'setStep', 'askHost', 'tabs', 'resume'].includes(m.cmd)) {
     const who = video.session && video.session !== m.session ? ` by ${(await sessionTabs())[video.session]?.name || 'another session'}` : '';
     return { ok: false, error: `a video is being recorded${who}; ${who ? 'wait until it is done' : 'wait for videoReady or call recordStop'}` };
   }
@@ -583,7 +596,9 @@ async function command(m) {
       // there), so a tab that opened on top is put behind the working tab again for the call.
       let t = await sessionTab(m);
       if (t && !t.active) t = await chrome.tabs.update(t.id, { active: true }).catch(() => t);
-      return t ? { ok: true, tabId: t.id, url: t.pendingUrl || t.url } : { ok: false, error: 'could not open a tab for this session' };
+      if (!t) return { ok: false, error: 'could not open a tab for this session' };
+      // paused: the call fails at once instead of hanging; armed: it watches for a pause while it runs.
+      return { ok: true, tabId: t.id, url: t.pendingUrl || t.url, ...(pauser.paused(t.id) && { paused: pauser.paused(t.id) }), ...(pauser.has(t.id) && { armed: true }) };
     }
     // The bridge asks on behalf of the browser_* tools; it records the grant itself.
     case 'askHost': {
@@ -617,6 +632,22 @@ async function command(m) {
       if (m.network !== undefined) Object.assign(out, await setNetwork(tab.id, m.network));
       if (out.ok && m.cpu !== undefined) Object.assign(out, await setCpu(tab.id, m.cpu));
       return out;
+    }
+    // Breakpoints and held requests in the session's own tab, see pause.js.
+    case 'pause': {
+      const tab = await tabFor(m);
+      if (!tab) return { ok: false, error: 'no tab' };
+      if (m.remove) return { ...(await pauser.remove(tab.id, String(m.remove))), tabId: tab.id, ...pauser.list(tab.id) };
+      if (m.list || !m.on) return { ok: true, tabId: tab.id, ...pauser.list(tab.id) };
+      const e = await permit(tab.url || '', 'pause the page there');
+      if (e) return { ok: false, error: e };
+      return { ...(await pauser.add(tab.id, m.session || '', m)), tabId: tab.id };
+    }
+    case 'resume': case 'inspectPaused': {
+      const tab = m.session ? await sessionTab(m, { create: false }) : await activeTab();
+      if (!tab) return { ok: false, error: 'no tab' };
+      if (m.cmd === 'inspectPaused') return pauser.inspect(tab.id, { expression: m.expression, frame: m.frame });
+      return { ...(await pauser.resume(tab.id, { step: m.step, what: m.what, by: 'agent' })), tabId: tab.id };
     }
     // A session clears its own highlights only.
     case 'clearHighlights':
@@ -991,19 +1022,28 @@ const setThrottleState = (tabId, patch) => serial(async () => {
 
 async function attachDebugger(tabId) {
   if (attachedTabs.has(tabId)) return;
-  await chrome.debugger.attach({ tabId }, '1.3');
+  try { await chrome.debugger.attach({ tabId }, '1.3'); }
+  catch (e) { if (!/already attached/i.test(String(e?.message || e))) throw e; }
   attachedTabs.add(tabId);
 }
-// Nothing throttled any more: let go of the tab.
-async function detachIfIdle(tabId, state) {
-  if (Object.keys(state).length || !attachedTabs.has(tabId)) return;
+// Nothing throttled and no pause point any more: let go of the tab.
+async function detachIfIdle(tabId) {
+  if (!attachedTabs.has(tabId) || pauser.has(tabId) || (await throttles())[tabId]) return;
   await chrome.debugger.detach({ tabId }).catch(() => {});
   attachedTabs.delete(tabId);
 }
+// Pause points and held requests (the `pause` tool) share this connection, see pause.js.
+const pauser = createPauser({ S, serial, attach: attachDebugger, idle: detachIfIdle, allowed, tell: m => send(m) });
+pauser.recover();
+chrome.debugger.onEvent.addListener((source, method, params) => { if (source.tabId != null) pauser.onEvent(source, method, params); });
 chrome.debugger.onDetach.addListener(({ tabId }) => {
   attachedTabs.delete(tabId);
+  pauser.dropped(tabId);
   serial(async () => { const t = await throttles(); if (t[tabId]) { delete t[tabId]; await S.set({ throttles: t }); } });
 });
+chrome.tabs.onUpdated.addListener((id, info) => { if (info.status === 'loading') pauser.navigated(id); });
+chrome.webNavigation.onCommitted.addListener(d => { if (!d.frameId) pauser.replaced(d.tabId, d.timeStamp); });
+const PAUSED = 'the page is paused at a breakpoint; call resume first';
 
 // spec: a preset name, "off", or { downloadKbps, uploadKbps, latencyMs, offline }.
 async function setNetwork(tabId, spec) {
@@ -1012,7 +1052,8 @@ async function setNetwork(tabId, spec) {
       await chrome.debugger.sendCommand({ tabId }, 'Network.emulateNetworkConditions',
         { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }).catch(() => {});
     }
-    await detachIfIdle(tabId, await setThrottleState(tabId, { network: null }));
+    await setThrottleState(tabId, { network: null });
+    await detachIfIdle(tabId);
     return { ok: true, network: 'off' };
   }
   let n;
@@ -1038,7 +1079,8 @@ async function setCpu(tabId, rate) {
   if (!(r >= 1 && r <= 20)) return { ok: false, error: 'cpu must be a slowdown factor from 1 (off) to 20, e.g. 4 or 6' };
   if (r === 1) {
     if (attachedTabs.has(tabId)) await chrome.debugger.sendCommand({ tabId }, 'Emulation.setCPUThrottlingRate', { rate: 1 }).catch(() => {});
-    await detachIfIdle(tabId, await setThrottleState(tabId, { cpu: null }));
+    await setThrottleState(tabId, { cpu: null });
+    await detachIfIdle(tabId);
     return { ok: true, cpu: 'off' };
   }
   await attachDebugger(tabId);
@@ -1575,6 +1617,9 @@ async function handle(m, sender) {
     }
     // The panel's "Turn off" for the tab in front; the user can always end throttling.
     case 'throttleOff': { const t = await activeTab(); return t ? throttleOff(t.id) : { ok: false }; }
+    // The pause card's buttons, also for the tab in front: the user can always let the page run again.
+    case 'pauseResume': { const t = await activeTab(); return t ? pauser.resume(t.id, { what: m.what, by: 'user' }) : { ok: false }; }
+    case 'pauseClear': { const t = await activeTab(); return t ? pauser.clear(t.id, 'user') : { ok: false }; }
     // Only the panel answers: the user's click, never a bridge command.
     case 'hostDecision': {
       const q = hostAsks.get(String(m.host));
@@ -1605,6 +1650,7 @@ async function handle(m, sender) {
     }
     case 'annotate': case 'recStart':
       if (video) return { error: 'A video is being recorded.' };
+      if (pauser.paused((await activeTab())?.id)) return { error: 'The page is paused. Resume it first.' };
       return m.type === 'recStart' ? startRecording() : handleAnnotate();
     case 'hello': return { allowed: await allowed(sender.tab?.url || m.url), tabId: sender.tab?.id ?? null };
     // Messages and Next/Back go to the session whose tab is in front.

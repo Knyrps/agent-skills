@@ -32,7 +32,7 @@ async function ensureBrowser({ force = false } = {}) {
 const [cmd, ...rest] = process.argv.slice(2);
 const opt = name => { const i = rest.indexOf('--' + name); return i >= 0 ? rest[i + 1] : undefined; };
 const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out', '--zoom', '--gesture', '--direction', '--to', '--url',
-  '--session', '--label', '--download', '--upload', '--latency', '--cpu']);
+  '--session', '--label', '--download', '--upload', '--latency', '--cpu', '--change', '--line', '--column', '--condition', '--step', '--what', '--frame']);
 const NETWORK_PRESETS = ['fast-4g', 'slow-4g', '3g', 'offline'];
 const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
 const positional = rest.filter((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
@@ -72,6 +72,20 @@ async function runCli() {
     case 'throttle': return call('POST', '/cmd', { cmd: 'throttle', network: opt('download')
       ? { downloadKbps: +opt('download'), uploadKbps: opt('upload') && +opt('upload'), latencyMs: +(opt('latency') || 0) }
       : positional[0] || (opt('cpu') ? undefined : 'off'), cpu: opt('cpu') && +opt('cpu') });
+    // pause [--session s] request <url> [--hold] | dom <selector> [--change c] | line <text> | line --url u --line n | event <name> | now
+    //       | list | remove <id|all>   (add --keep to pause more than once)
+    case 'pause': {
+      const [on, arg] = positional, base = { cmd: 'pause', session: opt('session'), once: !rest.includes('--keep') };
+      if (!on || on === 'list') return call('POST', '/cmd', { ...base, list: true });
+      if (on === 'remove') return call('POST', '/cmd', { ...base, remove: arg || 'all' });
+      return call('POST', '/cmd', { ...base, on, url: opt('url') ?? (on === 'request' ? arg || '' : undefined), hold: rest.includes('--hold'),
+        selector: on === 'dom' ? arg : undefined, change: opt('change'), text: on === 'line' ? arg : undefined, line: opt('line') && +opt('line'),
+        column: opt('column') && +opt('column'), condition: opt('condition'), event: on === 'event' ? arg : undefined });
+    }
+    // resume [--session s] [--step over|into|out] [--what page|requests]
+    case 'resume': return call('POST', '/cmd', { cmd: 'resume', session: opt('session'), step: opt('step'), what: opt('what') });
+    // inspect [--session s] [expression] [--frame n]
+    case 'inspect': return call('POST', '/cmd', { cmd: 'inspectPaused', session: opt('session'), expression: positional.join(' ') || undefined, frame: opt('frame') && +opt('frame') });
     case 'show': return call('POST', '/cmd', { cmd: 'hideOverlays', hidden: false });
     case 'tour': return call('POST', '/cmd', { cmd: 'loadTour', tour: JSON.parse(fs.readFileSync(positional[0], 'utf8')), start: +(opt('start') || 0) });
     case 'goto': return call('POST', '/cmd', { cmd: 'gotoStep', index: +positional[0] });
@@ -145,6 +159,8 @@ async function runMcp() {
     // Each session works in its own tab, so parallel sessions don't navigate under each other.
     tab: () => call('POST', '/tab', { session: SESSION, label: LABEL }).catch(e => ({ ok: false, error: e.message })),
     busy: on => call('POST', '/busy', { session: SESSION, on }).catch(() => {}),
+    // A call on a page with pause points returns when the page stops at one, instead of hanging.
+    pauseWait: (signal, now) => call('GET', `/pause/wait?session=${SESSION}${now ? '&now=1' : ''}`, null, { signal }).then(r => r?.paused || null, () => null),
     // The panel shows what the agent does in the browser, also when nothing visible changes.
     onActivity: text => { call('POST', '/activity', { text, session: SESSION, label: LABEL }).catch(() => {}); } });
 
@@ -255,6 +271,40 @@ async function runMcp() {
       uploadKbps: { type: 'number', description: 'Custom upload speed in kbit/s (default: same as download)' },
       latencyMs: { type: 'number', description: 'Custom added latency in ms' },
     } } },
+    { name: 'pause', description: 'Stop your tab at a chosen moment, like breakpoints in Chrome DevTools, so you or the user can look at a state '
+      + 'that normally passes too quickly (loading, empty, half-rendered, an open menu). `on` says when: "request" before a fetch/XHR whose URL contains '
+      + '`url` is sent (with hold: true the page runs on and only that request waits, so browser_* tools still work and the loading state stays on screen); '
+      + '"dom" when the element `selector` changes; "line" at a line of page code (`text`: code to search the loaded scripts for, or `url` + `line`); '
+      + '"event" at the first listener of an event such as click or submit; "now" immediately. A point is removed after it paused once unless once: false. '
+      + 'When the page pauses you are told where (file, line, function, call stack): by the browser_* call that caused it, or by a `paused` action. '
+      + 'browser_* tools cannot act on a paused page; look with inspect_paused and continue with resume. The panel shows the pause and lets the user '
+      + 'resume. Without `on` it lists your pause points; remove takes an id or "all".',
+    inputSchema: { type: 'object', properties: {
+      on: { type: 'string', enum: ['request', 'dom', 'line', 'event', 'now'] },
+      url: { type: 'string', description: 'request: part of the request URL ("" = any request). line: part of the script URL' },
+      hold: { type: 'boolean', description: 'request: keep the page running and only hold matching requests until resume' },
+      selector: { type: 'string', description: 'dom: CSS selector of the element to watch' },
+      change: { type: 'string', enum: ['any', 'content', 'attributes', 'removed'], description: 'dom: what counts (default any = content or attributes)' },
+      text: { type: 'string', description: 'line: code to find in the loaded scripts, e.g. "renderResults(data"; the pause is set where it occurs' },
+      line: { type: 'number', description: 'line: 1-based line in the script `url`, or the line to pick when `text` occurs several times' },
+      column: { type: 'number', description: 'line: 1-based column, for minified code' },
+      condition: { type: 'string', description: 'line: pause only when this expression is true there' },
+      event: { type: 'string', description: 'event: the event name, e.g. click, submit, keydown, input' },
+      once: { type: 'boolean', description: 'Remove the point after its first pause (default true)' },
+      remove: { type: 'string', description: 'Remove this pause point (id), or "all"' },
+    } } },
+    { name: 'resume', description: 'Let your paused tab run again and let held requests go. `step` (over, into, out) runs to the next line instead and '
+      + 'returns where it stopped. `what` limits it to "page" or "requests" (default both).',
+    inputSchema: { type: 'object', properties: {
+      step: { type: 'string', enum: ['over', 'into', 'out'] },
+      what: { type: 'string', enum: ['all', 'page', 'requests'] },
+    } } },
+    { name: 'inspect_paused', description: 'Look at your paused tab without changing it: the call stack and the variables of a call frame, or the value '
+      + 'of an `expression` there (e.g. "data.items.length", "this.state"). Read-only: expressions that would change something are refused.',
+    inputSchema: { type: 'object', properties: {
+      expression: { type: 'string', description: 'JavaScript evaluated in the frame; omit for the call stack and variables' },
+      frame: { type: 'number', description: 'Call frame, 0 = where it stopped (default)' },
+    } } },
     { name: 'hide_overlays', description: 'Temporarily hide (true) or show again (false) all highlights, e.g. around evidence screenshots. '
       + 'The side panel is browser UI and never appears in page screenshots.',
     inputSchema: { type: 'object', properties: { hidden: { type: 'boolean' } }, required: ['hidden'] } },
@@ -267,7 +317,7 @@ async function runMcp() {
     inputSchema: { type: 'object', properties: { timeoutSec: { type: 'number', description: 'Default 600' } } } },
   ];
 
-  const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'throttle', 'load_tour', 'request_demo', 'record_tour']);
+  const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'throttle', 'pause', 'load_tour', 'request_demo', 'record_tour']);
   const server = new Server({ name: 'show-and-tell', version: JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...TOOLS, ...(await driver.list(log)).map(t =>
     ({ ...t, description: 'Shared show-and-tell browser (the one the user sees): ' + (t.description || '') }))] }));
@@ -314,6 +364,10 @@ async function runMcp() {
           if (network === undefined && a.cpu === undefined) return reply({ ok: false, error: 'give preset, downloadKbps or cpu ("off" resets both)' });
           return done(await cmd({ cmd: 'throttle', network, cpu: a.cpu }));
         }
+        case 'pause': return done(await cmd({ cmd: 'pause', on: a.on, url: a.url, hold: a.hold, selector: a.selector, change: a.change, text: a.text,
+          line: a.line, column: a.column, condition: a.condition, event: a.event, once: a.once, remove: a.remove }));
+        case 'resume': return done(await cmd({ cmd: 'resume', step: a.step, what: a.what }));
+        case 'inspect_paused': return reply(await cmd({ cmd: 'inspectPaused', expression: a.expression, frame: a.frame }));
         case 'get_queue': return withShots(await call('GET', '/queue' + (a.recent ? '?recent=1' : '')));
         case 'wait_for_action': {
           const t = Math.max(1, Math.min(86400, +(a.timeoutSec || 600)));
