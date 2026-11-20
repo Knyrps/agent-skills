@@ -205,8 +205,11 @@ const ack = async id => {
 // and sends to, the session whose tab is in front. Commands without a session (the CLI) use that tab.
 
 const sessionTabs = () => S.get('sessionTabs').then(r => r.sessionTabs || {});
+// A session's tabs: the one it started in plus every tab opened from them (see "tabs opened from a
+// session's tab" below). tabId is the working tab, the newest one still open; tools act there.
+const tabsOf = e => (e.tabs?.length ? e.tabs : [e.tabId]);
 async function sessionOfTab(tabId) {
-  for (const [sid, e] of Object.entries(await sessionTabs())) if (e.tabId === tabId) return sid;
+  for (const [sid, e] of Object.entries(await sessionTabs())) if (tabsOf(e).includes(tabId)) return sid;
   return '';
 }
 
@@ -236,14 +239,14 @@ function sessionTab(m, { create = true } = {}) {
       }
     }
     if (!create) return null;
-    const owned = new Set(Object.values(map).map(x => x.tabId));
+    const owned = new Set(Object.values(map).flatMap(tabsOf));
     const front = await activeTab();
     let t = front && !owned.has(front.id) && !front.url.startsWith('chrome-extension://') && front.groupId < 0 && !(await isLab(front.url)) ? front : null;
     t ||= await chrome.tabs.create({ windowId: front?.windowId, active: true,
       url: chrome.runtime.getURL('tab.html') + '?s=' + encodeURIComponent(m.session) + '&n=' + encodeURIComponent(m.sessionName || '') });
     const name = m.sessionName || 'agent', color = m.color || 'blue';
     await groupTab(t, name, color);
-    map[m.session] = { tabId: t.id, name, color };
+    map[m.session] = { tabId: t.id, tabs: [t.id], name, color };
     await S.set({ sessionTabs: map });
     return chrome.tabs.get(t.id);
   });
@@ -256,10 +259,68 @@ async function tabFor(m, { show = false } = {}) {
   return t;
 }
 
+// ------------------------------------------------------------------ tabs opened from a session's tab
+// Chrome puts every tab a grouped tab opens (links with target=_blank, window.open, forms, also without a
+// click) into its group, so the group says which session a tab belongs to; Chrome's opener field is often
+// empty. Popup windows cannot hold groups: they belong to the session of the tab that opened them, which
+// Chrome does report there. A session's newest tab becomes its working tab, and the agent is told.
+const groupOf = async e => (await chrome.tabs.get(e.tabId).catch(() => null))?.groupId ?? -1;
+// A new tab's first page load belongs to the new-tab news, not another line.
+const freshTabs = new Map(); // tabId -> until
+async function adoptTab(tab) {
+  if (!tab?.id || tab.url?.endsWith('/panel.html')) return;
+  let report = null;
+  await serial(async () => {
+    const map = await sessionTabs();
+    if (Object.values(map).some(e => tabsOf(e).includes(tab.id))) return;
+    let sid = '';
+    if (tab.groupId >= 0) for (const [k, e] of Object.entries(map)) { if ((await groupOf(e)) === tab.groupId) { sid = k; break; } }
+    if (!sid && tab.openerTabId != null) {
+      const win = await chrome.windows.get(tab.windowId).catch(() => null);
+      if (win?.type === 'popup') sid = Object.keys(map).find(k => tabsOf(map[k]).includes(tab.openerTabId)) || '';
+    }
+    if (!sid) return;
+    const e = map[sid], from = e.tabId;
+    e.tabs = [...tabsOf(e), tab.id];
+    e.tabId = tab.id;
+    await S.set({ sessionTabs: map });
+    if (!e.ended) report = { sid, from };
+  });
+  if (report) tabNews(report.sid, 'newTab', tab.id, Date.now());
+}
+// What the agent hears about it, once the new tab knows its address.
+async function tabNews(session, kind, tabId, ts) {
+  let url = '';
+  for (let i = 0; i < 10 && !url; i++) {
+    const t = await chrome.tabs.get(tabId).catch(() => null);
+    url = t?.url || t?.pendingUrl || '';
+    if (!url || url === 'about:blank') { url = ''; await new Promise(r => setTimeout(r, 200)); }
+  }
+  send({ type: 'userEvent', session, event: { kind, url: url || 'about:blank', ts } });
+}
+chrome.tabs.onCreated.addListener(tab => { freshTabs.set(tab.id, Date.now() + 5000); adoptTab(tab); });
+chrome.tabs.onUpdated.addListener((id, info, tab) => {
+  if (!('groupId' in info)) return;
+  if (info.groupId >= 0) { adoptTab(tab); return; }
+  // Dragged out of the group: no longer the session's (its working tab stays, the user can't lose that).
+  serial(async () => {
+    const map = await sessionTabs();
+    for (const e of Object.values(map)) if (e.tabs?.includes(id) && e.tabId !== id) { e.tabs = e.tabs.filter(x => x !== id); await S.set({ sessionTabs: map }); }
+  });
+});
+
+// A closed tab leaves its session; when it was the working tab, the newest remaining one takes over.
 chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
   const map = await sessionTabs();
-  const sid = Object.keys(map).find(k => map[k].tabId === tabId);
-  if (sid) { delete map[sid]; await S.set({ sessionTabs: map }); }
+  const sid = Object.keys(map).find(k => tabsOf(map[k]).includes(tabId));
+  if (!sid) return;
+  const e = map[sid], rest = tabsOf(e).filter(x => x !== tabId);
+  if (!rest.length) delete map[sid];
+  else {
+    e.tabs = rest;
+    if (e.tabId === tabId) { e.tabId = rest[rest.length - 1]; if (!e.ended) tabNews(sid, 'tabClosed', e.tabId, Date.now()); }
+  }
+  await S.set({ sessionTabs: map });
 }));
 
 // ------------------------------------------------------------------ cleanup of ended sessions
@@ -284,8 +345,14 @@ function sweepTabs(live, endedIds) {
     const map = await sessionTabs(), ids = new Set(live.map(s => s.id)), gone = new Set(endedIds);
     let changed = false;
     for (const [sid, e] of Object.entries(map)) {
-      const t = await chrome.tabs.get(e.tabId).catch(() => null);
-      if (!t) { delete map[sid]; changed = true; continue; }
+      const tabs = (await Promise.all(tabsOf(e).map(id => chrome.tabs.get(id).catch(() => null)))).filter(Boolean);
+      if (!tabs.length) { delete map[sid]; changed = true; continue; }
+      if (tabs.length !== tabsOf(e).length) {
+        e.tabs = tabs.map(t => t.id);
+        if (!e.tabs.includes(e.tabId)) e.tabId = e.tabs[e.tabs.length - 1];
+        changed = true;
+      }
+      const t = tabs.find(x => x.id === e.tabId);
       // The pid goes back to a new bridge after a handover, so it can still tell when this session ends.
       const pid = live.find(s => s.id === sid)?.pid;
       if (pid && e.pid !== pid) { e.pid = pid; changed = true; }
@@ -295,13 +362,17 @@ function sweepTabs(live, endedIds) {
       }
       if (!e.ended && !gone.has(sid)) continue; // not reported as ended: someone may still need it
       if (!e.ended) {
-        if (isPlaceholder(t.url)) { await chrome.tabs.remove(t.id).catch(() => {}); delete map[sid]; changed = true; continue; }
-        if (t.groupId >= 0) await chrome.tabGroups.update(t.groupId, { title: `${e.name} · ended`, color: 'grey' }).catch(() => {});
+        for (const x of tabs.filter(x => isPlaceholder(x.url))) await chrome.tabs.remove(x.id).catch(() => {});
+        const kept = tabs.filter(x => !isPlaceholder(x.url));
+        if (!kept.length) { delete map[sid]; changed = true; continue; }
+        e.tabs = kept.map(x => x.id); if (!e.tabs.includes(e.tabId)) e.tabId = e.tabs[e.tabs.length - 1];
+        for (const g of new Set(kept.map(x => x.groupId).filter(g => g >= 0))) await chrome.tabGroups.update(g, { title: `${e.name} · ended`, color: 'grey' }).catch(() => {});
         e.ended = Date.now(); changed = true;
         continue;
       }
       if (Date.now() - e.ended < ENDED_MS) continue;
-      if (e.looked || t.active) await ungroup(t.id); else await chrome.tabs.remove(t.id).catch(() => {});
+      const looked = new Set(e.looked || []);
+      for (const x of tabs) { if (looked.has(x.id) || x.active) await ungroup(x.id); else await chrome.tabs.remove(x.id).catch(() => {}); }
       delete map[sid]; changed = true;
     }
     if (changed) await S.set({ sessionTabs: map });
@@ -311,8 +382,8 @@ function sweepTabs(live, endedIds) {
 // The user opening an ended session's tab means they want it: it is kept (ungrouped) later.
 chrome.tabs.onActivated.addListener(({ tabId }) => serial(async () => {
   const map = await sessionTabs();
-  const e = Object.values(map).find(x => x.tabId === tabId && x.ended && !x.looked);
-  if (e) { e.looked = true; await S.set({ sessionTabs: map }); }
+  const e = Object.values(map).find(x => x.ended && tabsOf(x).includes(tabId) && !x.looked?.includes(tabId));
+  if (e) { e.looked = [...(e.looked || []), tabId]; await S.set({ sessionTabs: map }); }
 }));
 
 // Groups Chrome restores from the last run (it brings back tabs and groups, not the extension's map): one
@@ -324,7 +395,7 @@ async function adoptRestored(live) {
   const { ourGroups = [] } = await chrome.storage.local.get('ourGroups');
   if (!ourGroups.length) return false;
   const names = new Set(ourGroups), map = await sessionTabs(), startup = Date.now() - (await bootedAt) < 60000;
-  const owned = new Set(Object.values(map).map(x => x.tabId));
+  const owned = new Set(Object.values(map).flatMap(tabsOf));
   let changed = false;
   for (const g of await chrome.tabGroups.query({})) {
     const name = String(g.title || '').replace(/ · ended$/, '');
@@ -334,8 +405,9 @@ async function adoptRestored(live) {
     const s = live.find(x => x.name === name && !map[x.id]);
     if (s) {
       const keep = tabs.find(t => !isPlaceholder(t.url)) || tabs[0];
-      map[s.id] = { tabId: keep.id, name: s.name, color: s.color };
-      owned.add(keep.id); changed = true;
+      map[s.id] = { tabId: keep.id, tabs: [...tabs.filter(t => t !== keep).map(t => t.id), keep.id], name: s.name, color: s.color };
+      for (const t of tabs) owned.add(t.id);
+      changed = true;
       await chrome.tabGroups.update(g.id, { title: s.name, color: s.color }).catch(() => {});
       continue;
     }
@@ -1423,10 +1495,13 @@ async function userEvent(tabId, event) {
   if (video?.tabId === tabId) return;
   const { recording } = await S.get('recording');
   if (recording?.tabId === tabId) return;
-  send({ type: 'userEvent', session: await sessionOfTab(tabId), event });
+  // A tab no session owns is nobody's business; guessing a session would tell the wrong agent.
+  const session = await sessionOfTab(tabId);
+  if (session) send({ type: 'userEvent', session, event });
 }
 const userNav = (kind, { tabId, frameId, url, transitionType }) => {
   if (frameId !== 0 || (ownNav.get(tabId) || 0) > Date.now() || !/^https?:/.test(url)) return;
+  if (kind === 'navigate' && (freshTabs.get(tabId) || 0) > Date.now()) { freshTabs.delete(tabId); return; }
   if (transitionType === 'auto_subframe') return;
   userEvent(tabId, { kind, url, ts: Date.now(), ...(transitionType && { how: transitionType }) });
 };

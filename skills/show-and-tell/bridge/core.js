@@ -96,7 +96,8 @@ export function startOwner({ standalone = false } = {}) {
     // the page reacting to it) is the agent's own and dropped.
     const userLog = new Map(); // session -> [event]
     const calls = new Map(); // session -> { running, windows: [[start, end]] }
-    const GRACE = { navigate: 3000, urlChange: 3000 };
+    const GRACE = { navigate: 3000, urlChange: 3000, newTab: 3000 };
+    const TAB_NEWS = new Set(['newTab', 'tabClosed']);
     const callState = s => { let c = calls.get(s); if (!c) calls.set(s, c = { running: 0, since: 0, windows: [] }); return c; };
     const agentsOwn = (s, ev) => {
       const c = calls.get(s);
@@ -112,7 +113,10 @@ export function startOwner({ standalone = false } = {}) {
     function onUserEvent(msg) {
       const s = msg.session || owner || '';
       const ev = msg.event || {};
-      if (!s || !ev.kind || agentsOwn(s, ev)) return;
+      if (!s || !ev.kind) return;
+      // A new or closed tab is always news; an agent's call that opened one is credited to it.
+      if (TAB_NEWS.has(ev.kind)) ev.by = agentsOwn(s, ev) ? 'agent' : 'other';
+      else if (agentsOwn(s, ev)) return;
       const list = userLog.get(s) || [];
       const last = list[list.length - 1];
       // A field edited twice in a row keeps only its final value.
@@ -521,6 +525,8 @@ export function userEventText(e) {
     key: () => `pressed ${e.key}${el ? ` in ${el}` : ''}`,
     navigate: () => `${e.how === 'reload' ? 'reloaded' : 'opened'} ${e.url}`,
     urlChange: () => `the page moved to ${e.url}`,
+    newTab: () => `a new tab opened${e.by === 'agent' ? ' from your last action' : ' (by the user or the page)'}: ${e.url}. Your calls now act on it`,
+    tabClosed: () => `your working tab was closed; your calls act on ${e.url} again`,
   }[e.kind]?.() || `${e.kind} ${el}`;
   return `${at} ${what}`;
 }

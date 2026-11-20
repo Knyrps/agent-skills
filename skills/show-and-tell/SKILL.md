@@ -32,7 +32,10 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
 Several agent sessions can share the browser. Each works in its own tab, grouped and named after it
 (`status` → `you`, e.g. "app 2" when another session runs in the same folder). Everything you do (`browser_*`,
 highlights, tours, `request_demo`, videos) happens in that tab; there is no switching to other tabs
-(`browser_tabs` is not offered). Showing something brings your tab to the front. What the user sends while
+(`browser_tabs` is not offered). A tab opened from yours (a link with `target="_blank"`, `window.open`, a
+popup window; by your click, the user or the page) joins your group and becomes your working tab: your calls
+act there, and your next result says so ("a new tab opened …"). When it closes you are back on the tab it
+came from ("your working tab was closed …"). Showing something brings your tab to the front. What the user sends while
 your tab is in front comes to you. Only one tour and one video run at a time: if another session's is
 running, you get a busy error; wait or tell the user.
 

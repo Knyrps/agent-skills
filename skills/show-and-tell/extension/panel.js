@@ -20,7 +20,7 @@ const GROUP = { grey: '#5f6368', blue: '#1a73e8', red: '#d93025', yellow: '#f9ab
 let frontTabId = null;
 async function frontSession() {
   const { sessionTabs = {}, sessions = [] } = await S.get(['sessionTabs', 'sessions']);
-  const id = Object.keys(sessionTabs).find(k => sessionTabs[k].tabId === frontTabId);
+  const id = Object.keys(sessionTabs).find(k => (sessionTabs[k].tabs || [sessionTabs[k].tabId]).includes(frontTabId));
   if (!id) return null;
   const live = sessions.find(x => x.id === id);
   return { id, name: live?.name || sessionTabs[id].name, color: sessionTabs[id].color, listening: !!live?.listening, live: !!live };
