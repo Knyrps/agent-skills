@@ -66,7 +66,7 @@ export function startOwner({ standalone = false } = {}) {
     // goes to that session. Sessions from the same folder get distinct names: "app", "app 2", …
     const sessions = new Map(); // session id -> { label, name, color, seen }
     let owner = null, recent = [], announced = '';
-    const alive = s => Date.now() - s.seen < 90000 || [...waiters].some(w => w.session === s.id);
+    const alive = s => !s.endedAt && (Date.now() - s.seen < 90000 || [...waiters].some(w => w.session === s.id));
     const touch = (id, label) => {
       if (!id) return;
       const s = sessions.get(id);
@@ -127,9 +127,22 @@ export function startOwner({ standalone = false } = {}) {
     }
     // `waiting`/`listener`: who gets input from a tab no session owns. `sessions`: every live session, so
     // the panel can show the one whose tab is in front.
+    // A session has ended only when its MCP process is gone: its random id dies with the process, so no chat
+    // can use it again. Sessions without a known process (CLI-only) never count as ended. A reused pid only
+    // delays cleanup, never causes it.
+    const pidAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+    const ended = () => {
+      const out = [];
+      for (const s of sessions.values()) {
+        if (!s.pid || pidAlive(s.pid)) continue;
+        s.endedAt ||= Date.now();
+        if (Date.now() - s.endedAt > 3600000) sessions.delete(s.id); else out.push(s.id);
+      }
+      return out;
+    };
     const listener = () => {
       const r = recipients();
-      return { waiting: r.length > 0, listener: owner ? nameOf(owner) || owner : '',
+      return { waiting: r.length > 0, listener: owner ? nameOf(owner) || owner : '', ended: ended(),
         sessions: [...sessions.values()].filter(alive).map(s => ({ id: s.id, name: s.name, color: s.color,
           listening: [...waiters].some(w => w.session === s.id) })) };
     };
@@ -331,7 +344,13 @@ export function startOwner({ standalone = false } = {}) {
       if (route === 'POST /hello' || route === 'POST /claim') {
         let body = {};
         try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
-        if (route === 'POST /claim') claim(body.session, body.label); else { touch(body.session, body.label); announce(); }
+        if (route === 'POST /claim') claim(body.session, body.label);
+        else {
+          touch(body.session, body.label);
+          const s = sessions.get(body.session);
+          if (s && Number.isSafeInteger(body.pid) && body.pid > 0) s.pid = body.pid;
+          announce();
+        }
         return json(res, 200, { ok: true, owner, listening: listener().waiting });
       }
       // Is this URL allowed? With ask, the side panel asks the user (up to 2 min); only the user's answer,

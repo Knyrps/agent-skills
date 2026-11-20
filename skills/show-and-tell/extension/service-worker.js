@@ -9,7 +9,12 @@ S.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }).catch(() => 
 S.set({ connected: false });
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
-chrome.alarms.onAlarm.addListener(() => connect());
+chrome.alarms.onAlarm.addListener(async () => {
+  connect();
+  // The bridge sends the session list only when it changes; tabs opened since then are swept here.
+  const { sessions = [], endedSessions = [] } = await S.get(['sessions', 'endedSessions']);
+  if (endedSessions.length) sweepTabs(sessions, endedSessions);
+});
 chrome.runtime.onStartup.addListener(() => connect());
 chrome.runtime.onInstalled.addListener(() => connect());
 
@@ -205,6 +210,7 @@ async function groupTab(tab, name, color) {
   try {
     const groupId = tab.groupId >= 0 ? tab.groupId : await chrome.tabs.group({ tabIds: tab.id, createProperties: { windowId: tab.windowId } });
     await chrome.tabGroups.update(groupId, { title: name, color });
+    await rememberGroup(name);
     return groupId;
   } catch { return -1; }
 }
@@ -252,6 +258,82 @@ chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
   if (sid) { delete map[sid]; await S.set({ sessionTabs: map }); }
 }));
 
+// ------------------------------------------------------------------ cleanup of ended sessions
+// Only sessions the bridge reports as ended are touched: their MCP process has exited, so no chat can use
+// them again. Silence, an offline bridge or an unknown session never count. An ended session's placeholder
+// tab closes at once; a real page turns into a grey "<name> · ended" group. 15 minutes later the tab
+// closes, unless the user opened it after the session ended or it is in front: then it is only ungrouped.
+// Groups restored from the last browser run go back to their session if it is still alive; the rest are
+// ungrouped (placeholders closed).
+const ENDED_MS = 15 * 60000;
+const isPlaceholder = url => (url || '').startsWith(chrome.runtime.getURL('tab.html'));
+const ungroup = tabId => chrome.tabs.ungroup(tabId).catch(() => {});
+
+async function rememberGroup(name) {
+  const { ourGroups = [] } = await chrome.storage.local.get('ourGroups');
+  if (!ourGroups.includes(name)) await chrome.storage.local.set({ ourGroups: [...ourGroups, name].slice(-50) });
+}
+
+function sweepTabs(live, endedIds) {
+  return serial(async () => {
+    const map = await sessionTabs(), ids = new Set(live.map(s => s.id)), gone = new Set(endedIds);
+    let changed = false;
+    for (const [sid, e] of Object.entries(map)) {
+      const t = await chrome.tabs.get(e.tabId).catch(() => null);
+      if (!t) { delete map[sid]; changed = true; continue; }
+      if (ids.has(sid) && !gone.has(sid)) {
+        if (e.ended) { await groupTab(t, e.name, e.color); delete e.ended; delete e.looked; changed = true; }
+        continue;
+      }
+      if (!e.ended && !gone.has(sid)) continue; // not reported as ended: someone may still need it
+      if (!e.ended) {
+        if (isPlaceholder(t.url)) { await chrome.tabs.remove(t.id).catch(() => {}); delete map[sid]; changed = true; continue; }
+        if (t.groupId >= 0) await chrome.tabGroups.update(t.groupId, { title: `${e.name} · ended`, color: 'grey' }).catch(() => {});
+        e.ended = Date.now(); changed = true;
+        continue;
+      }
+      if (Date.now() - e.ended < ENDED_MS) continue;
+      if (e.looked || t.active) await ungroup(t.id); else await chrome.tabs.remove(t.id).catch(() => {});
+      delete map[sid]; changed = true;
+    }
+    if (changed) await S.set({ sessionTabs: map });
+  });
+}
+
+// The user opening an ended session's tab means they want it: it is kept (ungrouped) later.
+chrome.tabs.onActivated.addListener(({ tabId }) => serial(async () => {
+  const map = await sessionTabs();
+  const e = Object.values(map).find(x => x.tabId === tabId && x.ended && !x.looked);
+  if (e) { e.looked = true; await S.set({ sessionTabs: map }); }
+}));
+
+// Runs with the first session list after a browser start, so live sessions are known.
+async function cleanupLastRun(live) {
+  const { ourGroups = [] } = await chrome.storage.local.get('ourGroups');
+  if (!ourGroups.length) return;
+  const names = new Set(ourGroups), map = await sessionTabs();
+  const owned = new Set(Object.values(map).map(x => x.tabId));
+  for (const g of await chrome.tabGroups.query({})) {
+    const name = String(g.title || '').replace(/ · ended$/, '');
+    if (!names.has(name)) continue;
+    const tabs = (await chrome.tabs.query({ groupId: g.id })).filter(t => !owned.has(t.id));
+    if (!tabs.length) continue;
+    const s = live.find(x => x.name === name && !map[x.id]);
+    if (s) {
+      const keep = tabs.find(t => !isPlaceholder(t.url)) || tabs[0];
+      map[s.id] = { tabId: keep.id, name: s.name, color: s.color };
+      await chrome.tabGroups.update(g.id, { title: s.name, color: s.color }).catch(() => {});
+      continue;
+    }
+    for (const t of tabs) {
+      if (isPlaceholder(t.url)) await chrome.tabs.remove(t.id).catch(() => {}); else await ungroup(t.id);
+    }
+  }
+  await S.set({ sessionTabs: map });
+  await chrome.storage.local.set({ ourGroups: Object.values(map).map(x => x.name) });
+}
+chrome.runtime.onStartup.addListener(() => S.set({ startupCleanup: true }));
+
 // ------------------------------------------------------------------ bridge -> extension
 
 async function onBridge(m) {
@@ -267,7 +349,12 @@ async function onBridge(m) {
       await S.set({ steps });
     });
   }
-  if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting, listener: String(m.listener || ''), sessions: m.sessions || [] });
+  if (m.cmd === 'setWaiting') {
+    await S.set({ waiting: !!m.waiting, listener: String(m.listener || ''), sessions: m.sessions || [], endedSessions: m.ended || [] });
+    const { startupCleanup } = await S.get('startupCleanup');
+    if (startupCleanup) { await S.set({ startupCleanup: false }); await serial(() => cleanupLastRun(m.sessions || [])); }
+    return sweepTabs(m.sessions || [], m.ended || []);
+  }
   if (m.cmd === 'hosts') return setHostState(m);
   if (m.cmd === 'thinking') return serial(async () => { const { thinking = {} } = await S.get('thinking'); thinking[m.session] = m.ts; await S.set({ thinking }); });
   if (m.cmd === 'say') {

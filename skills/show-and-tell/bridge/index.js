@@ -107,7 +107,7 @@ async function runMcp() {
   const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const WATCH = `node "${path.join(SKILL_DIR, 'bridge')}" wait --session ${SESSION} --label ${LABEL} --timeout 86400`;
   const cmd = body => call('POST', '/cmd', { ...body, session: SESSION, sessionLabel: LABEL });
-  const hello = () => call('POST', '/hello', { session: SESSION, label: LABEL }).catch(() => {});
+  const hello = () => call('POST', '/hello', { session: SESSION, label: LABEL, pid: process.pid }).catch(() => {});
   hello();
   setInterval(hello, 30000).unref();
   const watcher = async () => {
