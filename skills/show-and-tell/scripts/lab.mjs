@@ -1,45 +1,79 @@
 // Test page for show-and-tell: every element reacts to real mouse, touch and keyboard input (and to the
-// skill's scripted actions), and a log at the bottom lists what happened, trusted or synthetic.
+// skill's scripted actions), and a log at the bottom lists what happened, trusted or synthetic. It is built
+// like a Material 3 app (M3 color tokens, type scale, Material Web components), so the controls live in
+// shadow DOM the way they do in real apps.
 // node scripts/lab.mjs [port]  → http://localhost:5191/  (and /next for a second page)
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const here = path.dirname(fileURLToPath(import.meta.url));
+const FILES = {
+  '/material-lab.js': [path.join(here, 'lab-vendor', 'material-lab.js'), 'text/javascript'],
+  '/m3-tokens.css': [path.join(here, '..', 'extension', 'vendor', 'm3-tokens.css'), 'text/css'],
+};
 const port = +(process.argv[2] || process.env.LAB_PORT || 5191);
 // Enough cards to overflow the strip even on very wide screens.
-const cards = Array.from({ length: 20 }, (_, i) => `<div class="card" data-n="${i + 1}">Product ${i + 1}</div>`).join('');
+const cards = Array.from({ length: 20 }, (_, i) => `<div class="item md-typescale-label-large" data-n="${i + 1}">Product ${i + 1}</div>`).join('');
 
-const page = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><style>
+const page = (title, body, script = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/m3-tokens.css">
+<style>
+:root{color-scheme:light dark;--md-ref-typeface-brand:system-ui,"Segoe UI",sans-serif;--md-ref-typeface-plain:system-ui,"Segoe UI",sans-serif}
 *{box-sizing:border-box}
 /* Sideways swipes and wheels stay in the page instead of triggering Chrome's back/forward gesture. */
 html,body{overscroll-behavior:none}
-body{font:16px "Segoe UI",system-ui,sans-serif;margin:0;background:#f6f7fb;color:#1a1b21}
-header{background:#0b57d0;color:#fff;padding:14px 28px;font-size:20px;display:flex;gap:24px;align-items:center}
-header a{color:#fff}
-main{padding:24px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
-.box{min-width:0;background:#fff;border-radius:12px;padding:16px;min-height:96px;box-shadow:0 1px 3px #0003;user-select:none;touch-action:none;position:relative}
-.box h3{margin:0 0 6px;font-size:15px}.state{font-size:14px;color:#45464f}.ok{background:#e6f4ea}
+body{margin:0;background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);font-family:var(--md-ref-typeface-plain)}
+/* M3 small top app bar. */
+header{position:sticky;top:0;z-index:5;height:64px;display:flex;align-items:center;gap:24px;padding:0 24px;
+  background:var(--md-sys-color-surface-container)}
+header .grow{flex:1}
+header a{color:var(--md-sys-color-primary);text-decoration:none}
+main{padding:24px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+/* M3 filled card: surface-container-highest, 12 px corners. Done states use the secondary container. */
+.box{position:relative;min-width:0;min-height:112px;padding:16px;display:flex;flex-direction:column;gap:8px;border-radius:12px;
+  background:var(--md-sys-color-surface-container-highest);user-select:none;touch-action:none;transition:background .2s}
+.box h3{margin:0}
+.state{color:var(--md-sys-color-on-surface-variant)}
+.ok{background:var(--md-sys-color-secondary-container);color:var(--md-sys-color-on-secondary-container)}
+.ok .state{color:inherit}
 .wide{grid-column:span 2}
-.strip{display:flex;gap:12px;overflow-x:auto;padding:4px;scroll-behavior:auto;touch-action:pan-x}
-.card{flex:none;width:130px;height:80px;border-radius:10px;background:#d3e3fd;display:grid;place-items:center}
-#drag{width:110px;height:56px;border-radius:10px;background:#0b57d0;color:#fff;display:grid;place-items:center;cursor:grab;position:relative;z-index:2}
-#drop{min-height:96px;border:2px dashed #8e918f}#drop.over{border-color:#0b57d0;background:#e8f0fe}
-#pinch{overflow:hidden}#pinch .zoom{transform-origin:center;transition:transform .05s;font-size:28px;text-align:center;padding-top:6px}
-#hover:hover{background:#ffe08a}
-#scr{height:120px;overflow:auto;touch-action:pan-y}
-#menu{position:fixed;display:none;background:#fff;border-radius:8px;box-shadow:0 2px 8px #0004;padding:6px 0;z-index:9}
-#menu div{padding:6px 16px;cursor:pointer}#menu div:hover{background:#eee}
-input,select,button{font:inherit}input[type=text]{padding:6px;width:100%}
-#log{grid-column:1/-1;background:#1a1b21;color:#e3e2e9;border-radius:12px;padding:12px 16px;font:12px/18px ui-monospace,Consolas,monospace;height:150px;overflow:auto}
-dialog{border:0;border-radius:16px;padding:24px;box-shadow:0 4px 16px #0005}
-</style></head><body><header><b>Gesture lab</b>${title === 'Next page' ? '<a href="/" id="back-link">← Back to the lab</a>' : '<a href="/next" id="next-link">Next page →</a>'}</header>
-<main>${body}<div id="log"></div></main><div id="menu"><div data-v="Copy">Copy</div><div data-v="Delete">Delete</div></div>
-<script>
+.strip{display:flex;gap:8px;overflow-x:auto;padding:4px 0;scroll-behavior:auto;touch-action:pan-x;scrollbar-width:thin}
+.item{flex:none;width:136px;height:80px;border-radius:12px;display:grid;place-items:center;
+  background:var(--md-sys-color-surface-container-low);color:var(--md-sys-color-on-surface)}
+#drag{position:relative;z-index:2;width:112px;height:56px;border-radius:16px;display:grid;place-items:center;cursor:grab;
+  background:var(--md-sys-color-primary-container);color:var(--md-sys-color-on-primary-container)}
+#drop{outline:2px dashed var(--md-sys-color-outline);outline-offset:-2px}
+#drop.over{outline-color:var(--md-sys-color-primary);background:var(--md-sys-color-primary-container)}
+#pinch{overflow:hidden}#pinch .zoom{transform-origin:center;transition:transform .05s;font-size:28px;text-align:center}
+#hover:hover{background:var(--md-sys-color-tertiary-container);color:var(--md-sys-color-on-tertiary-container)}
+#scr{height:136px;overflow:auto;touch-action:pan-y}
+md-outlined-text-field,md-outlined-select{width:100%}
+label.check{display:flex;align-items:center;gap:8px;cursor:pointer}
+md-slider{width:100%}
+#menu-anchor{position:fixed;width:0;height:0}
+/* M3 terminal-style log on the inverse surface. */
+#log{grid-column:1/-1;height:160px;overflow:auto;padding:12px 16px;border-radius:12px;
+  background:var(--md-sys-color-inverse-surface);color:var(--md-sys-color-inverse-on-surface);font:12px/18px ui-monospace,Consolas,monospace}
+</style></head><body>
+<header><span class="md-typescale-title-large">${title}</span><span class="grow"></span>${title === 'Next page'
+  ? '<a href="/" id="back-link" class="md-typescale-label-large">← Back to the lab</a>'
+  : '<a href="/next" id="next-link" class="md-typescale-label-large">Next page →</a>'}</header>
+<main>${body}<div id="log"></div></main>
+<script type="module">
+import '/material-lab.js';
 const $ = s => document.querySelector(s);
+// e: the DOM event behind the entry, which says whether it was trusted, or 'component' for an event a
+// component fires itself (a select picking an option).
 const log = (what, e) => { const l = $('#log'); const d = document.createElement('div');
-  d.textContent = new Date().toLocaleTimeString() + '  ' + what + (e ? (e.isTrusted ? '  [trusted]' : '  [synthetic]') : '');
-  l.append(d); l.scrollTop = l.scrollHeight; window.__lab = window.__lab || []; window.__lab.push({ what, trusted: !!e?.isTrusted, event: !!e }); };
+  d.textContent = new Date().toLocaleTimeString() + '  ' + what + (e === 'component' ? '  [component]' : e ? (e.isTrusted ? '  [trusted]' : '  [synthetic]') : '');
+  l.append(d); l.scrollTop = l.scrollHeight; window.__lab = window.__lab || []; window.__lab.push({ what, trusted: !!e?.isTrusted, event: !!e && e !== 'component' }); };
 const set = (sel, text, ok = true) => { const s = $(sel + ' .state'); if (s) s.textContent = text; if (ok) $(sel).classList.add('ok'); };
-${title === 'Next page' ? '' : LAB_SCRIPT}
+// Material components re-fire change as their own (untrusted) event; the native control inside has the real one.
+const inner = async (sel, q = 'input') => { const h = $(sel); await customElements.whenDefined(h.localName); await h.updateComplete; return [...h.shadowRoot.querySelectorAll(q)].pop(); };
+${script}
 log('page loaded: ' + location.pathname);
 </script></body></html>`;
 
@@ -69,7 +103,7 @@ strip.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') { sx
 strip.addEventListener('pointermove', e => { if (sx) strip.scrollLeft = sx[1] - (e.clientX - sx[0]); });
 strip.addEventListener('pointerup', () => { sx = null; });
 let scrollLog = 0;
-strip.addEventListener('scroll', () => { const first = [...strip.children].find(c => c.offsetLeft + c.offsetWidth > strip.scrollLeft + 4);
+strip.addEventListener('scroll', () => { const first = [...strip.children].find(c => c.offsetLeft - strip.offsetLeft + c.offsetWidth > strip.scrollLeft + 4);
   set('#strip-box', 'First card in view: ' + first.dataset.n); clearTimeout(scrollLog); scrollLog = setTimeout(() => log('strip scrolled to card ' + first.dataset.n), 200); });
 // Drag to the drop zone: HTML5 drag and drop, or a pointer drag (touch, and pages that use pointer events).
 const drag = $('#drag'), drop = $('#drop');
@@ -87,53 +121,67 @@ drag.addEventListener('pointerup', e => { if (!pd) return; pd = null; drag.style
 let clicks = 0;
 $('#btn').addEventListener('click', e => { clicks++; $('#btn').textContent = 'Clicked ' + clicks; set('#btn-box', clicks + ' click' + (clicks > 1 ? 's' : '')); log('click', e); });
 $('#dbl').addEventListener('dblclick', e => { set('#dbl', 'Double clicked'); log('double click', e); });
-const menu = $('#menu');
-$('#ctx').addEventListener('contextmenu', e => { e.preventDefault(); Object.assign(menu.style, { display: 'block', left: e.clientX + 'px', top: e.clientY + 'px' }); set('#ctx', 'Menu open', false); log('right click', e); });
-menu.addEventListener('click', e => { const v = e.target.dataset.v; if (!v) return; menu.style.display = 'none'; set('#ctx', 'Chose ' + v); log('menu: ' + v, e); });
-addEventListener('pointerdown', e => { if (!menu.contains(e.target)) menu.style.display = 'none'; }, true);
+const menu = $('#menu'), anchor = $('#menu-anchor');
+$('#ctx').addEventListener('contextmenu', e => { e.preventDefault(); Object.assign(anchor.style, { left: e.clientX + 'px', top: e.clientY + 'px' });
+  menu.show(); set('#ctx', 'Menu open', false); log('right click', e); });
+for (const item of menu.querySelectorAll('md-menu-item')) item.addEventListener('click', e => { set('#ctx', 'Chose ' + item.dataset.v); log('menu: ' + item.dataset.v, e); });
 $('#hover').addEventListener('mouseenter', e => { set('#hover', 'Hovered'); log('hover', e); });
 // Scroll inside a box.
 let scrLog = 0;
 $('#scr').addEventListener('scroll', () => { set('#scr', 'Scrolled to ' + Math.round($('#scr').scrollTop) + ' px'); clearTimeout(scrLog); scrLog = setTimeout(() => log('box scrolled to ' + Math.round($('#scr').scrollTop)), 200); });
-// Typing, a form that submits on Enter, select, checkbox, slider, dialog.
-$('#name').addEventListener('input', e => set('#name-box', 'Hello, ' + ($('#name').value || '…')));
-$('#name').addEventListener('change', e => log('name changed to "' + $('#name').value + '"', e));
-$('#form').addEventListener('submit', e => { e.preventDefault(); set('#form-box', 'Searched for "' + $('#query').value + '"'); log('form submitted', e); });
-$('#size').addEventListener('change', e => { set('#size-box', 'Size ' + $('#size').value); log('select: ' + $('#size').value, e); });
-$('#agree').addEventListener('change', e => { set('#agree-box', $('#agree').checked ? 'Checked' : 'Unchecked'); log('checkbox ' + $('#agree').checked, e); });
-$('#vol').addEventListener('input', e => set('#vol-box', 'Volume ' + $('#vol').value));
-$('#vol').addEventListener('change', e => log('slider ' + $('#vol').value, e));
-$('#open-dlg').addEventListener('click', e => { $('#dlg').showModal(); log('dialog opened', e); });
+// Typing, a search that submits on Enter, select, checkbox, slider, dialog, a shortcut.
+$('#name').addEventListener('input', () => set('#name-box', 'Hello, ' + ($('#name').value || '…')));
+(await inner('#name')).addEventListener('change', e => log('name changed to "' + $('#name').value + '"', e));
+$('#query').addEventListener('keydown', e => { if (e.key !== 'Enter') return; e.preventDefault(); set('#form-box', 'Searched for "' + $('#query').value + '"'); log('search submitted', e); });
+$('#size').addEventListener('change', () => { set('#size-box', 'Size ' + $('#size').value); log('select: ' + $('#size').value, 'component'); });
+(await inner('#agree')).addEventListener('change', e => { set('#agree-box', $('#agree').checked ? 'Checked' : 'Unchecked'); log('checkbox ' + $('#agree').checked, e); });
+$('#vol').addEventListener('input', () => set('#vol-box', 'Volume ' + $('#vol').value));
+(await inner('#vol')).addEventListener('change', e => log('slider ' + $('#vol').value, e));
+$('#open-dlg').addEventListener('click', e => { $('#dlg').show(); log('dialog opened', e); });
 $('#dlg-ok').addEventListener('click', e => { $('#dlg').close(); set('#dlg-box', 'Dialog confirmed'); log('dialog confirmed', e); });
 addEventListener('keydown', e => { if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); set('#keys-box', 'Ctrl+K pressed'); log('shortcut Ctrl+K', e); } });
 `;
 
-const LAB = page('Gesture lab', `
-<div class="box" id="tap"><h3>Tap target</h3><div class="state">Tap or click</div></div>
-<div class="box" id="dtap"><h3>Double tap</h3><div class="state">Tap twice quickly</div></div>
-<div class="box" id="lp"><h3>Long press</h3><div class="state">Hold for 0.6 s</div></div>
-<div class="box" id="pinch"><h3>Pinch area</h3><div class="state">Pinch, or Ctrl + wheel</div><div class="zoom">🔍</div></div>
-<div class="box wide" id="strip-box"><h3>Swipe strip</h3><div class="strip" id="strip">${cards}</div><div class="state">Swipe, scroll or drag sideways</div></div>
-<div class="box"><h3>Drag me</h3><div id="drag" draggable="true">Box</div></div>
-<div class="box" id="drop"><h3>Drop here</h3><div class="state">Drop the box here</div></div>
-<div class="box" id="btn-box"><h3>Click</h3><button id="btn">Click</button><div class="state">0 clicks</div></div>
-<div class="box" id="dbl"><h3>Double click</h3><div class="state">Double click here</div></div>
-<div class="box" id="ctx"><h3>Right click</h3><div class="state">Right click for a menu</div></div>
-<div class="box" id="hover"><h3>Hover</h3><div class="state">Point at this</div></div>
-<div class="box" id="scr"><h3>Scroll inside</h3><div class="state">Scroll this box</div><div style="height:500px"></div></div>
-<div class="box" id="name-box"><h3>Type</h3><input type="text" id="name" placeholder="Name"><div class="state">Hello, …</div></div>
-<div class="box" id="form-box"><h3>Search (Enter)</h3><form id="form"><input type="text" id="query" placeholder="Search"></form><div class="state">Type and press Enter</div></div>
-<div class="box" id="size-box"><h3>Select</h3><select id="size"><option>S</option><option>M</option><option>L</option></select><div class="state">Size S</div></div>
-<div class="box" id="agree-box"><h3>Checkbox</h3><label><input type="checkbox" id="agree"> I agree</label><div class="state">Unchecked</div></div>
-<div class="box" id="vol-box"><h3>Slider</h3><input type="range" id="vol" min="0" max="100" value="20"><div class="state">Volume 20</div></div>
-<div class="box" id="dlg-box"><h3>Dialog</h3><button id="open-dlg">Open dialog</button><div class="state">Closed</div></div>
-<div class="box" id="keys-box"><h3>Shortcut</h3><div class="state">Press Ctrl+K</div></div>
-<dialog id="dlg"><p>A modal dialog.</p><button id="dlg-ok">OK</button></dialog>`);
+const card = (id, title, hint, extra = '', cls = '') =>
+  `<div class="box ${cls}" id="${id}"><h3 class="md-typescale-title-medium">${title}</h3>${extra}<div class="state md-typescale-body-medium">${hint}</div></div>`;
 
-const NEXT = page('Next page', '<div class="box wide"><h3>Second page</h3><div class="state">For recordings that span pages.</div></div>');
+const LAB = page('Gesture lab', [
+  card('tap', 'Tap target', 'Tap or click', '<md-ripple></md-ripple>'),
+  card('dtap', 'Double tap', 'Tap twice quickly', '<md-ripple></md-ripple>'),
+  card('lp', 'Long press', 'Hold for 0.6 s'),
+  card('pinch', 'Pinch area', 'Pinch, or Ctrl + wheel', '<div class="zoom">🔍</div>'),
+  card('strip-box', 'Swipe strip', 'Swipe, scroll or drag sideways', `<div class="strip" id="strip">${cards}</div>`, 'wide'),
+  `<div class="box"><h3 class="md-typescale-title-medium">Drag me</h3><div id="drag" draggable="true" class="md-typescale-label-large">Box</div></div>`,
+  card('drop', 'Drop here', 'Drop the box here'),
+  card('btn-box', 'Click', '0 clicks', '<div><md-filled-button id="btn">Click</md-filled-button></div>'),
+  card('dbl', 'Double click', 'Double click here'),
+  card('ctx', 'Right click', 'Right click for a menu'),
+  card('hover', 'Hover', 'Point at this'),
+  card('scr', 'Scroll inside', 'Scroll this box', '<div style="flex:none;height:500px"></div>'),
+  card('name-box', 'Type', 'Hello, …', '<md-outlined-text-field id="name" label="Name"></md-outlined-text-field>'),
+  card('form-box', 'Search (Enter)', 'Type and press Enter', '<md-outlined-text-field id="query" label="Search" type="search"></md-outlined-text-field>'),
+  card('size-box', 'Select', 'Size S', `<md-outlined-select id="size" label="Size">${['S', 'M', 'L'].map((v, i) =>
+    `<md-select-option value="${v}"${i ? '' : ' selected'}><div slot="headline">${v}</div></md-select-option>`).join('')}</md-outlined-select>`),
+  card('agree-box', 'Checkbox', 'Unchecked', '<label class="check md-typescale-body-large"><md-checkbox id="agree" touch-target="wrapper"></md-checkbox>I agree</label>'),
+  card('vol-box', 'Slider', 'Volume 20', '<md-slider id="vol" min="0" max="100" value="20" labeled></md-slider>'),
+  card('dlg-box', 'Dialog', 'Closed', '<div><md-outlined-button id="open-dlg">Open dialog</md-outlined-button></div>'),
+  card('keys-box', 'Shortcut', 'Press Ctrl+K'),
+  `<md-dialog id="dlg"><div slot="headline">Confirm</div><div slot="content">A modal dialog.</div>
+    <div slot="actions"><md-text-button id="dlg-ok">OK</md-text-button></div></md-dialog>`,
+  `<span id="menu-anchor"></span><md-menu id="menu" anchor="menu-anchor" positioning="fixed">
+    <md-menu-item data-v="Copy"><div slot="headline">Copy</div></md-menu-item>
+    <md-menu-item data-v="Delete"><div slot="headline">Delete</div></md-menu-item></md-menu>`,
+].join('\n'), LAB_SCRIPT);
+
+const NEXT = page('Next page', card('second', 'Second page', 'For recordings that span pages.', '', 'wide'));
 
 http.createServer((q, r) => {
   const p = new URL(q.url, 'http://x').pathname;
+  if (FILES[p]) {
+    const [file, type] = FILES[p];
+    r.writeHead(200, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-store' });
+    return fs.createReadStream(file).pipe(r);
+  }
   if (p !== '/' && p !== '/next') { r.writeHead(404); return r.end(); }
   r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
   r.end(p === '/next' ? NEXT : LAB);

@@ -37,6 +37,8 @@ function input(s) {
   const at = async (sel, fx = .5, fy = .5) => { await ev(`document.querySelector(${JSON.stringify(sel)}).scrollIntoView({ block: 'center', behavior: 'instant' })`); await sleep(80);
     return ev(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width * ${fx}, r.top + r.height * ${fy}]; })()`); };
   // A move with a button held reports that button, as Chrome's own input does (needed to start a drag).
+  // Where an element is now, without scrolling (menus and dialogs in the top layer).
+  const pos = sel => ev(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
   const mouse = (type, x, y, o = {}) => s.send('Input.dispatchMouseEvent', { type, x, y, button: o.button || (o.buttons ? 'left' : 'none'), buttons: o.buttons ?? 0, clickCount: o.count || 0, modifiers: o.mod || 0, deltaX: o.dx || 0, deltaY: o.dy || 0 });
   const click = async (x, y, { button = 'left', count = 1 } = {}) => {
     await mouse('mouseMoved', x, y);
@@ -50,7 +52,7 @@ function input(s) {
       .then(() => s.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, modifiers: mod }));
   };
   const type = text => s.send('Input.insertText', { text });
-  return { ev, at, mouse, click, touch, key, type };
+  return { ev, at, pos, mouse, click, touch, key, type };
 }
 const ENTER = ['Enter', 'Enter', 13], ESC = ['Escape', 'Escape', 27];
 
@@ -78,9 +80,9 @@ check('tap (mouse click)', /Tapped 1/.test(await state('#tap')));
 check('button click ×2', /2 clicks/.test(await state('#btn-box')));
 [x, y] = await p.at('#dbl'); await p.click(x, y, { count: 2 });
 check('double click', /Double clicked/.test(await state('#dbl')));
-[x, y] = await p.at('#ctx'); await p.click(x, y, { button: 'right' });
-const menuOpen = await p.ev(`getComputedStyle(document.getElementById('menu')).display !== 'none'`);
-[x, y] = await p.at('#menu [data-v="Delete"]'); await p.click(x, y);
+[x, y] = await p.at('#ctx'); await p.click(x, y, { button: 'right' }); await sleep(500);
+const menuOpen = await p.ev(`document.getElementById('menu').open`);
+[x, y] = await p.pos('#menu [data-v="Delete"]'); await p.click(x, y); await sleep(300);
 check('right click opens the menu, choosing an item', menuOpen && /Chose Delete/.test(await state('#ctx')));
 [x, y] = await p.at('#hover'); await p.mouse('mouseMoved', x - 30, y); await p.mouse('mouseMoved', x, y); await sleep(100);
 check('hover', /Hovered/.test(await state('#hover')));
@@ -101,14 +103,15 @@ check('Ctrl + wheel zooms', /Zoom 1[1-9]\d%/.test(await state('#pinch')));
 check('typing into a field', /Hello, Ada/.test(await state('#name-box')) && (await p.ev(`__lab.some(e => e.what.startsWith('name changed') && e.trusted)`)));
 [x, y] = await p.at('#query'); await p.click(x, y); await p.type('castors'); await p.key(...ENTER);
 check('Enter submits a form', /Searched for "castors"/.test(await state('#form-box')));
-await p.ev(`document.getElementById('size').focus()`); await p.key('ArrowDown', 'ArrowDown', 40); await sleep(100);
-check('select with the keyboard', /Size M/.test(await state('#size-box')));
+[x, y] = await p.at('#size'); await p.click(x, y); await sleep(500);
+[x, y] = await p.pos('#size md-select-option[value="M"]'); await p.click(x, y); await sleep(400);
+check('select: open and pick an option', /Size M/.test(await state('#size-box')), await state('#size-box'));
 [x, y] = await p.at('#agree'); await p.click(x, y);
 check('checkbox', /Checked/.test(await state('#agree-box')));
 [x, y] = await p.at('#vol', .8, .5); await p.click(x, y);
 check('slider click', /Volume (7\d|8\d)/.test(await state('#vol-box')), await state('#vol-box'));
-[x, y] = await p.at('#open-dlg'); await p.click(x, y); await sleep(200);
-[x, y] = await p.at('#dlg-ok'); await p.click(x, y);
+[x, y] = await p.at('#open-dlg'); await p.click(x, y); await sleep(800);
+[x, y] = await p.pos('#dlg-ok'); await p.click(x, y); await sleep(600);
 check('modal dialog open and confirm', /confirmed/.test(await state('#dlg-box')));
 await p.key('k', 'KeyK', 75, 2);
 check('keyboard shortcut Ctrl+K', /Ctrl\+K pressed/.test(await state('#keys-box')));

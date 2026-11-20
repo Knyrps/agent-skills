@@ -153,17 +153,24 @@
   // the skill's scripted actions are synthetic and never reported.
   const userEvt = ev => chrome.runtime.sendMessage({ type: 'userEvent', event: { ...ev, url: location.href, ts: Date.now() } }).catch(() => {});
   const what = el => { const d = describe(el); return { selector: d.selector, tag: d.tag, text: d.text.slice(0, 60) }; };
+  // Web components (Material Web, Shoelace, …) re-fire change from their host as an untrusted event; it
+  // counts as the user's when the user's own input went into that component in the last minute. A text
+  // field's change comes when it loses focus, so several recently touched components are remembered.
+  let touched = [];
+  const userTouched = e => { if (e.isTrusted && e.target instanceof Element) touched = [{ el: e.target, ts: Date.now() }, ...touched.filter(t => t.el !== e.target)].slice(0, 8); };
+  const fromUser = (e, el) => e.isTrusted || (el.localName.includes('-')
+    && touched.some(t => Date.now() - t.ts < 60000 && (t.el === el || el.contains(t.el))));
   function watchUser() {
+    for (const t of ['pointerdown', 'keydown', 'input']) addEventListener(t, userTouched, true);
     addEventListener('click', e => {
       if (!e.isTrusted || ours(e) || !(e.target instanceof Element)) return;
       userEvt({ kind: e.detail === 2 ? 'doubleClick' : 'click', target: what(e.target) });
     }, true);
     addEventListener('change', e => {
       const el = e.target;
-      if (!e.isTrusted || ours(e) || !(el instanceof Element)) return;
-      const value = el.type === 'password' ? '•••' : el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? 'checked' : 'unchecked')
-        : el.tagName === 'SELECT' ? [...el.selectedOptions].map(o => o.text.trim()).join(', ') : String(el.value ?? '').slice(0, 120);
-      userEvt({ kind: 'change', target: what(el), value });
+      if (ours(e) || !(el instanceof Element) || !fromUser(e, el)) return;
+      // A component renders its new state just after its change event.
+      setTimeout(() => userEvt({ kind: 'change', target: what(el), value: valueOf(el) }), el.localName.includes('-') ? 50 : 0);
     }, true);
     addEventListener('keydown', e => {
       if (!e.isTrusted || ours(e) || ['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
@@ -172,6 +179,20 @@
       const key = [e.ctrlKey && 'Ctrl', e.metaKey && 'Meta', e.altKey && 'Alt', e.shiftKey && 'Shift', e.key.length === 1 ? e.key.toUpperCase() : e.key].filter(Boolean).join('+');
       userEvt({ kind: 'key', key, ...(e.target instanceof Element && e.target !== document.body && { target: what(e.target) }) });
     }, true);
+  }
+
+  // A control's value as the user sees it, for native controls and components alike. This script runs in
+  // an isolated world and cannot see properties a component defines in page code (value, checked), so a
+  // component is read through the native control in its (open) shadow root, or the text it shows.
+  const innerControl = el => el.localName.includes('-') && el.shadowRoot?.querySelector('input:not([type=hidden]),textarea,select') || null;
+  function valueOf(el) {
+    const c = innerControl(el);
+    if (c) el = c;
+    else if (el.localName.includes('-')) return (el.shadowRoot?.querySelector('#label, [role=combobox]')?.textContent || el.getAttribute('value') || '').trim().slice(0, 120);
+    if (el.type === 'password') return '•••';
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? 'checked' : 'unchecked';
+    if (el.tagName === 'SELECT') return [...el.selectedOptions].map(o => o.text.trim()).join(', ');
+    return String(el.value ?? '').slice(0, 120);
   }
 
   // ---------------------------------------------------------------- "Record" recorder
@@ -276,9 +297,11 @@
     const el = e.target;
     if (ours(e) || el.type === 'checkbox' || el.type === 'radio') return;
     if (isText(el)) { if (typing?.el === el) flushTyping(); return; }
-    const value = el.tagName === 'SELECT' ? [...el.selectedOptions].map(o => o.value).join(',') : String(el.value ?? '');
-    recStep({ type: 'change', ...target(el), value,
-      ...(el.tagName === 'SELECT' && { label: [...el.selectedOptions].map(o => o.text.trim()).join(', ') }) });
+    const c = innerControl(el);
+    const value = el.tagName === 'SELECT' ? [...el.selectedOptions].map(o => o.value).join(',')
+      : c ? (c.type === 'checkbox' || c.type === 'radio' ? (c.checked ? 'checked' : 'unchecked') : String(c.value ?? '')) : valueOf(el);
+    const label = el.tagName === 'SELECT' ? valueOf(el) : '';
+    recStep({ type: 'change', ...target(el), value: el.type === 'password' ? '•••' : value, ...(label && label !== value && { label }) });
   }
 
   const KEYS = ['Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Delete'];
@@ -633,6 +656,7 @@
   }
 
   async function press(el, x, y, { button = 0, touch = false, count = 1 } = {}) {
+    touched = [];
     const btn = button === 2 ? 'right' : 'left', buttons = button === 2 ? 2 : 1;
     for (let i = 1; i <= count; i++) {
       if (film) await P.press(btn);
@@ -651,10 +675,11 @@
   function setValue(el, v) {
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
     if (el.isContentEditable) el.textContent = v; else setter ? setter.call(el, v) : (el.value = v);
-    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: v, inputType: 'insertText' }));
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: v, inputType: 'insertText' }));
   }
 
   async function fill(el, value) {
+    touched = []; // what follows is the skill's, not the user's
     if (el.tagName === 'SELECT') {
       const opt = [...el.options].find(o => o.value === value || o.text.trim() === value);
       if (!opt) throw new Error(`no option "${value}" in ${describeShort(el)}`);
@@ -663,6 +688,19 @@
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return;
     }
+    // A component select (md-outlined-select and the like): its options are light-DOM children with a
+    // value attribute; clicking one selects it, as the user would.
+    const field = innerControl(el);
+    if (el.localName.includes('-') && !field) {
+      const opts = [...el.querySelectorAll('[value]')].filter(o => o.localName.includes('-'));
+      const opt = opts.find(o => o.getAttribute('value') === value || o.textContent.trim() === value);
+      if (!opt) throw new Error(`no option "${value}" in ${describeShort(el)}`);
+      // The click handler usually sits on the option's own interactive element, inside its shadow root.
+      (opt.shadowRoot?.querySelector('[role=option], [role=menuitem], li, button') || opt).click();
+      return;
+    }
+    // A text field component types into the input inside it, so the component sees ordinary input events.
+    if (field) el = field;
     el.focus({ preventScroll: true });
     if (!film) { setValue(el, value); el.dispatchEvent(new Event('change', { bubbles: true })); return; }
     setValue(el, '');

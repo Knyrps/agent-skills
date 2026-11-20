@@ -21,6 +21,12 @@ await build({
   bundle: true, format: 'esm', minify: true, target: 'chrome116', legalComments: 'eof',
   outfile: path.join(out, 'material-web.js'),
 });
+// The test page's components (select, checkbox, slider, dialog, menu); not part of the extension.
+await build({
+  entryPoints: [path.join(here, 'lab-entry.js')],
+  bundle: true, format: 'esm', minify: true, target: 'chrome116', legalComments: 'eof',
+  outfile: path.join(here, '..', 'scripts', 'lab-vendor', 'material-lab.js'),
+});
 
 const SEED = '#0b57d0'; // Chrome's GM3 primary blue
 const kebab = s => s.replace(/[A-Z]/g, c => '-' + c.toLowerCase());

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "show-and-tell",
-  "version": "1.2.20777.865",
+  "version": "1.2.20777.880",
   "description": "Side panel for guided demos driven by an AI agent (next/back/questions, page markings, recordings) plus on-page highlights.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwYFOAK8o8Px/xbojsGeLPkL/VQWyvJuY+qHM1XQ7iBsZeVMxCWzKpBeW6hEYdqoyfV0D7lzJGc7vK4J2Tolgxp14ObrXz2s5bnfPmJ2V2d0VcMsGD7/AWIFRIFQPY9eozosLCUEiM3pn2HhaF40848W8DsryX0omQ9nJvE3wFQzzfL4lJe+OGojuqvSrKfz/2CRPMpuprLwOs186aWTKSgBOHJRL3wiLexgevr/A1o7iVCp1deOudF9X0upm0TqhbRa/gJq0uWgpLIJk/xkZ2C8kxHo6/u8xZwAfoC+fD9Q1eWzy8MWbXt73qNk8juXglPuzzgO01T20eIJdb3SXCQIDAQAB",
   "minimum_chrome_version": "116",
