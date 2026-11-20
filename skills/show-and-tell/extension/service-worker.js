@@ -1431,6 +1431,8 @@ const userNav = (kind, { tabId, frameId, url, transitionType }) => {
 };
 chrome.webNavigation.onCommitted.addListener(d => userNav('navigate', d));
 chrome.webNavigation.onHistoryStateUpdated.addListener(d => userNav('urlChange', d));
+// Jumps within the page (#anchors, a table of contents) change only the fragment.
+chrome.webNavigation.onReferenceFragmentUpdated.addListener(d => userNav('urlChange', d));
 
 chrome.runtime.onConnect.addListener(port => {
   if (port.name === 'video') return onVideoPort(port);
