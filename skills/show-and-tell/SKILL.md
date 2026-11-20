@@ -35,6 +35,14 @@ highlights, tours, `request_demo`, videos) happens in that tab; there is no swit
 your tab is in front comes to you. Only one tour and one video run at a time: if another session's is
 running, you get a busy error; wait or tell the user.
 
+## Slow network
+
+`throttle({ preset })` slows your tab's network like DevTools: `fast-4g`, `slow-4g`, `3g`, `offline`, or
+`downloadKbps`/`uploadKbps`/`latencyMs`; `preset: "off"` ends it. Use it to show or check loading states,
+spinners and offline handling. It stays on until off (the panel shows it, and the user can turn it off),
+so turn it off when you are done. In tours and videos a step's `network` field does the same from that
+step on; it ends with the tour or video.
+
 ## Working where the user watches
 
 The user follows the shared browser; the panel shows each `browser_*` call ("clicking …", "requesting

@@ -75,6 +75,21 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .activity .muted { color: inherit; opacity: .75; white-space: nowrap; margin-top: 2px; }
 .activity.old { opacity: .6; }
 
+/* The tab in front is throttled like in DevTools. */
+.throttle {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 4px 4px 12px; border-radius: 12px;
+  background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container);
+}
+.throttle svg { flex: none; }
+.throttle-text { flex: 1; min-width: 0; }
+.throttle md-text-button {
+  --md-text-button-label-text-color: var(--md-sys-color-on-tertiary-container);
+  --md-text-button-hover-label-text-color: var(--md-sys-color-on-tertiary-container);
+  --md-text-button-focus-label-text-color: var(--md-sys-color-on-tertiary-container);
+  --md-text-button-pressed-label-text-color: var(--md-sys-color-on-tertiary-container);
+}
+
 /* The agent asks to work on a host that is not allowed (M3 dialog look, inline). */
 .host-ask {
   display: flex; flex-direction: column; gap: 8px;

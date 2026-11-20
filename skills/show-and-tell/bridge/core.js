@@ -357,7 +357,7 @@ export function startOwner({ standalone = false } = {}) {
           broadcast({ cmd: 'setStep', label, session: body.session || '' });
           return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
         }
-        if (!['highlight', 'clearHighlights', 'hideOverlays', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
+        if (!['highlight', 'clearHighlights', 'hideOverlays', 'throttle', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
         try { return json(res, 200, await requestExt(body, ['recordTour', 'highlight', 'loadTour', 'requestDemo'].includes(body.cmd) ? 150000 : 8000)); }
         catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       }

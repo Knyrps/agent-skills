@@ -78,7 +78,7 @@ async function render() {
 async function refreshTab() {
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   tabUrl = t?.url || '';
-  if (frontTabId !== (t?.id ?? null)) { frontTabId = t?.id ?? null; render(); renderActivity(); }
+  if (frontTabId !== (t?.id ?? null)) { frontTabId = t?.id ?? null; render(); renderActivity(); renderThrottle(); }
   const placeholder = tabUrl.startsWith(chrome.runtime.getURL('tab.html'));
   const { hostState: hs = {}, connected } = await S.get(['hostState', 'connected']);
   const ok = hostAllowed(tabUrl, [...(await loadConfig()).allowlist, ...(hs.allow || []), ...(hs.loopback || []), ...(hs.granted || [])]);
@@ -111,6 +111,17 @@ async function renderActivity() {
   $('activity').classList.toggle('old', age > 5000);
   activityTimer = setTimeout(renderActivity, 1000);
 }
+
+async function renderThrottle() {
+  const { throttles = {} } = await S.get('throttles');
+  const t = frontTabId != null ? throttles[frontTabId] : null;
+  $('throttle').hidden = !t;
+  if (t) $('throttle-label').textContent = t.label;
+}
+$('throttle-off').addEventListener('click', async () => {
+  const r = await chrome.runtime.sendMessage({ type: 'throttleOff' });
+  toast(r?.ok ? 'Network throttling is off for this tab.' : 'Could not turn throttling off.');
+});
 
 // The agent wants to work on a host that is not allowed; the user decides here.
 async function renderHostAsk() {
@@ -252,6 +263,7 @@ chrome.storage.onChanged.addListener((c, area) => {
   if (c.hostState || c.connected) refreshTab();
   if (c.hostQuestions) renderHostAsk();
   if (c.activities || c.sessionTabs) renderActivity();
+  if (c.throttles) renderThrottle();
 });
 renderHostAsk();
 renderActivity();

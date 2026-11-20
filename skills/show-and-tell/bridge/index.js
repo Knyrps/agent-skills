@@ -32,7 +32,8 @@ async function ensureBrowser({ force = false } = {}) {
 const [cmd, ...rest] = process.argv.slice(2);
 const opt = name => { const i = rest.indexOf('--' + name); return i >= 0 ? rest[i + 1] : undefined; };
 const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out', '--zoom', '--gesture', '--direction', '--to', '--url',
-  '--session', '--label']);
+  '--session', '--label', '--download', '--upload', '--latency']);
+const NETWORK_PRESETS = ['fast-4g', 'slow-4g', '3g', 'offline'];
 const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
 const positional = rest.filter((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
 const out = o => process.stdout.write(JSON.stringify(o, null, 2) + '\n');
@@ -68,6 +69,8 @@ async function runCli() {
         gesture: opt('gesture'), direction: opt('direction'), to: opt('to'), url: opt('url') } });
     case 'clear': return call('POST', '/cmd', { cmd: 'clearHighlights', id: positional[0] });
     case 'hide': return call('POST', '/cmd', { cmd: 'hideOverlays', hidden: true });
+    case 'throttle': return call('POST', '/cmd', { cmd: 'throttle', network: opt('download')
+      ? { downloadKbps: +opt('download'), uploadKbps: opt('upload') && +opt('upload'), latencyMs: +(opt('latency') || 0) } : positional[0] || 'off' });
     case 'show': return call('POST', '/cmd', { cmd: 'hideOverlays', hidden: false });
     case 'tour': return call('POST', '/cmd', { cmd: 'loadTour', tour: JSON.parse(fs.readFileSync(positional[0], 'utf8')), start: +(opt('start') || 0) });
     case 'goto': return call('POST', '/cmd', { cmd: 'gotoStep', index: +positional[0] });
@@ -130,6 +133,7 @@ async function runMcp() {
       + 'text?, value? (fill), to? (drag/swipe end css), by? (drag offset [dx, dy] in px or "40%" of in), direction? (swipe), ms? (longPress/hover), touch? (finger instead of cursor), after?: ms}, {scrollBy: px|{x,y}, in?: css}, '
       + '{press: key, on?: css} or {wait: ms}. In a video a drawn cursor or finger performs them visibly.' },
     section: { type: 'string', description: 'Video only: a section name; a section slide appears when it changes' },
+    network: { type: 'string', enum: [...NETWORK_PRESETS, 'off'], description: 'Throttle the network from this step on, like DevTools; "off" ends it (so does the end of the tour or video)' },
     highlights: { type: 'array', description: 'Same fields as highlight() incl. gesture/direction/to; the first replaces, the rest are kept', items: { type: 'object' } },
     agent: { type: 'boolean', description: 'The agent performs this step itself (it receives an agentStep action)' },
     caption: { type: ['string', 'boolean'], description: 'Video only: subtitle text instead of explanation; false = none' },
@@ -200,6 +204,15 @@ async function runMcp() {
     } } },
     { name: 'clear_highlights', description: 'Remove one highlight by id, or all highlights when id is omitted.',
       inputSchema: { type: 'object', properties: { id: { type: 'string' } } } },
+    { name: 'throttle', description: 'Throttle the network of your tab like Chrome DevTools: a preset (fast-4g, slow-4g, 3g, offline), '
+      + 'custom kbit/s and latency, or off. It stays until off, the tab closes or the browser restarts; the panel shows it and lets the user turn it off. '
+      + 'Useful to show or check loading states, spinners and offline handling.',
+    inputSchema: { type: 'object', properties: {
+      preset: { type: 'string', enum: [...NETWORK_PRESETS, 'off'] },
+      downloadKbps: { type: 'number', description: 'Custom download speed in kbit/s (instead of preset)' },
+      uploadKbps: { type: 'number', description: 'Custom upload speed in kbit/s (default: same as download)' },
+      latencyMs: { type: 'number', description: 'Custom added latency in ms' },
+    } } },
     { name: 'hide_overlays', description: 'Temporarily hide (true) or show again (false) all highlights, e.g. around evidence screenshots. '
       + 'The side panel is browser UI and never appears in page screenshots.',
     inputSchema: { type: 'object', properties: { hidden: { type: 'boolean' } }, required: ['hidden'] } },
@@ -212,7 +225,7 @@ async function runMcp() {
     inputSchema: { type: 'object', properties: { timeoutSec: { type: 'number', description: 'Default 600' } } } },
   ];
 
-  const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'load_tour', 'request_demo', 'record_tour']);
+  const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'throttle', 'load_tour', 'request_demo', 'record_tour']);
   const server = new Server({ name: 'show-and-tell', version: '1.3.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...TOOLS, ...(await driver.list(log)).map(t =>
     ({ ...t, description: 'Shared show-and-tell browser (the one the user sees): ' + (t.description || '') }))] }));
@@ -248,6 +261,8 @@ async function runMcp() {
           gesture: a.gesture, direction: a.direction, to: a.to, url: a.url } }));
         case 'clear_highlights': return done(await cmd({ cmd: 'clearHighlights', id: a.id }));
         case 'hide_overlays': return done(await cmd({ cmd: 'hideOverlays', hidden: a.hidden !== false }));
+        case 'throttle': return done(await cmd({ cmd: 'throttle', network: a.downloadKbps
+          ? { downloadKbps: a.downloadKbps, uploadKbps: a.uploadKbps, latencyMs: a.latencyMs } : a.preset || 'off' }));
         case 'get_queue': return withShots(await call('GET', '/queue' + (a.recent ? '?recent=1' : '')));
         case 'wait_for_action': {
           const t = Math.max(1, Math.min(86400, +(a.timeoutSec || 600)));
