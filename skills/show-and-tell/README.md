@@ -86,6 +86,12 @@ whatever Chromium is listening on that port.
    e.g. `{ "allowlist": ["grafana.example.zz", "*.staging.example"] }` (`*.x` = x and all subdomains).
    The rule covers the `browser_*` tools too; the agent can ask but never grant.
 
+5. **Harness adapter (optional).** With an adapter, what you send from the panel arrives in the chat as
+   your message, the agent's reply shows up in the panel, permission prompts can be answered there, and
+   every chat gets its own tab. Without one, the agent uses a background watcher and the `say` tool.
+   OpenCode: add `{ "package": "<skill>/adapters/opencode" }` to `plugins` in `opencode.json(c)`. Writing
+   one for another harness: [references/adapters.md](references/adapters.md).
+
 Environment overrides: `DEMO_BROWSER_PATH` (any Chromium that honours `--load-extension`, for
 example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_DATA`
 (queue, screenshots and profile; default `%LOCALAPPDATA%\show-and-tell` on Windows,
@@ -139,7 +145,6 @@ By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo br
 | Cancel | `wait` in one terminal, `node <skill>/bridge cancel` in another | The wait prints `{"actions":[],"cancelled":true}` |
 | Gestures | `node <skill>/bridge highlight button --gesture double-tap --label Here --url http://localhost:<port>/`, then with `--gesture swipe --direction left --keep` on another element | The page opens; a finger dot taps twice with a ripple; the swipe shows a dotted path and a trail. An unknown gesture name returns the list of valid ones |
 | Video | `node <skill>/bridge record tour.json --name test`, then `wait --timeout 300` | 3-2-1 countdown in the panel, the window shrinks to a 1:1 size, intro card, chapter labels, captions, a gliding cursor; Esc in the page or **Stop and save** keeps a partial video. `videoReady` has `path`, `vtt`, `chapters` and the window is restored |
-| Tests | `npm test` in `bridge` | Routing, browser_* forwarding, MP4 converter and timing rules pass |
 
 ## Verify the browser_* tools drive this browser
 

@@ -1,0 +1,10 @@
+{
+  "name": "opencode-show-and-tell",
+  "version": "0.1.0",
+  "description": "show-and-tell adapter for OpenCode: panel input as user messages, replies mirrored to the panel, permission prompts in the panel",
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": ["index.js"]
+}

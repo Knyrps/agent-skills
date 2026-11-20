@@ -155,6 +155,11 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .host-ask-head svg { width: 20px; height: 20px; }
 .host-name { overflow-wrap: anywhere; }
 #host-ask-text { color: var(--md-sys-color-on-surface-variant); }
+.ask-detail {
+  margin: 0; padding: 8px 12px; border-radius: 8px; max-height: 160px; overflow: auto;
+  background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant);
+  font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .host-ask-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 /* ---- composer: a pill docked at the bottom, like Gemini's input. Message on top, tools and the round

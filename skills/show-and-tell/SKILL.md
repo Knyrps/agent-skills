@@ -107,6 +107,9 @@ Every item in `actions` has a `type` (and `step` while a tour runs).
 reply with `say({ text })` (Markdown; shell-only hosts: `node "<skill>/bridge" say --session <id> -` with the
 text on stdin, the id is in the watcher command). The panel shows "Thinking…" until you do. In your own chat
 add one line at most ("Answered in the panel."). Questions asked in your chat are answered in your chat.
+With a harness adapter (references/adapters.md) panel input arrives as a user message wrapped in
+`<show-and-tell from="panel">`, no watcher is needed, and your normal reply is mirrored to the panel: answer
+normally and skip `say`.
 
 - `question`: a message (`text`).
 - `annotation`: the user marked the page ("Annotate": a click marks an element, dragging draws) and wrote
