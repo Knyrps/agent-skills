@@ -1,0 +1,35 @@
+// Check: the README's by-hand rows, CLI without --session on the tab in front.
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { agent, panel, page, check, summary, sleep, LAB, SKILL, ENV } from './lib.mjs';
+const a = await agent();
+await a.tool('browser_navigate', { url: LAB + '?p6' });
+const pn = await panel();
+const lab = await page(u => u.endsWith('?p6'));
+await lab.send('Page.bringToFront'); await sleep(600);
+const J = s => { try { return JSON.parse(s); } catch { return { raw: s }; } };
+const cli = (...args) => { try { return J(execFileSync(process.execPath, [path.join(SKILL, 'bridge', 'index.js'), ...args], { env: ENV, encoding: 'utf8', timeout: 30000 })); } catch (e) { return { failed: (e.stdout || '') + (e.stderr || '') }; } };
+const card = async () => JSON.parse(await pn.P(`(() => { const e = document.getElementById('pause'); return JSON.stringify({ hidden: e.hidden, state: e.dataset.state, title: document.getElementById('pause-title').textContent, detail: document.getElementById('pause-detail').textContent }); })()`));
+const box = () => lab.ev(`document.querySelector('#load-box .state').innerText`).catch(e => e.message);
+
+const h = cli('pause', 'request', '/api/items', '--hold');
+check('hold', h.ok, JSON.stringify(h));
+check('card armed', (await card()).state === 'armed', JSON.stringify(await card()));
+await lab.click('#load'); await sleep(800);
+check('card held', (await card()).state === 'held' && /Loading/.test(await box()), JSON.stringify(await card()));
+check('resume releases', cli('resume').released === 1 && (await sleep(500), /4 items/.test(await box())));
+const l = cli('pause', 'line', 'renderItems(data.items)');
+check('line', l.ok && /404/.test(l.at || ''), JSON.stringify(l));
+await lab.click('#load'); await sleep(800);
+check('card paused', (await card()).state === 'paused', JSON.stringify(await card()));
+const i = cli('inspect');
+check('inspect lists variables', !!i.variables?.['local (loadItems)']?.data, JSON.stringify(i).slice(0, 300));
+check('assignment refused', /read-only/.test(cli('inspect', 'run = 5').error || ''));
+check('step into', cli('resume', '--step', 'into').paused?.fn === 'renderItems');
+check('resume', cli('resume').resumed === true && (await sleep(500), /4 items/.test(await box())), await box());
+check('dom', cli('pause', 'dom', '#items').ok);
+check('event', cli('pause', 'event', 'click').ok);
+check('list', cli('pause', 'list').points?.length === 2);
+check('remove all', cli('pause', 'remove', 'all').removed === 2 && (await card()).hidden);
+summary();
+await a.close(); process.exit(0);

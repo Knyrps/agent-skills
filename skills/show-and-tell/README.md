@@ -126,6 +126,15 @@ itself, click the show-and-tell icon in the toolbar (puzzle menu).
 When the agent host runs the show-and-tell MCP, that process owns the bridge port. Without an agent, run
 `node <skill>/bridge serve` in a second terminal.
 
+## Automated checks
+
+`node <skill>/tests/run.mjs` copies the skill to a temporary folder and runs it there on its own ports
+(bridge 47713, CDP 9434, test page 47714) in its own browser profile, so a running show-and-tell is not
+touched. It runs every `tests/*.test.mjs` and prints PASS/FAIL per check; screenshots (light and dark) land
+in `%TEMP%/show-and-tell-test/shots`. `run.mjs pause-menu once,kept` runs some sections of one test,
+`--keep` reuses the running test browser, `--clean` stops it and removes the copy. Needs
+`npm install` in `bridge/`.
+
 ## Manual test of every control
 
 The bridge serves a test page on `http://localhost:47614/` (and `/next`; `DEMO_LAB_PORT` changes the port)
