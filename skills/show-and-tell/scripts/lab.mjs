@@ -17,6 +17,46 @@ const port = +(process.argv[2] || process.env.LAB_PORT || 5191);
 // Enough cards to overflow the strip even on very wide screens.
 const cards = Array.from({ length: 20 }, (_, i) => `<div class="item md-typescale-label-large" data-n="${i + 1}">Product ${i + 1}</div>`).join('');
 
+// Raw events the debug panel can show, by group: [type, label shown when it differs from the type].
+const GROUPS = [
+  ['Pointer', [['pointerdown'], ['pointerup'], ['pointermove'], ['pointercancel']]],
+  ['Hover', [['mouseover', 'hover start'], ['mouseout', 'hover end']]],
+  ['Mouse', [['click'], ['dblclick'], ['auxclick'], ['contextmenu'], ['wheel']]],
+  ['Keyboard', [['keydown'], ['keyup']]],
+  ['Focus', [['focusin', 'focus'], ['focusout', 'blur']]],
+  ['Input', [['beforeinput'], ['input'], ['change'], ['compositionstart'], ['compositionend']]],
+  ['Touch', [['touchstart'], ['touchmove'], ['touchend'], ['touchcancel']]],
+  ['Drag', [['dragstart'], ['drag'], ['dragenter'], ['dragover'], ['dragleave'], ['drop'], ['dragend']]],
+  ['Scroll', [['scroll']]],
+  ['Clipboard', [['copy'], ['cut'], ['paste']]],
+  ['Page', [['visibilitychange', 'visibility change'], ['resize'], ['pageshow', 'page shown']]],
+];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const eventList = GROUPS.map(([group, types]) => `<div class="group" data-group="${group}">
+  <label class="check-row group-row"><md-checkbox class="gbox" aria-label="All ${group} events"></md-checkbox><span class="md-typescale-title-small grow">${group}</span><span class="count sub md-typescale-label-medium"></span></label>
+  ${types.map(([type, label = type]) => `<label class="check-row ev" data-type="${type}" data-label="${esc(label)}" data-search="${esc(`${label} ${type} ${group}`.toLowerCase())}"><md-checkbox></md-checkbox><span class="txt"><span class="md-typescale-body-medium">${esc(label)}</span>${label !== type ? `<span class="sub md-typescale-body-small">${type}</span>` : ''}</span></label>`).join('\n  ')}
+</div>`).join('\n');
+
+// The debug panel under the bug icon: who to show, and (Advanced) which events.
+const DEBUG_PANEL = `<div id="debug-panel" class="debug-panel" role="dialog" aria-label="Debug options" hidden>
+  <div class="pad"><md-outlined-select id="log-from" label="Log events from">
+    <md-select-option value="both" selected><div slot="headline">User + Agent</div></md-select-option>
+    <md-select-option value="user"><div slot="headline">User</div></md-select-option>
+    <md-select-option value="agent"><div slot="headline">Agent</div></md-select-option>
+  </md-outlined-select></div>
+  <button id="adv-toggle" class="adv-toggle" aria-expanded="false" aria-controls="adv"><md-ripple></md-ripple>
+    <span class="txt grow"><span class="md-typescale-body-large">Advanced…</span><span id="adv-sum" class="sub md-typescale-body-medium"></span></span>
+    <svg viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></button>
+  <div id="adv" hidden>
+    <label class="check-row"><md-checkbox id="demo"></md-checkbox><span class="txt"><span class="md-typescale-body-large">Demo reactions</span>
+      <span class="sub md-typescale-body-small">What the lab's cards report: tapped, hovered, Ctrl+K…</span></span></label>
+    <div class="sep"></div>
+    <div class="pad"><md-outlined-text-field id="ev-search" label="Search events" type="search"></md-outlined-text-field></div>
+    <div id="ev-list" class="ev-list">${eventList}</div>
+    <div class="adv-actions"><md-text-button id="ev-all">All</md-text-button><md-text-button id="ev-none">None</md-text-button><md-text-button id="ev-reset">Reset</md-text-button></div>
+  </div>
+</div>`;
+
 const page = (title, body, script = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/m3-tokens.css">
@@ -30,10 +70,29 @@ body{margin:0;background:var(--md-sys-color-surface);color:var(--md-sys-color-on
 header{position:sticky;top:0;z-index:5;height:64px;display:flex;align-items:center;gap:24px;padding:0 24px;
   background:var(--md-sys-color-surface-container)}
 header .grow{flex:1}
-header .debug{position:relative}
+[hidden]{display:none!important}
+.grow{flex:1}
 md-icon-button svg{width:24px;height:24px;fill:currentColor}
-md-menu-item md-checkbox{pointer-events:none}
 #log .raw{color:color-mix(in srgb,var(--md-sys-color-inverse-on-surface) 65%,transparent)}
+/* Debug panel: an M3 surface under the bug icon (surface container, 16 px corners, elevation 2). */
+.debug-panel{position:fixed;z-index:10;width:360px;max-height:calc(100vh - 80px);overflow:auto;padding:16px 0 8px;border-radius:16px;
+  background:var(--md-sys-color-surface-container);color:var(--md-sys-color-on-surface);
+  box-shadow:0 1px 2px rgb(0 0 0/.3),0 2px 6px 2px rgb(0 0 0/.15)}
+.debug-panel .pad{padding:0 16px}
+.debug-panel md-outlined-select,.debug-panel md-outlined-text-field{width:100%}
+.adv-toggle{all:unset;box-sizing:border-box;position:relative;display:flex;align-items:center;gap:16px;width:100%;min-height:64px;margin-top:8px;padding:8px 16px;cursor:pointer}
+.adv-toggle .txt,.check-row .txt{display:flex;flex-direction:column}
+.adv-toggle svg{flex:none;width:24px;height:24px;fill:var(--md-sys-color-on-surface-variant);transition:rotate .2s}
+.adv-toggle[aria-expanded=true] svg{rotate:180deg}
+.adv-toggle:focus-visible{outline:2px solid var(--md-sys-color-secondary);outline-offset:-2px}
+#adv{display:flex;flex-direction:column;gap:8px}
+.sep{height:1px;margin:0 16px;background:var(--md-sys-color-outline-variant)}
+.sub{color:var(--md-sys-color-on-surface-variant)}
+.check-row{display:flex;align-items:center;gap:12px;min-height:40px;padding:4px 16px;cursor:pointer}
+.check-row.ev{padding-left:48px}
+.group-row{min-height:48px}
+.ev-list{display:flex;flex-direction:column}
+.adv-actions{display:flex;justify-content:flex-end;gap:4px;padding:0 8px}
 header a{color:var(--md-sys-color-primary);text-decoration:none}
 main{padding:24px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
 /* M3 filled card: surface-container-highest, 12 px corners. Done states use the secondary container. */
@@ -65,84 +124,160 @@ md-slider{width:100%}
 <header><span class="md-typescale-title-large">${title}</span><span class="grow"></span>${title === 'Next page'
   ? '<a href="/" id="back-link" class="md-typescale-label-large">← Back to the lab</a>'
   : '<a href="/next" id="next-link" class="md-typescale-label-large">Next page →</a>'}
-<span class="debug"><md-icon-button id="debug-btn" aria-label="Debug options" title="Debug options">
+<md-icon-button id="debug-btn" aria-label="Debug options" title="Debug options" aria-haspopup="dialog" aria-expanded="false">
   <svg viewBox="0 0 24 24"><path d="M20 8h-2.81a6 6 0 0 0-1.82-1.96L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41l1.62 1.63A6 6 0 0 0 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81A6 6 0 0 0 12 21a6 6 0 0 0 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z"/></svg>
-</md-icon-button>
-<md-menu id="debug-menu" anchor="debug-btn" positioning="fixed" anchor-corner="end-end" menu-corner="start-end">
-  <md-menu-item keep-open data-flag="verbose" title="Also log focus, hover, pointer down/up, key, wheel, scroll, touch and drag events">
-    <md-checkbox slot="start" tabindex="-1"></md-checkbox><div slot="headline">Log every event</div></md-menu-item>
-  <md-menu-item keep-open data-flag="moves" title="pointermove, touchmove, drag and dragover; folded into one line per element">
-    <md-checkbox slot="start" tabindex="-1"></md-checkbox><div slot="headline">Log pointer moves</div></md-menu-item>
-</md-menu></span></header>
+</md-icon-button></header>
+${DEBUG_PANEL}
 <main>${body}<div id="log"></div></main>
 <script type="module">
 import '/material-lab.js';
-const $ = s => document.querySelector(s);
-// e: the DOM event behind the entry, or 'component' for an event a component fires itself (a select picking
-// an option). Trusted input is the user's or the agent's: Playwright's input is as trusted as a person's.
-// show-and-tell marks <html data-show-and-tell-agent> while the agent's browser call runs.
-const byAgent = () => document.documentElement.hasAttribute('data-show-and-tell-agent');
-// who: overrides who gets the credit (a field's change comes on blur, the value from whoever typed it).
-const log = (what, e, who) => { const l = $('#log'); const d = document.createElement('div'), agent = who ? who === 'agent' : byAgent();
-  d.textContent = new Date().toLocaleTimeString() + '  ' + what + (e === 'component' ? '  [component]' : e ? (!e.isTrusted ? '  [synthetic]' : agent ? '  [agent]' : '  [you]') : '');
-  l.append(d); l.scrollTop = l.scrollHeight; window.__lab = window.__lab || []; window.__lab.push({ what, trusted: !!e?.isTrusted, agent, event: !!e && e !== 'component' }); };
-const set = (sel, text, ok = true) => { const s = $(sel + ' .state'); if (s) s.textContent = text; if (ok) $(sel).classList.add('ok'); };
-// Material components re-fire change as their own (untrusted) event; the native control inside has the real one.
-const inner = async (sel, q = 'input') => { const h = $(sel); await customElements.whenDefined(h.localName); await h.updateComplete; return [...h.shadowRoot.querySelectorAll(q)].pop(); };
-// "Every event": the raw stream next to the summary lines above. Repeats of one event type on one element
-// within a second fold into one line ("pointermove ×37"). Kept per browser in localStorage.
-const RAW = ['pointerdown', 'pointerup', 'pointermove', 'pointercancel', 'mouseover', 'mouseout', 'focusin', 'focusout',
-  'keydown', 'keyup', 'beforeinput', 'input', 'change', 'click', 'auxclick', 'dblclick', 'contextmenu', 'wheel', 'scroll',
-  'touchstart', 'touchmove', 'touchend', 'touchcancel', 'dragstart', 'drag', 'dragenter', 'dragover', 'dragleave', 'drop', 'dragend',
-  'copy', 'cut', 'paste', 'compositionstart', 'compositionend'];
-const NAMES = { mouseover: 'hover start', mouseout: 'hover end', focusin: 'focus', focusout: 'blur' };
-const name = el => !(el instanceof Element) ? 'document' : el.id ? '#' + el.id
-  : el.localName + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/)[0] : '');
-const where = el => { const box = el instanceof Element && el.closest('.box'); return name(el) + (box && box !== el && box.id ? ' in #' + box.id : ''); };
-// Debug menu flags: "verbose" logs the raw stream except moves, "moves" logs only the moves; both together
-// log everything.
-const MOVES = new Set(['pointermove', 'touchmove', 'drag', 'dragover']);
-const flags = { verbose: localStorage.labVerbose === '1', moves: localStorage.labMoves === '1' };
-let last = null;
-function raw(e) {
-  const t = e.target;
-  if (!(MOVES.has(e.type) ? flags.moves : flags.verbose)) return;
-  if (t instanceof Element && (t.closest('#log, header') || t.localName === 'show-and-tell-overlay')) return;
-  if ((e.type === 'mouseover' || e.type === 'mouseout') && e.relatedTarget && t.contains?.(e.relatedTarget)) return;
-  const extra = e.type.startsWith('key') ? ' ' + e.key : e.type === 'wheel' ? ' ' + Math.round(e.deltaX) + ',' + Math.round(e.deltaY)
-    : e.pointerType ? ' ' + e.pointerType : '';
-  const who = !e.isTrusted ? 'synthetic' : byAgent() ? 'agent' : 'you';
-  const key = e.type + extra + where(t) + who, now = performance.now();
-  if (last && last.key === key && now - last.t < 1000 && last.d.isConnected) {
-    last.n++; last.t = now;
-    last.d.textContent = last.text.replace('{n}', ' ×' + last.n);
-    return;
-  }
-  const l = $('#log'), d = document.createElement('div');
-  d.className = 'raw';
-  const text = new Date().toLocaleTimeString() + '  · ' + (NAMES[e.type] || e.type) + '{n}' + extra + ' on ' + where(t) + '  [' + who + ']';
-  d.textContent = text.replace('{n}', '');
-  last = { key, t: now, n: 1, d, text };
-  const end = l.scrollHeight - l.scrollTop - l.clientHeight < 24;
-  l.append(d);
-  while (l.childElementCount > 2000) l.firstElementChild.remove();
-  if (end) l.scrollTop = l.scrollHeight;
-}
-for (const t of RAW) addEventListener(t, raw, { capture: true, passive: true });
-const STORE = { verbose: 'labVerbose', moves: 'labMoves' };
-const TOLD = { verbose: ['logging every event', 'logging summaries only'], moves: ['logging pointer moves', 'not logging pointer moves'] };
-$('#debug-btn').addEventListener('click', () => { $('#debug-menu').open = !$('#debug-menu').open; });
-for (const item of document.querySelectorAll('#debug-menu md-menu-item')) {
-  const f = item.dataset.flag, box = item.querySelector('md-checkbox');
-  box.checked = flags[f];
-  item.addEventListener('click', () => {
-    flags[f] = box.checked = !flags[f]; localStorage[STORE[f]] = flags[f] ? '1' : '0'; last = null;
-    log(TOLD[f][flags[f] ? 0 : 1]);
-  });
-}
+${LOG_SCRIPT}
 ${script}
 log('page loaded: ' + location.pathname);
 </script></body></html>`;
+
+// The log: every event goes into a buffer (5,000 lines); the debug panel's settings only decide what is
+// shown, so changing them shows or hides past events too. Who caused an event:
+//   trusted input                → [user], or [agent] while show-and-tell marks a browser_* call
+//   untrusted, during a step     → [agent · scripted] (the skill playing the agent's tour or video steps)
+//   untrusted, from page code    → [user · component] / [agent · component]: whoever's input came last
+const LOG_SCRIPT = String.raw`
+const $ = s => document.querySelector(s);
+const set = (sel, text, ok = true) => { const s = $(sel + ' .state'); if (s) s.textContent = text; if (ok) $(sel).classList.add('ok'); };
+// Material components re-fire change as their own (untrusted) event; the native control inside has the real one.
+const inner = async (sel, q = 'input') => { const h = $(sel); await customElements.whenDefined(h.localName); await h.updateComplete; return [...h.shadowRoot.querySelectorAll(q)].pop(); };
+const mark = () => document.documentElement.getAttribute('data-show-and-tell-agent');
+let lastInput = null;
+const whoOf = e => {
+  const m = mark();
+  if (e && e.isTrusted) return { who: m != null && m !== 'scripted' ? 'agent' : 'user', how: '' };
+  if (m === 'scripted') return { who: 'agent', how: 'scripted' };
+  return { who: lastInput && performance.now() - lastInput.t < 60000 ? lastInput.who : '', how: 'component' };
+};
+for (const t of ['pointerdown', 'keydown', 'beforeinput', 'wheel', 'touchstart'])
+  addEventListener(t, e => { if (e.isTrusted) lastInput = { who: whoOf(e).who, t: performance.now() }; }, true);
+const tag = c => c.who ? c.who + (c.how ? ' · ' + c.how : '') : c.how;
+
+const DEFAULTS = { from: 'both', demo: true, types: [], advanced: false };
+let cfg;
+try { cfg = { ...DEFAULTS, ...JSON.parse(localStorage.labLog || '{}') }; } catch { cfg = { ...DEFAULTS }; }
+let types = new Set(cfg.types);
+const save = () => { cfg.types = [...types]; localStorage.labLog = JSON.stringify(cfg); };
+
+const buffer = [], MAX = 5000;
+const shown = x => x.kind === 'note' || ((x.kind === 'demo' ? cfg.demo : types.has(x.type)) && (cfg.from === 'both' || !x.who || x.who === cfg.from));
+const text = x => x.time + '  ' + (x.kind === 'raw' ? '· ' + x.label + (x.n > 1 ? ' ×' + x.n : '') + x.extra + ' on ' + x.where : x.what)
+  + (x.kind === 'note' ? '' : '  [' + tag(x) + ']');
+const line = x => { const d = document.createElement('div'); if (x.kind === 'raw') d.className = 'raw'; d.textContent = text(x); x.el = d; return d; };
+const box = () => $('#log');
+const atEnd = () => box().scrollHeight - box().scrollTop - box().clientHeight < 24;
+function render() {
+  for (const x of buffer) x.el = null;
+  box().replaceChildren(...buffer.filter(shown).map(line));
+  box().scrollTop = box().scrollHeight;
+}
+function add(x) {
+  x.time = new Date().toLocaleTimeString();
+  buffer.push(x);
+  if (buffer.length > MAX) buffer.shift().el?.remove();
+  if (!shown(x)) return;
+  const end = atEnd();
+  box().append(line(x));
+  if (end) box().scrollTop = box().scrollHeight;
+}
+
+// A line from the lab's own listeners. e: the DOM event, 'component' for an event a component fires itself,
+// or nothing for a note. credit: who gets it instead (a field's change comes on blur, its value from whoever typed).
+function log(what, e, credit) {
+  if (!e) return add({ kind: 'note', what, who: '', how: '' });
+  const c = credit || whoOf(e === 'component' ? null : e);
+  add({ kind: 'demo', what, ...c });
+  (window.__lab = window.__lab || []).push({ what, trusted: !!e.isTrusted, agent: c.who === 'agent', event: e !== 'component' });
+}
+
+// Raw events, always recorded; repeats of one event on one element within a second fold into one line.
+const LABELS = Object.fromEntries([...document.querySelectorAll('#ev-list .ev')].map(r => [r.dataset.type, r.dataset.label]));
+const name = el => el === window ? 'window' : !(el instanceof Element) ? 'document' : el.id ? '#' + el.id
+  : el.localName + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/)[0] : '');
+const where = el => { const b = el instanceof Element && el.closest('.box'); return name(el) + (b && b !== el && b.id ? ' in #' + b.id : ''); };
+function raw(e) {
+  const t = e.target;
+  if (t instanceof Element && (t.closest('#log, header, #debug-panel') || t.localName === 'show-and-tell-overlay')) return;
+  if ((e.type === 'mouseover' || e.type === 'mouseout') && e.relatedTarget && t.contains?.(e.relatedTarget)) return;
+  const extra = e.type.startsWith('key') ? ' ' + e.key : e.type === 'wheel' ? ' ' + Math.round(e.deltaX) + ',' + Math.round(e.deltaY)
+    : e.pointerType ? ' ' + e.pointerType : '';
+  const c = whoOf(e), w = where(t), key = e.type + extra + w + tag(c), now = performance.now();
+  const last = buffer[buffer.length - 1];
+  if (last && last.kind === 'raw' && last.key === key && now - last.t < 1000) {
+    last.n++; last.t = now;
+    if (last.el) last.el.textContent = text(last);
+    return;
+  }
+  add({ kind: 'raw', type: e.type, label: LABELS[e.type] || e.type, extra, where: w, ...c, key, t: now, n: 1 });
+}
+for (const type of Object.keys(LABELS)) addEventListener(type, raw, { capture: true, passive: true });
+
+// The debug panel.
+const panel = $('#debug-panel'), btn = $('#debug-btn'), from = $('#log-from'), demo = $('#demo');
+const rows = [...panel.querySelectorAll('.ev')], groups = [...panel.querySelectorAll('.group')];
+const checkOf = r => r.querySelector('md-checkbox');
+function openPanel(on) {
+  panel.hidden = !on;
+  btn.setAttribute('aria-expanded', String(on));
+  if (!on) return;
+  const r = btn.getBoundingClientRect();
+  panel.style.top = (r.bottom + 4) + 'px';
+  panel.style.right = Math.max(8, innerWidth - r.right) + 'px';
+}
+btn.addEventListener('click', () => openPanel(panel.hidden));
+addEventListener('pointerdown', e => { if (!panel.hidden && !e.composedPath().some(n => n === panel || n === btn)) openPanel(false); }, true);
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || panel.hidden || e.composedPath().some(n => n.localName === 'md-outlined-select' && n.open)) return;
+  openPanel(false); btn.focus();
+}, true);
+function summary() {
+  const n = types.size;
+  $('#adv-sum').textContent = [cfg.demo && 'Demo reactions', n && n + ' event type' + (n > 1 ? 's' : '')].filter(Boolean).join(' + ') || 'Nothing';
+}
+function syncGroups() {
+  for (const g of groups) {
+    const items = rows.filter(r => g.contains(r)), on = items.filter(r => types.has(r.dataset.type)).length, gb = g.querySelector('.gbox');
+    gb.checked = on === items.length; gb.indeterminate = on > 0 && on < items.length;
+    g.querySelector('.count').textContent = on + '/' + items.length;
+  }
+}
+function syncAll() {
+  from.value = cfg.from; demo.checked = cfg.demo;
+  for (const r of rows) checkOf(r).checked = types.has(r.dataset.type);
+  syncGroups(); summary();
+}
+const changed = () => { save(); syncGroups(); summary(); render(); };
+function showAdvanced(on) {
+  $('#adv').hidden = !on; $('#adv-toggle').setAttribute('aria-expanded', String(on));
+  cfg.advanced = on; save();
+}
+$('#adv-toggle').addEventListener('click', () => showAdvanced($('#adv').hidden));
+from.addEventListener('change', () => { cfg.from = from.value; changed(); });
+demo.addEventListener('change', () => { cfg.demo = demo.checked; changed(); });
+for (const r of rows) checkOf(r).addEventListener('change', () => { checkOf(r).checked ? types.add(r.dataset.type) : types.delete(r.dataset.type); changed(); });
+for (const g of groups) g.querySelector('.gbox').addEventListener('change', e => {
+  for (const r of rows.filter(r => g.contains(r))) { e.target.checked ? types.add(r.dataset.type) : types.delete(r.dataset.type); checkOf(r).checked = e.target.checked; }
+  changed();
+});
+$('#ev-search').addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  for (const r of rows) r.hidden = !!q && !r.dataset.search.includes(q);
+  for (const g of groups) g.hidden = rows.filter(r => g.contains(r)).every(r => r.hidden);
+});
+const visibleRows = () => rows.filter(r => !r.hidden && !r.closest('.group').hidden);
+$('#ev-all').addEventListener('click', () => { for (const r of visibleRows()) types.add(r.dataset.type); syncAll(); changed(); });
+$('#ev-none').addEventListener('click', () => { for (const r of visibleRows()) types.delete(r.dataset.type); syncAll(); changed(); });
+$('#ev-reset').addEventListener('click', () => { cfg = { ...DEFAULTS, advanced: cfg.advanced }; types = new Set(); syncAll(); changed(); });
+await Promise.all(['md-outlined-select', 'md-checkbox'].map(n => customElements.whenDefined(n)));
+await from.updateComplete;
+syncAll(); showAdvanced(cfg.advanced);
+localStorage.removeItem('labVerbose'); localStorage.removeItem('labMoves');
+`;
 
 const LAB_SCRIPT = String.raw`
 // Tap: a pointer down and up on the same spot.
@@ -198,7 +333,7 @@ let scrLog = 0;
 $('#scr').addEventListener('scroll', () => { set('#scr', 'Scrolled to ' + Math.round($('#scr').scrollTop) + ' px'); clearTimeout(scrLog); scrLog = setTimeout(() => log('box scrolled to ' + Math.round($('#scr').scrollTop)), 200); });
 // Typing, a search that submits on Enter, select, checkbox, slider, dialog, a shortcut.
 let typedBy = '';
-$('#name').addEventListener('input', () => { typedBy = byAgent() ? 'agent' : 'you'; set('#name-box', 'Hello, ' + ($('#name').value || '…')); });
+$('#name').addEventListener('input', e => { typedBy = whoOf(e); set('#name-box', 'Hello, ' + ($('#name').value || '…')); });
 (await inner('#name')).addEventListener('change', e => log('name changed to "' + $('#name').value + '"', e, typedBy));
 $('#query').addEventListener('keydown', e => { if (e.key !== 'Enter') return; e.preventDefault(); set('#form-box', 'Searched for "' + $('#query').value + '"'); log('search submitted', e); });
 $('#size').addEventListener('change', () => { set('#size-box', 'Size ' + $('#size').value); log('select: ' + $('#size').value, 'component'); });

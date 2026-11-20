@@ -157,11 +157,19 @@
   // counts as the user's when the user's own input went into that component in the last minute. A text
   // field's change comes when it loses focus, so several recently touched components are remembered.
   let touched = [];
-  const userTouched = e => { if (e.isTrusted && e.target instanceof Element) touched = [{ el: e.target, ts: Date.now() }, ...touched.filter(t => t.el !== e.target)].slice(0, 8); };
-  const fromUser = (e, el) => e.isTrusted || (el.localName.includes('-')
-    && touched.some(t => Date.now() - t.ts < 60000 && (t.el === el || el.contains(t.el))));
+  const agentActing = () => agentMark.call || agentMark.scripted > 0;
+  const userTouched = e => { if (e.isTrusted && !agentActing() && e.target instanceof Element) touched = [{ el: e.target, ts: Date.now() }, ...touched.filter(t => t.el !== e.target)].slice(0, 8); };
+  // A field's change fires when it loses focus, often long after the typing: it belongs to whoever typed
+  // the value. One the agent typed and the user only left (by clicking elsewhere) is not the user's.
+  const typedBy = new WeakMap();
+  const fromUser = (e, el) => typedBy.get(el) !== 'agent' && (e.isTrusted || (el.localName.includes('-')
+    && touched.some(t => Date.now() - t.ts < 60000 && (t.el === el || el.contains(t.el)))));
   function watchUser() {
     for (const t of ['pointerdown', 'keydown', 'input']) addEventListener(t, userTouched, true);
+    addEventListener('input', e => {
+      if (!(e.target instanceof Element)) return;
+      if (agentActing()) typedBy.set(e.target, 'agent'); else if (e.isTrusted) typedBy.set(e.target, 'user');
+    }, true);
     addEventListener('click', e => {
       if (!e.isTrusted || ours(e) || !(e.target instanceof Element)) return;
       userEvt({ kind: e.detail === 2 ? 'doubleClick' : 'click', target: what(e.target) });
@@ -1376,17 +1384,24 @@
     };
   }
 
-  // While the agent's browser_* call runs, <html data-show-and-tell-agent> is set, so the page (the lab's
-  // log, a tester) can tell the agent's trusted input from the user's. It stays 300 ms longer for the
-  // events the page fires in reaction.
+  // While the agent acts in this page, <html data-show-and-tell-agent> is set, so the page (the lab's log, a
+  // tester) can tell the agent's input from the user's: "call" during a browser_* call (Playwright's input
+  // is as trusted as a person's), "scripted" while the skill plays the agent's steps (tours, videos). It
+  // stays 300 ms longer for the events the page fires in reaction.
+  const agentMark = { call: false, scripted: 0 };
   let agentOff = 0;
+  function markAgent() {
+    clearTimeout(agentOff);
+    const value = agentMark.scripted ? 'scripted' : agentMark.call ? 'call' : '';
+    if (value) document.documentElement.setAttribute('data-show-and-tell-agent', value);
+    else agentOff = setTimeout(() => document.documentElement.removeAttribute('data-show-and-tell-agent'), 300);
+  }
+  async function scripted(fn) {
+    agentMark.scripted++; markAgent();
+    try { return await fn(); } finally { agentMark.scripted--; markAgent(); }
+  }
   function onMessage(m, _sender, reply) {
-    if (m.cmd === 'agentBusy') {
-      clearTimeout(agentOff);
-      if (m.on) document.documentElement.setAttribute('data-show-and-tell-agent', '');
-      else agentOff = setTimeout(() => document.documentElement.removeAttribute('data-show-and-tell-agent'), 300);
-      return false;
-    }
+    if (m.cmd === 'agentBusy') { agentMark.call = !!m.on; markAgent(); return false; }
     if (m.cmd === 'annotate') { startAnnotate(reply); return true; }
     if (m.cmd === 'annotateClear') { finishAnnotate(null); return false; }
     // Keys pressed while the side panel has focus (right after clicking Annotate) arrive from the panel.
@@ -1403,7 +1418,7 @@
         aw: screen.availWidth, ah: screen.availHeight, ax: screen.availLeft ?? 0, ay: screen.availTop ?? 0 });
       return false;
     }
-    if (m.cmd === 'runActions') { runActions(m.actions || [], !!m.cinematic, m.accent).then(reply, e => reply({ ok: false, error: String(e?.message || e) })); return true; }
+    if (m.cmd === 'runActions') { scripted(() => runActions(m.actions || [], !!m.cinematic, m.accent)).then(reply, e => reply({ ok: false, error: String(e?.message || e) })); return true; }
     return false;
   }
 })();
