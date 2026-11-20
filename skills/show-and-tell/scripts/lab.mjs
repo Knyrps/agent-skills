@@ -30,6 +30,10 @@ body{margin:0;background:var(--md-sys-color-surface);color:var(--md-sys-color-on
 header{position:sticky;top:0;z-index:5;height:64px;display:flex;align-items:center;gap:24px;padding:0 24px;
   background:var(--md-sys-color-surface-container)}
 header .grow{flex:1}
+header .debug{position:relative}
+md-icon-button svg{width:24px;height:24px;fill:currentColor}
+md-menu-item md-checkbox{pointer-events:none}
+#log .raw{color:color-mix(in srgb,var(--md-sys-color-inverse-on-surface) 65%,transparent)}
 header a{color:var(--md-sys-color-primary);text-decoration:none}
 main{padding:24px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
 /* M3 filled card: surface-container-highest, 12 px corners. Done states use the secondary container. */
@@ -60,7 +64,16 @@ md-slider{width:100%}
 </style></head><body>
 <header><span class="md-typescale-title-large">${title}</span><span class="grow"></span>${title === 'Next page'
   ? '<a href="/" id="back-link" class="md-typescale-label-large">← Back to the lab</a>'
-  : '<a href="/next" id="next-link" class="md-typescale-label-large">Next page →</a>'}</header>
+  : '<a href="/next" id="next-link" class="md-typescale-label-large">Next page →</a>'}
+<span class="debug"><md-icon-button id="debug-btn" aria-label="Debug options" title="Debug options">
+  <svg viewBox="0 0 24 24"><path d="M20 8h-2.81a6 6 0 0 0-1.82-1.96L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41l1.62 1.63A6 6 0 0 0 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81A6 6 0 0 0 12 21a6 6 0 0 0 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z"/></svg>
+</md-icon-button>
+<md-menu id="debug-menu" anchor="debug-btn" positioning="fixed" anchor-corner="end-end" menu-corner="start-end">
+  <md-menu-item keep-open data-flag="verbose" title="Also log focus, hover, pointer down/up, key, wheel, scroll, touch and drag events">
+    <md-checkbox slot="start" tabindex="-1"></md-checkbox><div slot="headline">Log every event</div></md-menu-item>
+  <md-menu-item keep-open data-flag="moves" title="pointermove, touchmove, drag and dragover; folded into one line per element">
+    <md-checkbox slot="start" tabindex="-1"></md-checkbox><div slot="headline">Log pointer moves</div></md-menu-item>
+</md-menu></span></header>
 <main>${body}<div id="log"></div></main>
 <script type="module">
 import '/material-lab.js';
@@ -76,6 +89,57 @@ const log = (what, e, who) => { const l = $('#log'); const d = document.createEl
 const set = (sel, text, ok = true) => { const s = $(sel + ' .state'); if (s) s.textContent = text; if (ok) $(sel).classList.add('ok'); };
 // Material components re-fire change as their own (untrusted) event; the native control inside has the real one.
 const inner = async (sel, q = 'input') => { const h = $(sel); await customElements.whenDefined(h.localName); await h.updateComplete; return [...h.shadowRoot.querySelectorAll(q)].pop(); };
+// "Every event": the raw stream next to the summary lines above. Repeats of one event type on one element
+// within a second fold into one line ("pointermove ×37"). Kept per browser in localStorage.
+const RAW = ['pointerdown', 'pointerup', 'pointermove', 'pointercancel', 'mouseover', 'mouseout', 'focusin', 'focusout',
+  'keydown', 'keyup', 'beforeinput', 'input', 'change', 'click', 'auxclick', 'dblclick', 'contextmenu', 'wheel', 'scroll',
+  'touchstart', 'touchmove', 'touchend', 'touchcancel', 'dragstart', 'drag', 'dragenter', 'dragover', 'dragleave', 'drop', 'dragend',
+  'copy', 'cut', 'paste', 'compositionstart', 'compositionend'];
+const NAMES = { mouseover: 'hover start', mouseout: 'hover end', focusin: 'focus', focusout: 'blur' };
+const name = el => !(el instanceof Element) ? 'document' : el.id ? '#' + el.id
+  : el.localName + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/)[0] : '');
+const where = el => { const box = el instanceof Element && el.closest('.box'); return name(el) + (box && box !== el && box.id ? ' in #' + box.id : ''); };
+// Debug menu flags: "verbose" logs the raw stream except moves, "moves" logs only the moves; both together
+// log everything.
+const MOVES = new Set(['pointermove', 'touchmove', 'drag', 'dragover']);
+const flags = { verbose: localStorage.labVerbose === '1', moves: localStorage.labMoves === '1' };
+let last = null;
+function raw(e) {
+  const t = e.target;
+  if (!(MOVES.has(e.type) ? flags.moves : flags.verbose)) return;
+  if (t instanceof Element && (t.closest('#log, header') || t.localName === 'show-and-tell-overlay')) return;
+  if ((e.type === 'mouseover' || e.type === 'mouseout') && e.relatedTarget && t.contains?.(e.relatedTarget)) return;
+  const extra = e.type.startsWith('key') ? ' ' + e.key : e.type === 'wheel' ? ' ' + Math.round(e.deltaX) + ',' + Math.round(e.deltaY)
+    : e.pointerType ? ' ' + e.pointerType : '';
+  const who = !e.isTrusted ? 'synthetic' : byAgent() ? 'agent' : 'you';
+  const key = e.type + extra + where(t) + who, now = performance.now();
+  if (last && last.key === key && now - last.t < 1000 && last.d.isConnected) {
+    last.n++; last.t = now;
+    last.d.textContent = last.text.replace('{n}', ' ×' + last.n);
+    return;
+  }
+  const l = $('#log'), d = document.createElement('div');
+  d.className = 'raw';
+  const text = new Date().toLocaleTimeString() + '  · ' + (NAMES[e.type] || e.type) + '{n}' + extra + ' on ' + where(t) + '  [' + who + ']';
+  d.textContent = text.replace('{n}', '');
+  last = { key, t: now, n: 1, d, text };
+  const end = l.scrollHeight - l.scrollTop - l.clientHeight < 24;
+  l.append(d);
+  while (l.childElementCount > 2000) l.firstElementChild.remove();
+  if (end) l.scrollTop = l.scrollHeight;
+}
+for (const t of RAW) addEventListener(t, raw, { capture: true, passive: true });
+const STORE = { verbose: 'labVerbose', moves: 'labMoves' };
+const TOLD = { verbose: ['logging every event', 'logging summaries only'], moves: ['logging pointer moves', 'not logging pointer moves'] };
+$('#debug-btn').addEventListener('click', () => { $('#debug-menu').open = !$('#debug-menu').open; });
+for (const item of document.querySelectorAll('#debug-menu md-menu-item')) {
+  const f = item.dataset.flag, box = item.querySelector('md-checkbox');
+  box.checked = flags[f];
+  item.addEventListener('click', () => {
+    flags[f] = box.checked = !flags[f]; localStorage[STORE[f]] = flags[f] ? '1' : '0'; last = null;
+    log(TOLD[f][flags[f] ? 0 : 1]);
+  });
+}
 ${script}
 log('page loaded: ' + location.pathname);
 </script></body></html>`;

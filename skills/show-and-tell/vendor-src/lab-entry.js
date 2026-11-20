@@ -7,6 +7,7 @@ import '@material/web/select/outlined-select.js';
 import '@material/web/select/select-option.js';
 import '@material/web/checkbox/checkbox.js';
 import '@material/web/slider/slider.js';
+import '@material/web/iconbutton/icon-button.js';
 import '@material/web/dialog/dialog.js';
 import '@material/web/menu/menu.js';
 import '@material/web/menu/menu-item.js';
