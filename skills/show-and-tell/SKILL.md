@@ -23,7 +23,8 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
   say --session <id> <text|->|request <prompt>|throttle <preset|off> [--cpu n]|step <label>|tour <file>|goto <n>|end|
   record <file> [--name n] [--size s]|record-stop|record-cancel|
   pause <request <url> [--hold]|dom <css> [--change c]|line <code> [--condition e]|event <name>|now|list|remove <id|all>>
-  [--keep] [--session <id>]|resume [--step over|into|out] [--what page|requests]|inspect [expression] [--frame n]>`.
+  [--keep] [--session <id>]|resume [--step over|into|out] [--what page|requests] [--remove]
+  [--reload again|skip|remove]|inspect [expression] [--frame n]>`.
 - **`browser_*` tools** of the same MCP (Playwright MCP, attached to this browser) drive the page when you
   need more than `highlight` can do: `browser_snapshot`, `browser_click`, `browser_type`,
   `browser_evaluate`, `browser_navigate`, … They start the browser if needed and act in the app tab, never
@@ -91,9 +92,21 @@ While the page is paused:
   something is refused.
 - `resume()` lets the page run and held requests go. `resume({ step: "over" | "into" | "out" })` runs to the
   next line and pauses again; `resume({ what: "requests" | "page" })` releases only one of the two.
+- At a pause point (`paused.point` names it: `id`, `label`, `kept`) there is more than running on:
+  - `resume({ remove: true })` runs on and removes a kept point.
+  - `resume({ reload: "again" })` loads the page again and pauses at the same point once more, also when it
+    was a once point that is already used up. The result is the new pause, or `running: true` when the page
+    only gets there after an action (a click, …).
+  - `resume({ reload: "skip" })` loads the page again and lets the point's next hit pass; it pauses at the
+    one after.
+  - `resume({ reload: "remove" })` loads the page again without the point.
+
+  Use `reload` to see the same moment again; do not `browser_navigate` a paused page for that.
 
 The panel shows the user "Page paused" or "Holding requests" with a **Resume** / **Release** button, so they
-can end it themselves; you then get a `resumed` action. Say in chat or with `say` what they are looking at
+can end it themselves; at a pause point the Resume button has a menu with the same choices as above. You
+then get a `resumed` action whose `note` says what they chose (reloaded, point removed, …); after "again" a
+`paused` action follows when the page stops there. Say in chat or with `say` what they are looking at
 while it is paused, and resume when you are done. A pause also ends when the tab loads another page or
 closes, and when your session ends. Pause points work in your own tabs, on allowed hosts.
 
@@ -179,8 +192,9 @@ add one line at most ("Answered in the panel."). Questions asked in your chat ar
   `demoDeclined`: the user discarded your request.
 - Tour and video events: `next`/`back`, `agentStep`, `stepError`, `tourEnd`, `videoReady`, `videoError`,
   `videoDiscarded` (sections below).
-- Pause events (see "Pausing the page"): `paused` (`reason`, `where`, `fn`, `frames`), `requestHeld` (`count`,
-  `urls`), `resumed` (`by: "user"` from the panel, or `"navigation"` when a new page replaced the paused one).
+- Pause events (see "Pausing the page"): `paused` (`reason`, `where`, `fn`, `frames`, `point` when a pause
+  point caused it), `requestHeld` (`count`, `urls`), `resumed` (`by: "user"` from the panel, with a `note`
+  saying what they chose, or `"navigation"` when a new page replaced the paused one).
 
 `request_demo({ prompt })` asks the user to show you something; the panel starts recording for them.
 

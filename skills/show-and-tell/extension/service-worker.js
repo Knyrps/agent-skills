@@ -647,7 +647,7 @@ async function command(m) {
       const tab = m.session ? await sessionTab(m, { create: false }) : await activeTab();
       if (!tab) return { ok: false, error: 'no tab' };
       if (m.cmd === 'inspectPaused') return pauser.inspect(tab.id, { expression: m.expression, frame: m.frame });
-      return { ...(await pauser.resume(tab.id, { step: m.step, what: m.what, by: 'agent' })), tabId: tab.id };
+      return { ...(await pauser.resume(tab.id, { step: m.step, what: m.what, remove: m.remove, reload: m.reload, by: 'agent' })), tabId: tab.id };
     }
     // A session clears its own highlights only.
     case 'clearHighlights':
@@ -1618,7 +1618,7 @@ async function handle(m, sender) {
     // The panel's "Turn off" for the tab in front; the user can always end throttling.
     case 'throttleOff': { const t = await activeTab(); return t ? throttleOff(t.id) : { ok: false }; }
     // The pause card's buttons, also for the tab in front: the user can always let the page run again.
-    case 'pauseResume': { const t = await activeTab(); return t ? pauser.resume(t.id, { what: m.what, by: 'user' }) : { ok: false }; }
+    case 'pauseResume': { const t = await activeTab(); return t ? pauser.resume(t.id, { what: m.what, remove: m.remove, reload: m.reload, by: 'user' }) : { ok: false }; }
     case 'pauseClear': { const t = await activeTab(); return t ? pauser.clear(t.id, 'user') : { ok: false }; }
     // Only the panel answers: the user's click, never a bridge command.
     case 'hostDecision': {

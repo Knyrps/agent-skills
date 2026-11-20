@@ -165,7 +165,7 @@ export function startOwner({ standalone = false } = {}) {
       const told = m.by === 'user' || (m.by === 'navigation' && !callState(session).running);
       if (told && (ran || released)) {
         push({ type: 'resumed', own: true, to: session, tab: m.tabId, by: m.by, ...(ran && { page: true }), ...(released && { requests: prev.held.count }),
-          note: m.by === 'user' ? 'The user let it run again from the side panel.' : 'A new page loaded in the tab; what was paused or held belonged to the old one.' });
+          note: m.by === 'user' ? m.note || 'The user let it run again from the side panel.' : 'A new page loaded in the tab; what was paused or held belonged to the old one.' });
       }
     }
     const ownerAlive = () => [...waiters].some(w => w.session === owner) || Date.now() - (sessions.get(owner)?.seen || 0) < 90000;

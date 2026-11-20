@@ -13,6 +13,8 @@ import '@material/web/chips/input-chip.js';
 import '@material/web/chips/suggestion-chip.js';
 import '@material/web/progress/linear-progress.js';
 import '@material/web/divider/divider.js';
+import '@material/web/menu/menu.js';
+import '@material/web/menu/menu-item.js';
 import '@material/web/elevation/elevation.js';
 import { styles as typescale } from '@material/web/typography/md-typescale-styles.js';
 

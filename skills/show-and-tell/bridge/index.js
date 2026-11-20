@@ -32,7 +32,7 @@ async function ensureBrowser({ force = false } = {}) {
 const [cmd, ...rest] = process.argv.slice(2);
 const opt = name => { const i = rest.indexOf('--' + name); return i >= 0 ? rest[i + 1] : undefined; };
 const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out', '--zoom', '--gesture', '--direction', '--to', '--url',
-  '--session', '--label', '--download', '--upload', '--latency', '--cpu', '--change', '--line', '--column', '--condition', '--step', '--what', '--frame']);
+  '--session', '--label', '--download', '--upload', '--latency', '--cpu', '--change', '--line', '--column', '--condition', '--step', '--what', '--frame', '--reload']);
 const NETWORK_PRESETS = ['fast-4g', 'slow-4g', '3g', 'offline'];
 const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
 const positional = rest.filter((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
@@ -82,8 +82,9 @@ async function runCli() {
         selector: on === 'dom' ? arg : undefined, change: opt('change'), text: on === 'line' ? arg : undefined, line: opt('line') && +opt('line'),
         column: opt('column') && +opt('column'), condition: opt('condition'), event: on === 'event' ? arg : undefined });
     }
-    // resume [--session s] [--step over|into|out] [--what page|requests]
-    case 'resume': return call('POST', '/cmd', { cmd: 'resume', session: opt('session'), step: opt('step'), what: opt('what') });
+    // resume [--session s] [--step over|into|out] [--what page|requests] [--remove] [--reload again|skip|remove]
+    case 'resume': return call('POST', '/cmd', { cmd: 'resume', session: opt('session'), step: opt('step'), what: opt('what'),
+      remove: rest.includes('--remove') || undefined, reload: opt('reload') });
     // inspect [--session s] [expression] [--frame n]
     case 'inspect': return call('POST', '/cmd', { cmd: 'inspectPaused', session: opt('session'), expression: positional.join(' ') || undefined, frame: opt('frame') && +opt('frame') });
     case 'show': return call('POST', '/cmd', { cmd: 'hideOverlays', hidden: false });
@@ -294,10 +295,16 @@ async function runMcp() {
       remove: { type: 'string', description: 'Remove this pause point (id), or "all"' },
     } } },
     { name: 'resume', description: 'Let your paused tab run again and let held requests go. `step` (over, into, out) runs to the next line instead and '
-      + 'returns where it stopped. `what` limits it to "page" or "requests" (default both).',
+      + 'returns where it stopped. `what` limits it to "page" or "requests" (default both). At a pause point you can also take that point away '
+      + '(remove: true), or load the page again instead of letting it run on (`reload`), e.g. to see the same moment a second time. '
+      + 'The user has the same choices in the side panel.',
     inputSchema: { type: 'object', properties: {
       step: { type: 'string', enum: ['over', 'into', 'out'] },
       what: { type: 'string', enum: ['all', 'page', 'requests'] },
+      remove: { type: 'boolean', description: 'Also remove the pause point the page is paused at (a point set with once: false)' },
+      reload: { type: 'string', enum: ['again', 'skip', 'remove'], description: 'Reload the paused page: "again" pauses at the same point once more '
+        + '(a used-up point is set again) and returns where it stopped; "skip" lets the point\'s next hit pass and pauses at the one after; '
+        + '"remove" reloads without the point' },
     } } },
     { name: 'inspect_paused', description: 'Look at your paused tab without changing it: the call stack and the variables of a call frame, or the value '
       + 'of an `expression` there (e.g. "data.items.length", "this.state"). Read-only: expressions that would change something are refused.',
@@ -366,7 +373,7 @@ async function runMcp() {
         }
         case 'pause': return done(await cmd({ cmd: 'pause', on: a.on, url: a.url, hold: a.hold, selector: a.selector, change: a.change, text: a.text,
           line: a.line, column: a.column, condition: a.condition, event: a.event, once: a.once, remove: a.remove }));
-        case 'resume': return done(await cmd({ cmd: 'resume', step: a.step, what: a.what }));
+        case 'resume': return done(await cmd({ cmd: 'resume', step: a.step, what: a.what, remove: a.remove, reload: a.reload }));
         case 'inspect_paused': return reply(await cmd({ cmd: 'inspectPaused', expression: a.expression, frame: a.frame }));
         case 'get_queue': return withShots(await call('GET', '/queue' + (a.recent ? '?recent=1' : '')));
         case 'wait_for_action': {

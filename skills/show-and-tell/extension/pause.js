@@ -8,6 +8,7 @@ const DOM_TYPES = { content: ['subtree-modified'], attributes: ['attribute-modif
 const SCOPES = ['local', 'block', 'catch', 'closure', 'module', 'script'];
 const KICK = 'show-and-tell-pause'; // the empty script that makes an idle page stop, see pauseNow
 const READ_ONLY = 'inspection is read-only: this expression would change something, or calls code that might. Read variables and properties instead.';
+const AGAIN_MS = 10000; // how long a reloaded page has to show a watched element again
 
 const cut = (s, n = 200) => { s = String(s); return s.length > n ? s.slice(0, n) + '…' : s; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -40,19 +41,23 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
   const cdp = (tabId, method, params) => chrome.debugger.sendCommand({ tabId }, method, params);
   const quiet = (tabId, method, params) => cdp(tabId, method, params).catch(() => null);
   const fresh = session => ({ session, points: [], scripts: new Map(), debug: false, dom: false, fetch: false, root: 0,
-    paused: null, frames: [], idle: false, held: new Map(), waiters: [], stepping: false, stepTimer: 0, nowPending: false, resumedBy: '' });
+    paused: null, frames: [], idle: false, held: new Map(), waiters: [], stepping: false, stepTimer: 0, nowPending: false, resumedBy: '',
+    // cause: the point the page is paused at (kept while stepping). reloading: who reloads the paused page.
+    // awaited: the agent's own reload waits for the next pause. note: what the user chose, for the agent.
+    cause: null, reloading: '', awaited: false, skipping: false, note: '', domRun: 0 });
 
   const view = t => (t && (t.points.length || t.paused || t.held.size)) ? {
     session: t.session,
-    points: t.points.map(({ id, kind, label, once }) => ({ id, kind, label, once })),
+    points: t.points.map(({ id, kind, label, once, skip }) => ({ id, kind, label, once, ...(skip ? { skip } : {}) })),
     paused: t.paused,
     held: t.held.size ? { count: t.held.size, urls: [...new Set([...t.held.values()].map(h => h.url))].slice(0, 3) } : null,
   } : null;
 
   // Writes what the panel shows and tells the bridge. by: who or what caused the change.
-  function publish(tabId, by, session) {
+  function publish(tabId, by, session, note) {
     const t = tabs.get(tabId), v = view(t);
-    tell({ type: 'pauseState', tabId, session: t?.session ?? session ?? null, by, points: v?.points || [], paused: v?.paused || null, held: v?.held || null });
+    tell({ type: 'pauseState', tabId, session: t?.session ?? session ?? null, by, points: v?.points || [], paused: v?.paused || null, held: v?.held || null,
+      ...(note ? { note } : {}) });
     return serial(async () => {
       const { pauses = {} } = await S.get('pauses');
       const now = view(tabs.get(tabId));
@@ -63,6 +68,11 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
 
   const wake = (t, value) => { for (const w of t.waiters.splice(0)) w(value); };
   const next = (t, ms) => Promise.race([new Promise(r => t.waiters.push(r)), sleep(ms).then(() => 'timeout')]);
+  // Waits through pauses and resumes until the test holds; false when the time is over.
+  async function until(t, test, ms) {
+    for (const end = Date.now() + ms; !test();) if (Date.now() >= end || (await next(t, end - Date.now())) === 'timeout') return test();
+    return true;
+  }
   const urlOf = (t, f) => f.url || t.scripts.get(f.location.scriptId)?.url || '';
   const place = (t, f) => f ? `${fileOf(urlOf(t, f))}:${f.location.lineNumber + 1}` : '';
 
@@ -154,7 +164,7 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
         if (!nodeId) return { error: `no element matches ${selector} (elements inside a shadow root cannot be watched)` };
         for (const type of DOM_TYPES[change]) await cdp(tabId, 'DOMDebugger.setDOMBreakpoint', { nodeId, type });
         const what = { content: 'content changes', attributes: 'attributes change', removed: 'is removed', any: 'changes' }[change];
-        return { point: { kind: 'dom', key: `${selector} ${change}`, nodeId, types: DOM_TYPES[change], once, label: `${selector} ${what}` } };
+        return { point: { kind: 'dom', key: `${selector} ${change}`, selector, nodeId, types: DOM_TYPES[change], once, label: `${selector} ${what}` } };
       }
       case 'event': {
         const eventName = String(spec.event ?? '').trim();
@@ -179,15 +189,16 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
         }
         const key = `${target.url || target.urlRegex} ${target.line} ${target.column || 0} ${spec.condition || ''}`;
         if (same('line', key)) return { point: same('line', key) };
-        const r = await cdp(tabId, 'Debugger.setBreakpointByUrl', {
+        const params = {
           ...(target.url ? { url: target.url } : { urlRegex: target.urlRegex }), lineNumber: target.line - 1,
           ...(target.column ? { columnNumber: target.column - 1 } : {}), ...(spec.condition ? { condition: String(spec.condition) } : {}),
-        });
+        };
+        const r = await cdp(tabId, 'Debugger.setBreakpointByUrl', params);
         const loc = r.locations?.[0], s = loc && t.scripts.get(loc.scriptId);
         if (s) await sourceOf(tabId, t, s);
         const at = loc ? `${fileOf(s?.url)}:${loc.lineNumber + 1}` : `${fileOf(target.url || String(spec.url))}:${target.line}`;
         return {
-          point: { kind: 'line', key, breakpointId: r.breakpointId, once, label: 'breakpoint at ' + at + (spec.condition ? ` if ${cut(spec.condition, 40)}` : '') },
+          point: { kind: 'line', key, params, breakpointId: r.breakpointId, once, label: 'breakpoint at ' + at + (spec.condition ? ` if ${cut(spec.condition, 40)}` : '') },
           info: loc ? { at: `${at}:${loc.columnNumber + 1}`, code: codeAt(t, loc) } : { note: 'no loaded script has that line yet; the pause applies once such a script loads' },
         };
       }
@@ -202,6 +213,39 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
     if (point.kind === 'event') await quiet(tabId, 'DOMDebugger.removeEventListenerBreakpoint', { eventName: point.eventName });
     if (point.kind === 'line') await quiet(tabId, 'Debugger.removeBreakpoint', { breakpointId: point.breakpointId });
     if (point.kind === 'dom') for (const type of point.types) await quiet(tabId, 'DOMDebugger.removeDOMBreakpoint', { nodeId: point.nodeId, type });
+  }
+
+  // Sets a point again that its own pause used up, under the same id. A watched element is new after a
+  // reload and is looked up then, see watchAgain.
+  async function rearm(tabId, t, point) {
+    if (t.points.includes(point)) return;
+    if (point.kind === 'line') point.breakpointId = (await cdp(tabId, 'Debugger.setBreakpointByUrl', point.params)).breakpointId;
+    if (point.kind === 'request') await cdp(tabId, 'DOMDebugger.setXHRBreakpoint', { url: point.url });
+    if (point.kind === 'event') await cdp(tabId, 'DOMDebugger.setEventListenerBreakpoint', { eventName: point.eventName });
+    t.points.push(point);
+  }
+
+  // After a reload from a pause: watched elements are set again as soon as the new document has them.
+  async function watchAgain(tabId, t) {
+    const run = ++t.domRun;
+    while (tabs.get(tabId) === t && run === t.domRun) {
+      const open = t.points.filter(p => p.kind === 'dom' && !p.nodeId);
+      if (!open.length) return;
+      if (!t.root) t.root = (await quiet(tabId, 'DOM.getDocument', { depth: 0 }))?.root?.nodeId || 0;
+      for (const p of open) {
+        const nodeId = t.root && (await quiet(tabId, 'DOM.querySelector', { nodeId: t.root, selector: p.selector }))?.nodeId;
+        if (!nodeId) continue;
+        for (const type of p.types) await quiet(tabId, 'DOMDebugger.setDOMBreakpoint', { nodeId, type });
+        p.nodeId = nodeId;
+      }
+      const late = t.points.filter(p => p.kind === 'dom' && !p.nodeId && p.again < Date.now());
+      if (late.length) {
+        t.points = t.points.filter(p => !late.includes(p));
+        await publish(tabId, 'navigation');
+        await settle(tabId);
+      }
+      await sleep(50);
+    }
   }
 
   // Nothing set, paused or held any more: switch the domains off and let the tab go.
@@ -257,6 +301,7 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
     const gone = t.points.filter(p => id === 'all' || p.id === id);
     if (!gone.length && id !== 'all') return { ok: false, error: `no pause point ${id}; the tab has ${t.points.map(p => p.id).join(', ') || 'none'}` };
     for (const p of gone) await unset(tabId, t, p);
+    if (t.paused?.point && gone.includes(t.cause)) t.paused.point.kept = false;
     // Requests that only a removed hold kept waiting go on.
     if (t.held.size && !t.points.some(p => p.hold)) await releaseHeld(tabId, t, false);
     await publish(tabId, by);
@@ -274,6 +319,14 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
   }
 
   async function onPaused(tabId, t, p) {
+    const hit = hitPoint(t, p);
+    // "Ignore once": the point lets this hit pass and counts again from the next one.
+    if (hit?.skip && !t.stepping && p.reason !== 'step') {
+      hit.skip--;
+      t.skipping = true;
+      if (!(await quiet(tabId, 'Debugger.resume'))) t.skipping = false;
+      return void publish(tabId, 'page');
+    }
     clearTimeout(t.stepTimer);
     const stepped = t.stepping || p.reason === 'step';
     t.stepping = false;
@@ -282,7 +335,7 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
     // A page stopped while idle is inside the empty script that stopped it: no page code to show. Code
     // without a file was run from outside (browser_evaluate, the console) and is left out of the call stack.
     const real = p.callFrames.filter(f => urlOf(t, f) !== KICK), own = real.filter(f => urlOf(t, f)), top = own[0];
-    const point = hitPoint(t, p), now = t.nowPending && !point;
+    const point = hit, now = t.nowPending && !point;
     const reason = point ? point.label : now ? 'paused by the agent' : stepped ? (t.paused?.reason || 'step')
       : p.reason === 'XHR' ? `request to ${cut(p.data?.url || '', 80)}` : 'debugger statement in the page';
     t.nowPending = false;
@@ -295,20 +348,27 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
       frames: own.slice(0, 5).map(f => ({ fn: f.functionName || '(anonymous)', at: place(t, f) })),
     };
     if (point?.once) await unset(tabId, t, point);
-    await publish(tabId, stepped ? 'step' : now ? 'agent' : 'breakpoint');
+    // The point behind this pause, also after stepping on from it. kept: it is still set and pauses again.
+    t.cause = point || (stepped ? t.cause : null);
+    if (t.cause) t.paused.point = { id: t.cause.id, label: t.cause.label, kept: t.points.includes(t.cause) };
+    const awaited = t.awaited;
+    t.awaited = false;
+    await publish(tabId, stepped ? 'step' : now || awaited ? 'agent' : 'breakpoint');
     wake(t, t.paused);
   }
 
   async function ran(tabId, t) {
     t.stepping = false;
-    t.paused = null; t.frames = [];
-    const by = t.resumedBy || 'page'; t.resumedBy = '';
-    await publish(tabId, by);
+    t.paused = null; t.frames = []; t.cause = null; t.reloading = '';
+    const by = t.resumedBy || 'page', note = t.note;
+    t.resumedBy = ''; t.note = '';
+    await publish(tabId, by, undefined, note);
     wake(t, null);
     await settle(tabId);
   }
 
   function onResumed(tabId, t) {
+    if (t.skipping) return void (t.skipping = false); // a hit that was let pass, see onPaused
     clearTimeout(t.stepTimer);
     // A step resumes and pauses again right away; only a step that runs on counts as resumed.
     if (t.stepping) t.stepTimer = setTimeout(() => ran(tabId, t), 700);
@@ -331,10 +391,50 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
     return held.length;
   }
 
+  // Loads the paused page again instead of letting it run on. how: "again" pauses at the same point once
+  // more, "skip" lets that point's next hit pass, "remove" takes the point away.
+  async function reload(tabId, t, how, by) {
+    if (!['again', 'skip', 'remove'].includes(how)) return { ok: false, error: 'reload must be again, skip or remove' };
+    if (!t.paused) return { ok: false, error: 'the page is not paused; reload it with browser_navigate instead' };
+    const point = t.cause, since = t.paused.since, name = point && `${point.id} (${point.label})`;
+    if (!point && how !== 'remove') return { ok: false, error: 'this pause has no pause point to come back to (the page was paused directly, or by its own debugger statement); use reload: "remove" or a plain resume' };
+    try {
+      if (how !== 'remove') { await rearm(tabId, t, point); point.skip = how === 'skip' ? 1 : 0; }
+      else if (t.points.includes(point)) await unset(tabId, t, point);
+    } catch (e) { return { ok: false, error: errorText(e) }; }
+    // Watched elements are new after a reload: every DOM point is looked up again in the new document.
+    for (const p of t.points) if (p.kind === 'dom') p.again = Date.now() + AGAIN_MS;
+    clearTimeout(t.stepTimer);
+    t.stepping = false;
+    t.resumedBy = t.reloading = by;
+    t.awaited = by === 'agent' && how !== 'remove';
+    if (by === 'user') {
+      t.note = 'The user reloaded the page from the side panel' + (!point ? '.' : how === 'again' ? `; it pauses at ${name} again.`
+        : how === 'skip' ? `; ${name} lets its next hit pass and pauses at the one after.` : ` and removed the pause point ${name}.`);
+    }
+    const failed = await chrome.tabs.reload(tabId).then(() => '', errorText);
+    if (failed || !(await until(t, () => t.paused?.since !== since, 5000))) {
+      t.awaited = false; t.resumedBy = t.reloading = t.note = '';
+      return { ok: false, error: failed || 'the page did not reload' };
+    }
+    // The user's choice shows in the panel; the agent's own reload returns where the page stopped again.
+    if (by !== 'agent' || how === 'remove') return { ok: true, reloaded: true, ...(how === 'remove' && point ? { removed: point.id } : {}) };
+    const again = await until(t, () => !!t.paused, 8000);
+    t.awaited = false;
+    return again ? { ok: true, reloaded: true, paused: t.paused }
+      : { ok: true, reloaded: true, running: true, note: `the page has not paused again yet; ${point.id} is set, and a paused action follows when it does` };
+  }
+
   // what: "all" (default), "page" or "requests". step: "over", "into" or "out" stops again at the next line.
-  async function resume(tabId, { step, what = 'all', by = 'agent' } = {}) {
+  // remove: also takes away the point the page is paused at. reload: see reload().
+  async function resume(tabId, { step, what = 'all', remove, reload: how, by = 'agent' } = {}) {
     const t = tabs.get(tabId);
     if (!t || (!t.paused && !t.held.size)) return { ok: true, note: 'nothing was paused or held in this tab' };
+    if (how) return reload(tabId, t, how, by);
+    if (remove && t.paused && t.cause && what !== 'requests') {
+      if (by === 'user') t.note = `The user let it run again from the side panel and removed the pause point ${t.cause.id} (${t.cause.label}).`;
+      if (t.points.includes(t.cause)) await unset(tabId, t, t.cause);
+    }
     if (step) {
       const method = { over: 'Debugger.stepOver', into: 'Debugger.stepInto', out: 'Debugger.stepOut' }[step];
       if (!method) return { ok: false, error: 'step must be over, into or out' };
@@ -416,11 +516,14 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
       case 'Debugger.resumed': onResumed(tabId, t); break;
       case 'Fetch.requestPaused': onHeld(tabId, t, params).catch(fail); break;
       case 'DOM.documentUpdated': {
-        // A new document: the watched elements are gone, and so are their breakpoints.
+        // A new document: the watched elements are gone, and so are their breakpoints. After a reload from
+        // a pause they are set again on the new elements.
         t.root = 0;
-        if (!t.points.some(p => p.kind === 'dom')) break;
-        t.points = t.points.filter(p => p.kind !== 'dom');
-        publish(tabId, 'navigation').then(() => settle(tabId)).catch(fail);
+        const before = t.points.length, now = Date.now();
+        for (const p of t.points) if (p.kind === 'dom') p.nodeId = 0;
+        t.points = t.points.filter(p => p.kind !== 'dom' || p.again > now);
+        if (t.points.some(p => p.kind === 'dom')) watchAgain(tabId, t).catch(fail);
+        if (t.points.length !== before) publish(tabId, 'navigation').then(() => settle(tabId)).catch(fail);
         break;
       }
     }
@@ -442,7 +545,7 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
     const t = tabs.get(tabId);
     if (!t?.paused || t.paused.since > at) return;
     clearTimeout(t.stepTimer);
-    t.resumedBy = 'navigation';
+    t.resumedBy = t.reloading || 'navigation';
     ran(tabId, t).catch(() => {});
   }
 

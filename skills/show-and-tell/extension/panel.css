@@ -32,7 +32,9 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .avatar[style*="--session"] svg { fill: var(--session); }
 .titles { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #who-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.listen { display: inline-flex; align-items: center; gap: 8px; color: var(--md-sys-color-on-surface-variant); }
+/* One line each, like an app bar's title and subtitle; what does not fit ends in an ellipsis (full text in the tooltip). */
+.listen { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--md-sys-color-on-surface-variant); }
+#listen-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .listen .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); flex: none; }
 .listen.on { color: var(--md-sys-color-primary); }
 .listen.on .dot { background: var(--md-sys-color-primary); }
@@ -41,8 +43,8 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .listen.on[style*="--session"] .dot { background: var(--session); }
 #new-tab { flex: none; --md-icon-button-icon-color: var(--md-sys-color-on-surface-variant); }
 #new-tab svg { width: 24px; height: 24px; }
-.conn { flex: none; display: inline-flex; align-items: center; gap: 8px; color: var(--md-sys-color-on-surface-variant); }
-.conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); }
+.conn { flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 0 4px; white-space: nowrap; color: var(--md-sys-color-on-surface-variant); }
+.conn .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); }
 .conn.ok .dot { background: var(--sat-color-success); }
 
 /* ---- pinned state */
@@ -98,9 +100,40 @@ svg { width: 18px; height: 18px; fill: currentColor; }
   padding: 4px 4px 4px 16px; border-radius: 12px;
   background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container);
 }
-.pause[data-state="paused"] { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
-.pause svg { flex: none; }
+/* Paused: the action is a filled split button. In a narrow panel it moves to its own row, right-aligned. */
+.pause[data-state="paused"] {
+  flex-wrap: wrap; row-gap: 4px; padding: 8px 8px 8px 16px;
+  background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container);
+}
+.pause[data-state="paused"] .pause-text { flex-basis: 160px; }
+.pause > svg { flex: none; }
 .pause-text { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 4px 0; overflow-wrap: anywhere; }
+/* M3 split button, small (40 px): leading button and a 48 px trailing icon button 2 px apart, 4 px inner
+   corners. While its menu is open the trailing button is fully round and its arrow points up.
+   The outer corners are 20 px, not the default 9999 px: next to a radius that large, CSS scales the
+   inner corners down to nothing. */
+@property --split-inner { syntax: '<length>'; inherits: true; initial-value: 4px; }
+.split { flex: none; display: inline-flex; gap: 2px; margin-left: auto; }
+.split md-filled-button {
+  --md-filled-button-leading-space: 16px; --md-filled-button-trailing-space: 12px;
+  --md-filled-button-container-shape: 20px;
+  --md-filled-button-container-shape-start-end: 4px; --md-filled-button-container-shape-end-end: 4px;
+}
+.split.single md-filled-button {
+  --md-filled-button-trailing-space: 16px;
+  --md-filled-button-container-shape-start-end: 20px; --md-filled-button-container-shape-end-end: 20px;
+}
+.split md-filled-icon-button {
+  --md-filled-icon-button-container-width: 48px; --md-filled-icon-button-icon-size: 22px;
+  --md-filled-icon-button-container-shape: 20px;
+  --md-filled-icon-button-container-shape-start-start: var(--split-inner); --md-filled-icon-button-container-shape-end-start: var(--split-inner);
+  transition: --split-inner .2s cubic-bezier(.2, 0, 0, 1);
+}
+.split md-filled-icon-button svg { width: 22px; height: 22px; translate: -1px; transition: rotate .2s cubic-bezier(.2, 0, 0, 1), translate .2s cubic-bezier(.2, 0, 0, 1); }
+.split md-menu-item { --md-menu-item-one-line-container-height: 48px; }
+.split.open md-filled-icon-button { --split-inner: 20px; }
+.split.open md-filled-icon-button svg { rotate: 180deg; translate: 0; }
+@media (prefers-reduced-motion: reduce) { .split md-filled-icon-button, .split md-filled-icon-button svg { transition: none; } }
 .pause md-text-button {
   flex: none;
   --md-text-button-label-text-color: currentColor;

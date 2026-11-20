@@ -34,8 +34,10 @@ async function render() {
   const s = await S.get(['step', 'steps', 'waiting', 'listener', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning',
     'tourTab', 'tourHome', 'explanation', 'video']);
   const pending = (s.outbox || []).length;
-  $('conn-text').textContent = (s.connected ? 'Connected' : 'Offline') + (pending ? ` · ${pending} pending` : '');
+  $('conn-text').textContent = pending ? `${pending} pending` : '';
+  $('conn-text').hidden = !pending;
   $('conn').classList.toggle('ok', !!s.connected);
+  $('conn').title = $('conn').ariaLabel = (s.connected ? 'Bridge connected' : 'Bridge offline') + (pending ? ` · ${pending} message${pending === 1 ? '' : 's'} not sent yet` : '');
   const me = await frontSession();
   const who = me?.name || s.listener || 'the agent';
   const listening = me ? me.listening : s.waiting;
@@ -43,9 +45,9 @@ async function render() {
   // A new tab inside the group of the session in front (Ctrl+T would open one outside it).
   $('new-tab').hidden = !me?.live;
   if (me) $('new-tab').title = $('new-tab').ariaLabel = `New tab in ${me.name}'s group`;
-  $('listen-text').textContent = !s.connected ? 'Bridge offline · messages are kept'
-    : me && !me.live ? 'Session ended · messages go to the latest agent'
-      : listening ? 'Listening · panel messages only' : me || s.listener ? 'Not listening · messages wait for it' : 'No agent listening · messages are kept';
+  $('listen-text').textContent = $('listen').title = !s.connected ? 'Bridge offline · messages are kept'
+    : me && !me.live ? 'Session ended · the latest agent gets messages'
+      : listening ? 'Listening · panel messages only' : me || s.listener ? 'Not listening · messages wait' : 'No agent · messages are kept';
   $('listen').classList.toggle('on', !!(s.connected && listening));
   for (const e of [$('listen'), $('avatar')]) e.style.setProperty('--session', me ? GROUP[me.color] || '' : '');
   $('q').placeholder = `Message ${me?.name || s.listener || 'the agent'}`;
@@ -207,18 +209,41 @@ async function renderPause() {
   const [title, detail, action] = {
     paused: () => ['Page paused', [p.paused.reason, p.paused.frames?.length && [!p.paused.reason.includes(p.paused.where) && p.paused.where, p.paused.fn && `${p.paused.fn}()`].filter(Boolean).join(' '), waiting], 'Resume'],
     held: () => ['Holding requests', [short(p.held.urls[0] || ''), waiting], 'Release'],
-    armed: () => [p.points.length === 1 ? 'Pause point set' : 'Pause points set', p.points.map(x => x.label), 'Remove'],
+    armed: () => [p.points.length === 1 ? 'Pause point set' : 'Pause points set', p.points.map(x => x.label + (x.skip ? ' (lets the next hit pass)' : '')), 'Remove'],
   }[state]();
   $('pause').dataset.state = state;
   $('pause-title').textContent = title;
   $('pause-detail').textContent = detail.filter(Boolean).join(' · ');
   $('pause-action').textContent = action;
+  // Paused: a split button. Its menu needs a breakpoint to act on; "remove" only one that is still set.
+  const point = p.paused?.point;
+  $('pause-action').hidden = !!p.paused;
+  $('pause-split').hidden = !p.paused;
+  $('pause-split').classList.toggle('single', !point);
+  $('pause-more').hidden = !point;
+  $('pause-remove').hidden = $('pause-remove').disabled = $('pause-menu-divider').hidden = !point?.kept;
+  if (!point) $('pause-menu').open = false;
 }
-$('pause-action').addEventListener('click', async () => {
-  const state = $('pause').dataset.state;
-  const r = await chrome.runtime.sendMessage({ type: state === 'armed' ? 'pauseClear' : 'pauseResume' }).catch(() => null);
-  if (!r?.ok) return toast('Could not do that. Reload the page to let it run again.');
-  toast(state === 'armed' ? 'Pause points removed.' : state === 'held' ? 'Requests released.' : 'The page runs again.');
+const PAUSE_DONE = { resume: 'The page runs again.', remove: 'The page runs again, without the breakpoint.', again: 'Reloading to the breakpoint.',
+  skip: 'Reloading. The breakpoint lets its next hit pass.', drop: 'Reloading without the breakpoint.', held: 'Requests released.', armed: 'Pause points removed.' };
+async function pauseDo(what) {
+  const m = { armed: { type: 'pauseClear' }, remove: { remove: true }, again: { reload: 'again' }, skip: { reload: 'skip' }, drop: { reload: 'remove' } }[what] || {};
+  const r = await chrome.runtime.sendMessage({ type: 'pauseResume', ...m }).catch(() => null);
+  toast(r?.ok ? PAUSE_DONE[what] : r?.error ? `Could not do that: ${r.error}.` : 'Could not do that. Reload the page to let it run again.');
+}
+$('pause-action').addEventListener('click', () => pauseDo($('pause').dataset.state));
+$('pause-resume').addEventListener('click', () => pauseDo('resume'));
+$('pause-more').addEventListener('click', () => { $('pause-menu').open = !$('pause-menu').open; });
+for (const type of ['opening', 'closing']) {
+  $('pause-menu').addEventListener(type, () => {
+    $('pause-split').classList.toggle('open', type === 'opening');
+    $('pause-more').ariaExpanded = String(type === 'opening');
+  });
+}
+// A menu item chosen by click or keyboard; Escape closes without choosing.
+$('pause-menu').addEventListener('close-menu', e => {
+  const { initiator, reason } = e.detail;
+  if (initiator?.dataset?.do && (reason.kind === 'click-selection' || reason.key !== 'Escape')) pauseDo(initiator.dataset.do);
 });
 $('new-tab').addEventListener('click', async () => {
   const r = await chrome.runtime.sendMessage({ type: 'newSessionTab' }).catch(e => ({ error: e.message }));

@@ -25,7 +25,8 @@
     <md-icon-button id="new-tab" title="New tab in this session's group" aria-label="New tab in this session's group" hidden>
       <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
     </md-icon-button>
-    <span id="conn" class="conn md-typescale-label-small" title="Bridge"><span class="dot"></span><span id="conn-text">Offline</span></span>
+    <!-- The bridge: a dot, and how many messages still wait to be sent. The line under the name says it in words. -->
+    <span id="conn" class="conn md-typescale-label-small" role="img" title="Bridge offline" aria-label="Bridge offline"><span class="dot"></span><span id="conn-text" hidden></span></span>
   </header>
 
   <!-- State that holds while it lasts: tour or video, throttling, a paused page, a page the agent may not use. -->
@@ -70,7 +71,21 @@
     <div id="pause" class="pause md-typescale-body-medium" role="status" hidden>
       <svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
       <span class="pause-text"><b id="pause-title"></b><span id="pause-detail"></span></span>
-      <md-text-button id="pause-action">Resume</md-text-button>
+      <md-text-button id="pause-action">Release</md-text-button>
+      <!-- M3 split button: Resume, and the other ways to go on from a breakpoint in a menu. -->
+      <span id="pause-split" class="split" hidden>
+        <md-filled-button id="pause-resume">Resume</md-filled-button>
+        <md-filled-icon-button id="pause-more" title="More ways to continue" aria-label="More ways to continue" aria-haspopup="menu" aria-expanded="false">
+          <svg viewBox="0 0 24 24"><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+        </md-filled-icon-button>
+        <md-menu id="pause-menu" anchor="pause-more" positioning="popover" anchor-corner="end-end" menu-corner="start-end">
+          <md-menu-item id="pause-remove" data-do="remove"><div slot="headline">Resume and remove breakpoint</div></md-menu-item>
+          <md-divider id="pause-menu-divider" role="separator" tabindex="-1"></md-divider>
+          <md-menu-item data-do="again"><div slot="headline">Reload to breakpoint</div></md-menu-item>
+          <md-menu-item data-do="skip"><div slot="headline">Reload and ignore breakpoint once</div></md-menu-item>
+          <md-menu-item data-do="drop"><div slot="headline">Reload and remove breakpoint</div></md-menu-item>
+        </md-menu>
+      </span>
     </div>
 
     <div id="notice" class="notice" hidden>
