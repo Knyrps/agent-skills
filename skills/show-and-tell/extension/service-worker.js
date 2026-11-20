@@ -531,7 +531,7 @@ async function onBridge(m) {
     return sweepTabs(m.sessions || [], m.ended || []);
   }
   if (m.cmd === 'hosts') return setHostState(m);
-  if (m.cmd === 'lab') return S.set({ labUrl: String(m.url || LAB_DEFAULT) });
+  if (m.cmd === 'lab') { await S.set({ labUrl: String(m.url || LAB_DEFAULT) }); return pinLab(); }
   if (m.cmd === 'thinking') return serial(async () => { const { thinking = {} } = await S.get('thinking'); thinking[m.session] = m.ts; await S.set({ thinking }); });
   if (m.cmd === 'say') {
     await serial(async () => { const { thinking = {} } = await S.get('thinking'); delete thinking[m.session]; await S.set({ thinking }); });
@@ -848,11 +848,15 @@ async function runNow(tabId, actions, i, cinematic, ctx) {
 // with the page's real title says where the viewer is now.
 async function videoSwitch(v, tabId, kind) {
   v.followed.add(tabId); v.visited.add(tabId);
+  const info = async id => { const x = await chrome.tabs.get(id).catch(() => null); return { title: x?.title || '', url: x?.url || '', favicon: x?.favIconUrl || '' }; };
+  const from = await info(v.tabId), to = await info(tabId);
+  // In tab-strip order: going to a new tab puts it after the one it came from; going back, the other way.
+  const tabs = kind === 'Back to' ? [{ ...to, active: true }, { ...from, active: false }] : [{ ...from, active: false }, { ...to, active: true }];
   const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
   await videoCmd({ cmd: 'switch', streamId });
   v.tabId = tabId;
   const t = await chrome.tabs.get(tabId);
-  await stage(v, { tabChip: { kind, title: t.title || '', favicon: t.favIconUrl || '', url: t.url, at: Date.now() } });
+  await stage(v, { tabChip: { kind, title: t.title || '', favicon: t.favIconUrl || '', url: t.url, tabs, at: Date.now() } });
 }
 
 // { waitForTab: ms }: the previous action opened a tab or popup; the tour goes on there.
@@ -1742,6 +1746,18 @@ chrome.webNavigation.onHistoryStateUpdated.addListener(d => userNav('urlChange',
 const LAB_DEFAULT = 'http://localhost:47614/';
 const labUrl = async () => (await S.get('labUrl')).labUrl || LAB_DEFAULT;
 async function isLab(url) { try { return new URL(url).origin === new URL(await labUrl()).origin; } catch { return false; } }
+// The browser's own test-page tab (the start page, owned by no session) is pinned, so it reads as part of
+// the browser rather than a stray tab. Agent tabs that open lab pages are grouped and left alone.
+async function pinLab() {
+  const lab = await labUrl(), offline = chrome.runtime.getURL('lab-offline.html');
+  const owned = new Set(Object.values(await sessionTabs()).flatMap(tabsOf));
+  const tabs = (await chrome.tabs.query({ windowType: 'normal' })).filter(t => !owned.has(t.id) && t.groupId < 0
+    && ((t.url || t.pendingUrl || '') === lab || (t.url || '').startsWith(offline)));
+  if (!tabs.length || tabs.some(t => t.pinned)) return;
+  await chrome.tabs.update(tabs[0].id, { pinned: true }).catch(() => {});
+}
+chrome.tabs.onUpdated.addListener((id, info) => { if (info.status === 'complete') pinLab().catch(() => {}); });
+
 chrome.webNavigation.onErrorOccurred.addListener(async d => {
   if (d.frameId !== 0 || /ERR_ABORTED/.test(d.error) || !(await isLab(d.url))) return;
   await chrome.tabs.update(d.tabId, { url: chrome.runtime.getURL('lab-offline.html') + '?u=' + encodeURIComponent(d.url) }).catch(() => {});

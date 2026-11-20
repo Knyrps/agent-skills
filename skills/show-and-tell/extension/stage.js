@@ -48,8 +48,8 @@
       border-radius:0 0 16px 16px;background:var(--md-sys-color-surface-container-highest);box-shadow:${EL2};
       transition:opacity .35s cubic-bezier(.2,0,0,1),translate .35s cubic-bezier(.2,0,0,1)}
     .tabbar.hide{translate:-50% -110%}
-    .tabbar .kind{align-self:center;padding-bottom:8px;font:500 12px/16px ${FONT};letter-spacing:.5px;color:var(--md-sys-color-primary)}
-    .tab{position:relative;display:flex;align-items:center;gap:8px;height:36px;max-width:min(380px,60vw);padding:0 12px;
+    .tabbar .kind{align-self:center;white-space:nowrap;padding-bottom:8px;font:500 12px/16px ${FONT};letter-spacing:.5px;color:var(--md-sys-color-primary)}
+    .tab{position:relative;display:flex;align-items:center;gap:8px;height:36px;width:max-content;max-width:min(260px,32vw);padding:0 12px;
       border-radius:10px 10px 0 0;background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);font:500 14px/20px ${FONT};letter-spacing:.1px}
     .tab::before,.tab::after{content:'';position:absolute;bottom:0;width:10px;height:10px}
     .tab::before{left:-10px;background:radial-gradient(circle at 0 0,transparent 9.5px,var(--md-sys-color-surface) 10px)}
@@ -57,7 +57,14 @@
     .tab .ic{flex:none;width:16px;height:16px;border-radius:2px}
     .tab .ic.globe{fill:var(--md-sys-color-on-surface-variant)}
     .tab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .tab .x{flex:none;width:16px;height:16px;margin-left:4px;fill:var(--md-sys-color-on-surface-variant)}`;
+    .tab .x{flex:none;width:16px;height:16px;margin-left:4px;fill:var(--md-sys-color-on-surface-variant)}
+    /* Inactive tabs sit on the strip itself, like in Chrome: no surface, muted text, a divider between. */
+    .tab.off{background:transparent;color:var(--md-sys-color-on-surface-variant);font-weight:400}
+    .tab.off::before,.tab.off::after{display:none}
+    .tab.off + .tab.off::before{display:block;content:'';left:0;top:10px;bottom:10px;width:1px;height:auto;background:var(--md-sys-color-outline-variant)}
+    .tab.on{animation:tabin .35s cubic-bezier(.2,0,0,1)}
+    @keyframes tabin{from{opacity:0;translate:0 8px}}
+    .tabs{display:flex;align-items:flex-end;gap:8px}`;
 
   let host = null, root = null, els = {}, state = {};
   const tokens = fetch(chrome.runtime.getURL('vendor/m3-tokens.css')).then(r => r.text())
@@ -186,12 +193,13 @@
   function tabChip(s) {
     const t = s.tabChip, left = t ? 3500 - (Date.now() - (t.at || 0)) : 0, on = !!t && !s.card && left > 0;
     if (on) {
-      const html = `<span class="kind">${esc(t.kind || 'New tab')}</span><span class="tab">`
-        + (t.favicon ? `<img class="ic" alt="" src="${esc(t.favicon)}">` : GLOBE) + `<span class="t">${esc(t.title || t.url || '')}</span>${X}</span>`;
+      // Both tabs side by side, as in a tab strip: the one the video came from and the one it is in now.
+      const list = t.tabs?.length ? t.tabs : [{ title: t.title, url: t.url, favicon: t.favicon, active: true }];
+      const html = `<span class="kind">${esc(t.kind || 'New tab')}</span><span class="tabs">` + list.map(x => `<span class="tab ${x.active ? 'on' : 'off'}">`
+        + (x.favicon ? `<img class="ic" alt="" src="${esc(x.favicon)}">` : GLOBE) + `<span class="t">${esc(x.title || x.url || '')}</span>${X}</span>`).join('') + '</span>';
       if (els.tabbar.dataset.html !== html) {
         els.tabbar.innerHTML = html; els.tabbar.dataset.html = html;
-        const img = els.tabbar.querySelector('img.ic');
-        if (img) img.onerror = () => { img.outerHTML = GLOBE; };
+        for (const img of els.tabbar.querySelectorAll('img.ic')) img.onerror = () => { img.outerHTML = GLOBE; };
       }
       clearTimeout(chipTimer); chipTimer = setTimeout(() => tabChip(state), left);
     }
