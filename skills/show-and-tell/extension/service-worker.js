@@ -850,14 +850,13 @@ async function runNow(tabId, actions, i, cinematic, ctx) {
 // after them). Other tabs are not listed: one "…" tab in the middle says there are more, wherever they sit.
 async function stripOf(aId, bId, a, b) {
   const ta = await chrome.tabs.get(aId).catch(() => null), tb = await chrome.tabs.get(bId).catch(() => null);
-  const normal = [ta, tb].find(t => t && t.windowId != null && t.index != null && t.windowId === ta?.windowId && t.windowId === tb?.windowId) || ta || tb;
+  // The strip comes from the tab in a normal window; a popup (own window, no strip) always goes after it.
+  let normal = null;
+  for (const t of [ta, tb]) if (t && !normal && (await chrome.windows.get(t.windowId).catch(() => null))?.type === 'normal') normal = t;
   let strip = [];
   if (normal) {
-    const win = await chrome.windows.get(normal.windowId).catch(() => null);
-    if (win?.type === 'normal') {
-      strip = (await chrome.tabs.query({ windowId: normal.windowId, ...(normal.groupId >= 0 && { groupId: normal.groupId }) }))
-        .sort((x, y) => x.index - y.index).map(t => t.id);
-    }
+    strip = (await chrome.tabs.query({ windowId: normal.windowId, ...(normal.groupId >= 0 && { groupId: normal.groupId }) }))
+      .sort((x, y) => x.index - y.index).map(t => t.id);
   }
   for (const id of [aId, bId]) if (!strip.includes(id)) strip.push(id); // popups, or a tab outside the group
   const [ia, ib] = [strip.indexOf(aId), strip.indexOf(bId)];

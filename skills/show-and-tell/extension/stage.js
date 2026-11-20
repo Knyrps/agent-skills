@@ -62,7 +62,9 @@
     .tab.off{background:transparent;color:var(--md-sys-color-on-surface-variant);font-weight:400}
     .tab.off::before,.tab.off::after{display:none}
     .tab.off + .tab.off::before{display:block;content:'';left:0;top:10px;bottom:10px;width:1px;height:auto;background:var(--md-sys-color-outline-variant)}
-    .tab.new{animation:tabin .35s cubic-bezier(.2,0,0,1)}
+    /* A tab the video opens grows into the strip, like Chrome adds a tab (the reverse of closing). */
+    .tab.new{overflow:hidden;animation:tabopen .4s .45s cubic-bezier(.2,0,0,1) both}
+    @keyframes tabopen{from{max-width:0;padding-left:0;padding-right:0;margin-left:-8px;opacity:0}to{max-width:min(260px,32vw);opacity:1}}
     /* A tab the video leaves and closes: its X is pressed (M3 state layer), then the tab collapses out of the strip. */
     .tab .x{border-radius:50%}
     .tab.closing .x{animation:xpress .95s .5s linear both}
@@ -71,7 +73,6 @@
       45%,85%{background:color-mix(in srgb,var(--md-sys-color-on-surface) 20%,transparent);box-shadow:0 0 0 5px color-mix(in srgb,var(--md-sys-color-on-surface) 20%,transparent)}}
     .tab.closing{overflow:hidden;animation:tabclose .35s 1.45s cubic-bezier(.3,0,.8,.15) forwards}
     @keyframes tabclose{to{max-width:0;padding-left:0;padding-right:0;margin-left:-8px;opacity:0}}
-    @keyframes tabin{from{opacity:0;translate:0 8px}}
     .tabs{display:flex;align-items:flex-end;gap:8px}
     /* The other tabs, not listed: one inactive tab with an ellipsis, always between the two. */
     .tab.more{padding:0 16px;font-size:20px;font-weight:700;color:var(--md-sys-color-on-surface-variant)}`;
