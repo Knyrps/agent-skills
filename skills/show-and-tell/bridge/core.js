@@ -369,27 +369,6 @@ export function startOwner({ standalone = false } = {}) {
         broadcast({ cmd: 'say', session: body.session, text, who: nameOf(body.session) });
         return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
       }
-      // A harness adapter puts a question to the user in the panel, e.g. a permission prompt. The user's
-      // choice reaches the session as an `answer` action { ask, choice }; /ask/done withdraws the card
-      // (answered elsewhere, or no longer needed).
-      if (route === 'POST /ask') {
-        let body = {};
-        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
-        const options = (Array.isArray(body.options) ? body.options : []).slice(0, 4)
-          .map(o => ({ id: String(o?.id || '').slice(0, 40), label: String(o?.label || o?.id || '').slice(0, 40) })).filter(o => o.id);
-        if (!body.session || !body.id || !body.title || !options.length) return json(res, 400, { error: 'session, id, title and options are required' });
-        touch(body.session, body.label);
-        broadcast({ cmd: 'ask', ask: { session: body.session, id: String(body.id).slice(0, 80), title: String(body.title).slice(0, 200),
-          detail: String(body.detail || '').slice(0, 2000), kind: String(body.kind || '').slice(0, 40), options, who: nameOf(body.session), ts: Date.now() } });
-        return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
-      }
-      if (route === 'POST /ask/done') {
-        let body = {};
-        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
-        if (!body.id) return json(res, 400, { error: 'id is required' });
-        broadcast({ cmd: 'askDone', id: String(body.id), note: String(body.note || '').slice(0, 200) });
-        return json(res, 200, { ok: true });
-      }
       // A session's browser call starts or ends (only the driver of that session sends this).
       if (route === 'POST /busy') {
         let body = {};

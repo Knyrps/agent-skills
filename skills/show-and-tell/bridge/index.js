@@ -5,7 +5,6 @@
 // node bridge status | serve | step <label> | highlight <selector> [--label t] [--text t] [--style spotlight] [--keep]
 //             clear [id] | hide | show
 import crypto from 'node:crypto';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,29 +102,24 @@ async function runMcp() {
 
   // This agent session: what the user sends from the panel reaches it through a watcher, a `wait` job
   // the agent runs in the background. Tools that drive the browser claim the panel for this session.
-  const OWN_SESSION = crypto.randomUUID().slice(0, 8);
-  const OWN_LABEL = path.basename(process.cwd()).replace(/[^\w.-]+/g, '-').slice(0, 40) || 'agent';
-  // A harness adapter may name the session per call (_session, _label arguments), so several chats
-  // served by this one process each get their own tab, conversation and listener. See references/adapters.md.
-  const ctx = new AsyncLocalStorage();
-  const SESSION_ID = () => ctx.getStore()?.session || OWN_SESSION;
-  const LABEL_OF = () => ctx.getStore()?.label || OWN_LABEL;
+  const SESSION = crypto.randomUUID().slice(0, 8);
+  const LABEL = path.basename(process.cwd()).replace(/[^\w.-]+/g, '-').slice(0, 40) || 'agent';
   const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const WATCH = () => `node "${path.join(SKILL_DIR, 'bridge')}" wait --session ${SESSION_ID()} --label ${LABEL_OF()} --timeout 86400`;
-  const cmd = body => call('POST', '/cmd', { ...body, session: SESSION_ID(), sessionLabel: LABEL_OF() });
-  const hello = () => call('POST', '/hello', { session: OWN_SESSION, label: OWN_LABEL }).catch(() => {});
+  const WATCH = `node "${path.join(SKILL_DIR, 'bridge')}" wait --session ${SESSION} --label ${LABEL} --timeout 86400`;
+  const cmd = body => call('POST', '/cmd', { ...body, session: SESSION, sessionLabel: LABEL });
+  const hello = () => call('POST', '/hello', { session: SESSION, label: LABEL }).catch(() => {});
   hello();
   setInterval(hello, 30000).unref();
   const watcher = async () => {
     const s = await call('GET', '/status').catch(() => null);
-    const running = !!s?.watching?.includes(SESSION_ID());
-    return running ? { running } : { running, command: WATCH(),
+    const running = !!s?.watching?.includes(SESSION);
+    return running ? { running } : { running, command: WATCH,
       todo: 'Start this command now as a background shell job (no waiting on it); it wakes you when the user sends something from the browser.' };
   };
   // What the user did in this session's tab since the last call, so the agent does not act on a page
   // state that no longer holds. Read once; empty most of the time.
   const userActivity = async () => {
-    const r = await call('GET', `/user-events?session=${SESSION_ID()}`).catch(() => null);
+    const r = await call('GET', `/user-events?session=${SESSION}`).catch(() => null);
     return r?.events?.length ? r.events.map(e => e.text) : null;
   };
   const userNote = lines => 'The user worked in your browser tab since your last show-and-tell call:\n'
@@ -140,15 +134,15 @@ async function runMcp() {
   const driver = createDriver({ cdp: `http://127.0.0.1:${CDP_PORT}`, outputDir: path.join(DATA, 'playwright'),
     before: async () => {
       if (!(await browserVersion())) await ensureBrowser();
-      await call('POST', '/claim', { session: SESSION_ID(), label: LABEL_OF() }).catch(() => {});
+      await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
     },
     // Hosts that are not allowed are put to the user in the side panel; the call waits for the answer.
-    guard: (url, why) => call('POST', '/host/check', { url, why, ask: true, session: SESSION_ID() }).catch(e => ({ ok: false, error: e.message })),
+    guard: (url, why) => call('POST', '/host/check', { url, why, ask: true, session: SESSION }).catch(e => ({ ok: false, error: e.message })),
     // Each session works in its own tab, so parallel sessions don't navigate under each other.
-    tab: () => call('POST', '/tab', { session: SESSION_ID(), label: LABEL_OF() }).catch(e => ({ ok: false, error: e.message })),
-    busy: on => call('POST', '/busy', { session: SESSION_ID(), on }).catch(() => {}),
+    tab: () => call('POST', '/tab', { session: SESSION, label: LABEL }).catch(e => ({ ok: false, error: e.message })),
+    busy: on => call('POST', '/busy', { session: SESSION, on }).catch(() => {}),
     // The panel shows what the agent does in the browser, also when nothing visible changes.
-    onActivity: text => { call('POST', '/activity', { text, session: SESSION_ID(), label: LABEL_OF() }).catch(() => {}); } });
+    onActivity: text => { call('POST', '/activity', { text, session: SESSION, label: LABEL }).catch(() => {}); } });
 
   const STEPS = { type: 'array', items: { type: 'object', required: ['title'], properties: {
     title: { type: 'string' },
@@ -258,50 +252,37 @@ async function runMcp() {
 
   const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'throttle', 'load_tour', 'request_demo', 'record_tour']);
   const server = new Server({ name: 'show-and-tell', version: '1.3.0' }, { capabilities: { tools: {} } });
-  // Playwright's schemas forbid extra arguments, and harnesses drop what a schema forbids; adapters add
-  // _session/_label to every call, so the listed schemas allow them (they are removed before Playwright).
-  const open = ({ additionalProperties, ...schema } = {}) => schema;
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...TOOLS, ...(await driver.list(log)).map(t =>
-    ({ ...t, inputSchema: open(t.inputSchema), description: 'Shared show-and-tell browser (the one the user sees): ' + (t.description || '') }))] }));
-  // One Playwright child serves every session of this process: its calls run one at a time, so selecting
-  // one session's tab can't interleave with another session's call.
-  let driverQueue = Promise.resolve();
-  const drive = (name, args) => { const r = driverQueue.then(() => driver.call(name, args)); driverQueue = r.catch(() => {}); return r; };
-  const SAFE_ID = /^[\w.-]{1,64}$/;
-  server.setRequestHandler(CallToolRequestSchema, (req, extra) => {
-    const { _session, _label, ...args } = req.params.arguments || {};
-    const store = SAFE_ID.test(String(_session || '')) ? { session: String(_session),
-      label: String(_label || '').replace(/[^\w .-]+/g, '-').trim().slice(0, 40) || undefined } : {};
-    return ctx.run(store, () => callTool(req.params.name, args, extra));
-  });
-  async function callTool(name, a, extra) {
-    if (name.startsWith('browser_')) {
+    ({ ...t, description: 'Shared show-and-tell browser (the one the user sees): ' + (t.description || '') }))] }));
+  server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
+    const a = req.params.arguments || {};
+    if (req.params.name.startsWith('browser_')) {
       try {
-        const r = await drive(name, a);
+        const r = await driver.call(req.params.name, a);
         const user = await userActivity();
         return user ? { ...r, content: [{ type: 'text', text: userNote(user) }, ...(r.content || [])] } : r;
       }
       catch (e) { return reply({ ok: false, error: String(e.message || e) }); }
     }
     try {
-      if (AUTOSTART.has(name) && !(await browserVersion())) await ensureBrowser();
-      switch (name) {
+      if (AUTOSTART.has(req.params.name) && !(await browserVersion())) await ensureBrowser();
+      switch (req.params.name) {
         case 'start_browser': {
           const r = await ensureBrowser({ force: true });
           if (r.browser) await driver.reset(); // a new browser process: Playwright reattaches on next use
-          await call('POST', '/claim', { session: SESSION_ID(), label: LABEL_OF() }).catch(() => {});
+          await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
           return done(r);
         }
         case 'status': {
           const s = await call('GET', '/status');
-          return done({ ...s, you: s.sessions?.find(x => x.id === SESSION_ID())?.name || LABEL_OF() });
+          return done({ ...s, you: s.sessions?.find(x => x.id === SESSION)?.name || LABEL });
         }
         case 'load_tour': return done(await cmd({ cmd: 'loadTour', tour: a.tour, start: +(a.start || 0) }));
         case 'record_tour': return done(await cmd({ cmd: 'recordTour', tour: a.tour, name: a.name, size: a.size,
           pace: a.pace, captions: a.captions, cards: a.cards, zoom: a.zoom, hidpi: a.hidpi, out: a.out }));
         case 'stop_recording': return done(await cmd({ cmd: 'recordStop', discard: !!a.discard }));
         case 'request_demo': return done(await cmd({ cmd: 'requestDemo', prompt: String(a.prompt || '') }));
-        case 'say': return done(await call('POST', '/say', { session: SESSION_ID(), label: LABEL_OF(), text: String(a.text || '') }));
+        case 'say': return done(await call('POST', '/say', { session: SESSION, label: LABEL, text: String(a.text || '') }));
         case 'goto_step': return done(await cmd({ cmd: 'gotoStep', index: +a.index }));
         case 'end_tour': return done(await cmd({ cmd: 'endTour' }));
         case 'set_step': return done(await cmd({ cmd: 'setStep', label: String(a.label ?? '') }));
@@ -318,12 +299,12 @@ async function runMcp() {
         case 'get_queue': return withShots(await call('GET', '/queue' + (a.recent ? '?recent=1' : '')));
         case 'wait_for_action': {
           const t = Math.max(1, Math.min(86400, +(a.timeoutSec || 600)));
-          return withShots(await call('GET', `/wait?timeout=${t}&session=${SESSION_ID()}&label=${LABEL_OF()}`, null, { signal: extra?.signal }));
+          return withShots(await call('GET', `/wait?timeout=${t}&session=${SESSION}&label=${LABEL}`, null, { signal: extra?.signal }));
         }
-        default: return reply({ ok: false, error: 'unknown tool ' + name });
+        default: return reply({ ok: false, error: 'unknown tool ' + req.params.name });
       }
     } catch (e) { return reply({ ok: false, error: String(e.message || e) }); }
-  }
+  });
   await server.connect(new StdioServerTransport());
 }
 

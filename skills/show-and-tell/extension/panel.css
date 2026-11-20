@@ -133,6 +133,13 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 @keyframes talk { 50% { scale: .55; opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .working .text, .working .spark svg circle, .msg { animation: none; } }
 
+/* Note at the top of the conversation: the panel shows panel exchanges only. */
+.scope {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-radius: 12px;
+  background: var(--md-sys-color-surface-container-low); color: var(--md-sys-color-on-surface-variant);
+}
+.scope svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+
 /* The agent's replies (Markdown). */
 .md { display: flex; flex-direction: column; gap: var(--tight); overflow-wrap: anywhere; }
 .md p, .md ul, .md ol, .md pre, .md blockquote { margin: 0; }
@@ -155,11 +162,6 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .host-ask-head svg { width: 20px; height: 20px; }
 .host-name { overflow-wrap: anywhere; }
 #host-ask-text { color: var(--md-sys-color-on-surface-variant); }
-.ask-detail {
-  margin: 0; padding: 8px 12px; border-radius: 8px; max-height: 160px; overflow: auto;
-  background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant);
-  font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
-}
 .host-ask-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 /* ---- composer: a pill docked at the bottom, like Gemini's input. Message on top, tools and the round

@@ -38,7 +38,7 @@ async function render() {
   $('who-name').textContent = me?.name || s.listener || 'show-and-tell';
   $('listen-text').textContent = !s.connected ? 'Bridge offline · messages are kept'
     : me && !me.live ? 'Session ended · messages go to the latest agent'
-      : listening ? 'Listening' : me || s.listener ? 'Not listening · messages wait for it' : 'No agent listening · messages are kept';
+      : listening ? 'Listening · panel messages only' : me || s.listener ? 'Not listening · messages wait for it' : 'No agent listening · messages are kept';
   $('listen').classList.toggle('on', !!(s.connected && listening));
   for (const e of [$('listen'), $('avatar')]) e.style.setProperty('--session', me ? GROUP[me.color] || '' : '');
   $('q').placeholder = `Message ${me?.name || s.listener || 'the agent'}`;
@@ -134,42 +134,11 @@ function agentMsg(m) {
   } else if (m.kind === 'point') {
     body.append(el('div', 'md-typescale-label-medium muted', `Pointed at something${m.host ? ` on ${m.host}` : ''}`),
       el('div', 'md-typescale-body-large', m.text || m.selector), el('div', 'md-typescale-label-small muted', clock(m.ts)));
-  } else if (m.kind === 'ask') {
-    body.append(el('div', 'md-typescale-label-medium muted', 'Asked for permission'), el('div', 'md-typescale-body-large', m.text),
-      el('div', 'md-typescale-label-small muted', `${m.outcome} · ${clock(m.ts)}`));
   } else if (m.kind === 'say') {
     const md = markdown(m.text || '');
     md.classList.add('md-typescale-body-large');
     body.append(md, el('div', 'md-typescale-label-small muted', clock(m.ts)));
   } else body.append(el('div', 'md-typescale-body-large', m.text || ''));
-  row.append(spark(), body);
-  return row;
-}
-
-// A question from the agent's harness (e.g. "Allow running this command?"), answered here instead of in
-// the agent chat. The first option is the primary action, the last the dismissive one.
-const ASK_ICON = '<path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>';
-function askCard(q) {
-  const row = el('section', 'msg agent'), body = el('div', 'agent-body host-ask');
-  row.setAttribute('role', 'alertdialog');
-  const head = el('div', 'host-ask-head');
-  head.innerHTML = `<svg viewBox="0 0 24 24">${ASK_ICON}</svg>`;
-  head.append(el('span', 'md-typescale-label-large', `${q.who || 'The agent'} asks for permission`));
-  body.append(head, el('div', 'md-typescale-title-medium host-name', q.title));
-  if (q.detail) { const pre = el('pre', 'ask-detail md-typescale-body-small', q.detail); body.append(pre); }
-  const actions = el('div', 'host-ask-actions');
-  q.options.forEach((o, i) => {
-    const kind = i === 0 ? 'md-filled-button' : i === q.options.length - 1 ? 'md-text-button' : 'md-outlined-button';
-    const b = el(kind, null, o.label);
-    b.addEventListener('click', async () => {
-      const r = await chrome.runtime.sendMessage({ type: 'askAnswer', id: q.id, choice: o.id }).catch(() => null);
-      if (!r?.ok) toast('This question is no longer open.');
-    });
-    actions.append(b);
-  });
-  // Primary action last, on the right, as in M3 dialogs.
-  actions.append(...[...actions.children].reverse());
-  body.append(actions);
   row.append(spark(), body);
   return row;
 }
@@ -190,16 +159,16 @@ async function renderChat(jump = false) {
   clearTimeout(chatTimer);
   const box = $('chat');
   const atEnd = jump || box.scrollHeight - box.scrollTop - box.clientHeight < 48;
-  const { chats = {}, demoRequest, hostQuestions = [], thinking = {}, asks = [] } = await S.get(['chats', 'demoRequest', 'hostQuestions', 'thinking', 'asks']);
+  const { chats = {}, demoRequest, hostQuestions = [], thinking = {} } = await S.get(['chats', 'demoRequest', 'hostQuestions', 'thinking']);
   const me = await frontSession();
   const list = chats[me?.id || ''] || [];
   // A pending request shows as its live card instead of its history entry.
   const shown = demoRequest ? list.filter((m, i) => !(m.kind === 'request' && i === list.findLastIndex(x => x.kind === 'request'))) : list;
-  const mine = asks.filter(q => q.session === (me?.id || ''));
-  const since = me && !mine.length && thinking[me.id];
-  $('log').replaceChildren(...shown.map(m => (m.role === 'user' ? userMsg(m) : agentMsg(m))), ...(since ? [thinkingMsg(since)] : []), ...mine.map(askCard));
+  const since = me && thinking[me.id];
+  $('log').replaceChildren(...shown.map(m => (m.role === 'user' ? userMsg(m) : agentMsg(m))), ...(since ? [thinkingMsg(since)] : []));
   if (since && Date.now() - since <= 120000) chatTimer = setTimeout(renderChat, 120000 - (Date.now() - since) + 100);
-  $('empty').hidden = shown.length > 0 || !!demoRequest || hostQuestions.length > 0 || mine.length > 0;
+  $('empty').hidden = shown.length > 0 || !!demoRequest || hostQuestions.length > 0;
+  $('scope').hidden = !shown.length;
   $('empty-text').textContent = me ? `Mark the page, show it by doing it, or just ask ${me.name}.` : 'Mark the page, show it by doing it, or just ask.';
   if (atEnd) box.scrollTop = box.scrollHeight;
   // The "working" sheen ends 5 s after the last action.
@@ -373,7 +342,7 @@ chrome.storage.onChanged.addListener((c, area) => {
   if (c.recording || c.recordingDraft || c.annotationDraft || c.demoRequest) renderRecording();
   if (c.hostState || c.connected) refreshTab();
   if (c.hostQuestions) renderHostAsk();
-  if (c.chats || c.sessionTabs || c.sessions || c.demoRequest || c.hostQuestions || c.thinking || c.asks) renderChat();
+  if (c.chats || c.sessionTabs || c.sessions || c.demoRequest || c.hostQuestions || c.thinking) renderChat();
   if (c.throttles) renderThrottle();
 });
 renderHostAsk();

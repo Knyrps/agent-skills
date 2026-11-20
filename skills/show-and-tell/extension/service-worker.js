@@ -171,18 +171,6 @@ function chatUser(to, id, a) {
 
 const chatAgent = (sid, entry) => chatEdit(chats => { (chats[sid || ''] ||= []).push({ role: 'agent', ts: Date.now(), ...entry }); });
 
-// A harness question leaves the panel once answered; its outcome stays in the conversation.
-async function settleAsk(id, outcome) {
-  let ask = null;
-  await serial(async () => {
-    const { asks = [] } = await S.get('asks');
-    ask = asks.find(a => a.id === id);
-    if (ask) await S.set({ asks: asks.filter(a => a.id !== id) });
-  });
-  if (ask) await chatAgent(ask.session, { kind: 'ask', text: ask.title, outcome });
-  return ask;
-}
-
 async function flushOutbox() {
   const { outbox = [] } = await S.get('outbox');
   for (const item of outbox) send({ type: 'action', ...item });
@@ -282,9 +270,6 @@ async function onBridge(m) {
   if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting, listener: String(m.listener || ''), sessions: m.sessions || [] });
   if (m.cmd === 'hosts') return setHostState(m);
   if (m.cmd === 'thinking') return serial(async () => { const { thinking = {} } = await S.get('thinking'); thinking[m.session] = m.ts; await S.set({ thinking }); });
-  // A question from the harness (a permission prompt, …) for the user; shown in that session's conversation.
-  if (m.cmd === 'ask') return serial(async () => { const { asks = [] } = await S.get('asks'); await S.set({ asks: [...asks.filter(a => a.id !== m.ask.id), m.ask].slice(-20) }); });
-  if (m.cmd === 'askDone') return settleAsk(m.id, m.note || 'Answered in the agent chat');
   if (m.cmd === 'say') {
     await serial(async () => { const { thinking = {} } = await S.get('thinking'); delete thinking[m.session]; await S.set({ thinking }); });
     return chatAgent(m.session, { kind: 'say', text: String(m.text || '') });
@@ -1193,15 +1178,6 @@ async function handle(m, sender) {
       const q = hostAsks.get(String(m.host));
       if (!q || !['session', 'always', 'no'].includes(m.decision)) return { ok: false };
       q.resolve(m.decision);
-      return { ok: true };
-    }
-    // Only the panel answers harness questions too.
-    case 'askAnswer': {
-      const { asks = [] } = await S.get('asks');
-      const ask = asks.find(a => a.id === m.id), opt = ask?.options.find(o => o.id === m.choice);
-      if (!opt) return { ok: false };
-      await settleAsk(ask.id, `You chose: ${opt.label}`);
-      await enqueue({ type: 'answer', ask: ask.id, choice: opt.id }, ask.session);
       return { ok: true };
     }
     case 'hostAllow': {

@@ -86,12 +86,6 @@ whatever Chromium is listening on that port.
    e.g. `{ "allowlist": ["grafana.example.zz", "*.staging.example"] }` (`*.x` = x and all subdomains).
    The rule covers the `browser_*` tools too; the agent can ask but never grant.
 
-5. **Harness adapter (optional).** With an adapter, what you send from the panel arrives in the chat as
-   your message, the agent's reply shows up in the panel, permission prompts can be answered there, and
-   every chat gets its own tab. Without one, the agent uses a background watcher and the `say` tool.
-   OpenCode: add `{ "package": "<skill>/adapters/opencode" }` to `plugins` in `opencode.json(c)`. Writing
-   one for another harness: [references/adapters.md](references/adapters.md).
-
 Environment overrides: `DEMO_BROWSER_PATH` (any Chromium that honours `--load-extension`, for
 example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_DATA`
 (queue, screenshots and profile; default `%LOCALAPPDATA%\show-and-tell` on Windows,
