@@ -60,7 +60,7 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .card md-linear-progress:not([data-on]) { visibility: hidden; }
 .step { white-space: pre-wrap; overflow-wrap: anywhere; }
 .explanation { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.status { margin-top: 4px; color: var(--md-sys-color-on-surface-variant); }
+.status { margin-top: 4px; color: var(--md-sys-color-on-surface-variant); white-space: pre-line; }
 .nav { display: grid; grid-template-columns: 1fr 1fr; gap: var(--tight); }
 
 .notice {

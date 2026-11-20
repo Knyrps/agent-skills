@@ -394,8 +394,14 @@ export function startOwner({ standalone = false } = {}) {
         try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
         if (!body.session) return json(res, 400, { error: 'session is required' });
         const c = callState(body.session), t = Date.now();
+        const first = body.on && !c.running, last = !body.on && c.running === 1;
         if (body.on) { if (!c.running++) c.since = t; }
         else if (c.running > 0 && !--c.running) { c.windows.push([c.since, t]); c.windows = c.windows.slice(-20); }
+        // The page marks the agent's input as such; the call waits (briefly) until the mark is set.
+        if ((first || last) && exts.size) {
+          const mark = requestExt({ cmd: 'agentBusy', session: body.session, on: !!body.on }, 500).catch(() => {});
+          if (first) await mark;
+        }
         return json(res, 200, { ok: true });
       }
       // What the user did in the session's tab since the last time it asked; read once.

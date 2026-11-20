@@ -59,8 +59,9 @@ async function render() {
     $('step-kicker').textContent = 'Video recording';
     $('countdown').textContent = v.state === 'countdown' ? String(v.count) : '';
     $('busy').toggleAttribute('data-on', v.state === 'starting' || v.state === 'finishing');
-    $('status').textContent = { countdown: 'Recording starts. Keep your hands off the page.', starting: 'Preparing the recording…',
-      finishing: 'Saving the video…' }[v.state] || `● Recording ${v.width}×${v.height} · step ${v.step + 1} of ${v.steps}`;
+    $('status').textContent = ({ countdown: 'Recording starts. Keep your hands off the page.', starting: 'Preparing the recording…',
+      finishing: 'Saving the video…' }[v.state] || `● Recording ${v.width}×${v.height} · step ${v.step + 1} of ${v.steps}`)
+      + (v.state === 'finishing' ? '' : '\nThe window size is locked until the video is done.');
     $('video-stop').disabled = $('video-discard').disabled = v.state === 'finishing';
     return;
   }

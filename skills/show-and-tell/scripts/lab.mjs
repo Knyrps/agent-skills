@@ -65,11 +65,14 @@ md-slider{width:100%}
 <script type="module">
 import '/material-lab.js';
 const $ = s => document.querySelector(s);
-// e: the DOM event behind the entry, which says whether it was trusted, or 'component' for an event a
-// component fires itself (a select picking an option).
-const log = (what, e) => { const l = $('#log'); const d = document.createElement('div');
-  d.textContent = new Date().toLocaleTimeString() + '  ' + what + (e === 'component' ? '  [component]' : e ? (e.isTrusted ? '  [trusted]' : '  [synthetic]') : '');
-  l.append(d); l.scrollTop = l.scrollHeight; window.__lab = window.__lab || []; window.__lab.push({ what, trusted: !!e?.isTrusted, event: !!e && e !== 'component' }); };
+// e: the DOM event behind the entry, or 'component' for an event a component fires itself (a select picking
+// an option). Trusted input is the user's or the agent's: Playwright's input is as trusted as a person's.
+// show-and-tell marks <html data-show-and-tell-agent> while the agent's browser call runs.
+const byAgent = () => document.documentElement.hasAttribute('data-show-and-tell-agent');
+// who: overrides who gets the credit (a field's change comes on blur, the value from whoever typed it).
+const log = (what, e, who) => { const l = $('#log'); const d = document.createElement('div'), agent = who ? who === 'agent' : byAgent();
+  d.textContent = new Date().toLocaleTimeString() + '  ' + what + (e === 'component' ? '  [component]' : e ? (!e.isTrusted ? '  [synthetic]' : agent ? '  [agent]' : '  [you]') : '');
+  l.append(d); l.scrollTop = l.scrollHeight; window.__lab = window.__lab || []; window.__lab.push({ what, trusted: !!e?.isTrusted, agent, event: !!e && e !== 'component' }); };
 const set = (sel, text, ok = true) => { const s = $(sel + ' .state'); if (s) s.textContent = text; if (ok) $(sel).classList.add('ok'); };
 // Material components re-fire change as their own (untrusted) event; the native control inside has the real one.
 const inner = async (sel, q = 'input') => { const h = $(sel); await customElements.whenDefined(h.localName); await h.updateComplete; return [...h.shadowRoot.querySelectorAll(q)].pop(); };
@@ -130,8 +133,9 @@ $('#hover').addEventListener('mouseenter', e => { set('#hover', 'Hovered'); log(
 let scrLog = 0;
 $('#scr').addEventListener('scroll', () => { set('#scr', 'Scrolled to ' + Math.round($('#scr').scrollTop) + ' px'); clearTimeout(scrLog); scrLog = setTimeout(() => log('box scrolled to ' + Math.round($('#scr').scrollTop)), 200); });
 // Typing, a search that submits on Enter, select, checkbox, slider, dialog, a shortcut.
-$('#name').addEventListener('input', () => set('#name-box', 'Hello, ' + ($('#name').value || '…')));
-(await inner('#name')).addEventListener('change', e => log('name changed to "' + $('#name').value + '"', e));
+let typedBy = '';
+$('#name').addEventListener('input', () => { typedBy = byAgent() ? 'agent' : 'you'; set('#name-box', 'Hello, ' + ($('#name').value || '…')); });
+(await inner('#name')).addEventListener('change', e => log('name changed to "' + $('#name').value + '"', e, typedBy));
 $('#query').addEventListener('keydown', e => { if (e.key !== 'Enter') return; e.preventDefault(); set('#form-box', 'Searched for "' + $('#query').value + '"'); log('search submitted', e); });
 $('#size').addEventListener('change', () => { set('#size-box', 'Size ' + $('#size').value); log('select: ' + $('#size').value, 'component'); });
 (await inner('#agree')).addEventListener('change', e => { set('#agree-box', $('#agree').checked ? 'Checked' : 'Unchecked'); log('checkbox ' + $('#agree').checked, e); });

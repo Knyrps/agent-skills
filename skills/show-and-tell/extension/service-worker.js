@@ -386,6 +386,13 @@ async function tourBusy(m) {
 }
 
 async function command(m) {
+  // The agent's browser_* call starts or ends: the session's page is told, so it can tell the agent's
+  // (equally trusted) input from the user's. Allowed during a video too; it changes nothing on screen.
+  if (m.cmd === 'agentBusy') {
+    const tab = (await sessionTabs())[m.session];
+    if (tab) await chrome.tabs.sendMessage(tab.tabId, { cmd: 'agentBusy', on: !!m.on }).catch(() => {});
+    return { ok: true };
+  }
   if (video && !['state', 'recordStop', 'setStep', 'askHost'].includes(m.cmd)) {
     const who = video.session && video.session !== m.session ? ` by ${(await sessionTabs())[video.session]?.name || 'another session'}` : '';
     return { ok: false, error: `a video is being recorded${who}; ${who ? 'wait until it is done' : 'wait for videoReady or call recordStop'}` };
@@ -996,6 +1003,19 @@ async function stageWindow(tab, size) {
   return { restore, width, height, viewport: { width: Math.round(vw()), height: Math.round(vh()) }, scale, exact };
 }
 
+// The window keeps its recording size until the video is done: a resize, maximize or minimize during the
+// recording is undone at once (Chrome has no way to forbid it). The panel says the size is locked.
+chrome.windows.onBoundsChanged.addListener(async w => {
+  const v = video;
+  if (!v?.locked || w.id !== v.locked.id || v.finishing) return;
+  const b = v.locked, now = await chrome.windows.get(w.id).catch(() => null);
+  if (!now || (now.state === 'normal' && now.left === b.left && now.top === b.top && now.width === b.width && now.height === b.height)) return;
+  if (now.state !== 'normal') await chrome.windows.update(w.id, { state: 'normal' }).catch(() => {});
+  await chrome.windows.update(w.id, { left: b.left, top: b.top, width: b.width, height: b.height }).catch(() => {});
+  v.snaps = (v.snaps || 0) + 1;
+  await S.set({ videoSnaps: v.snaps });
+});
+
 async function restoreWindow(r) {
   if (!r) return;
   if (r.state === 'normal') await chrome.windows.update(r.id, { left: r.left, top: r.top, width: r.width, height: r.height }).catch(() => {});
@@ -1032,6 +1052,8 @@ async function recordTour(m, tab) {
   }
   video = { tabId: tab.id, session: m.session || '', tour, opts, ...staged, zoomBefore, step: -1, abort: false, discard: false, failure: '', finishing: false,
     loading: false, onCamera: false, stage: {} };
+  const w = await chrome.windows.get(tab.windowId);
+  video.locked = { id: w.id, left: w.left, top: w.top, width: w.width, height: w.height };
   await S.set({ video: { state: 'starting', steps: tour.steps.length, step: -1, width: staged.width, height: staged.height } });
   runVideo(video);
   const z = zoom || 1;
@@ -1227,6 +1249,7 @@ async function runVideo(v) {
     await chrome.tabs.sendMessage(v.tabId, { cmd: 'stage', end: true }).catch(() => {});
     await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
     await S.set({ pointerAt: null });
+    v.locked = null;
     await restoreWindow(v.restore);
     if (v.zoomBefore) await chrome.tabs.setZoom(v.tabId, v.zoomBefore).catch(() => {});
     if (v.throttled) await throttleOff(v.tabId).catch(() => {});

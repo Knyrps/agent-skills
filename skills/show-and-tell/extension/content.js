@@ -1376,7 +1376,17 @@
     };
   }
 
+  // While the agent's browser_* call runs, <html data-show-and-tell-agent> is set, so the page (the lab's
+  // log, a tester) can tell the agent's trusted input from the user's. It stays 300 ms longer for the
+  // events the page fires in reaction.
+  let agentOff = 0;
   function onMessage(m, _sender, reply) {
+    if (m.cmd === 'agentBusy') {
+      clearTimeout(agentOff);
+      if (m.on) document.documentElement.setAttribute('data-show-and-tell-agent', '');
+      else agentOff = setTimeout(() => document.documentElement.removeAttribute('data-show-and-tell-agent'), 300);
+      return false;
+    }
     if (m.cmd === 'annotate') { startAnnotate(reply); return true; }
     if (m.cmd === 'annotateClear') { finishAnnotate(null); return false; }
     // Keys pressed while the side panel has focus (right after clicking Annotate) arrive from the panel.
