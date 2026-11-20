@@ -141,18 +141,54 @@ async function enqueue(action, to = '') {
     await S.set({ outbox });
   });
   if (!send({ type: 'action', ...item })) connect();
+  if (['question', 'annotation', 'recording'].includes(action.type)) await chatUser(to, item.id, action);
   return { id: item.id, delivered: ws?.readyState === WebSocket.OPEN };
 }
+
+// ------------------------------------------------------------------ conversation in the panel
+// Per session ("" = no session's tab): what the user sent and what the agent did in the browser, shown
+// in the panel like a chat. Kept until the browser restarts, at most 60 entries per session.
+const chatEdit = fn => serial(async () => {
+  const { chats = {} } = await S.get('chats');
+  if (fn(chats) === false) return;
+  for (const k of Object.keys(chats)) if (chats[k].length > 60) chats[k].splice(0, chats[k].length - 60);
+  await S.set({ chats });
+});
+
+// An annotation and a recording sent with one message arrive as two actions: one bubble.
+function chatUser(to, id, a) {
+  const att = a.type === 'annotation' ? `Annotation · ${a.annotations?.length || 0}`
+    : a.type === 'recording' ? `Recording · ${Math.max(0, (a.recording?.steps?.length || 2) - 2)} steps` : '';
+  return chatEdit(chats => {
+    const list = chats[to || ''] ||= [];
+    const last = list[list.length - 1];
+    if (last?.role === 'user' && att && last.text === (a.text || '') && Date.now() - last.ts < 3000) {
+      last.att.push(att); last.ids.push(id); return;
+    }
+    list.push({ role: 'user', ids: [id], text: a.text || '', att: att ? [att] : [], ts: Date.now(), acked: false });
+  });
+}
+
+const chatAgent = (sid, entry) => chatEdit(chats => { (chats[sid || ''] ||= []).push({ role: 'agent', ts: Date.now(), ...entry }); });
 
 async function flushOutbox() {
   const { outbox = [] } = await S.get('outbox');
   for (const item of outbox) send({ type: 'action', ...item });
 }
 
-const ack = id => serial(async () => {
-  const { outbox = [] } = await S.get('outbox');
-  await S.set({ outbox: outbox.filter(x => x.id !== id) });
-});
+const ack = async id => {
+  await serial(async () => {
+    const { outbox = [] } = await S.get('outbox');
+    await S.set({ outbox: outbox.filter(x => x.id !== id) });
+  });
+  await chatEdit(chats => {
+    for (const list of Object.values(chats)) {
+      const m = list.find(x => x.role === 'user' && x.ids?.includes(id));
+      if (m && !m.acked) { m.acked = true; return; }
+    }
+    return false;
+  });
+};
 
 // ------------------------------------------------------------------ one tab per agent session
 // Every session works in its own tab, grouped and named after it ("app", "app 2", …) in its colour. The
@@ -235,11 +271,12 @@ async function onBridge(m) {
   if (m.cmd === 'hosts') return setHostState(m);
   if (m.cmd === 'activity') {
     const a = { text: String(m.text || ''), who: String(m.who || ''), session: String(m.session || ''), ts: Date.now() };
-    return serial(async () => {
-      const { activities = {} } = await S.get('activities');
-      activities[a.session] = a;
-      for (const k of Object.keys(activities)) if (a.ts - activities[k].ts > 60000) delete activities[k];
-      await S.set({ activities });
+    // A run of browser actions is one entry that updates in place, like an agent's "working" line.
+    return chatEdit(chats => {
+      const list = chats[a.session] ||= [];
+      const last = list[list.length - 1];
+      if (last?.kind === 'activity' && a.ts - last.ts < 60000) Object.assign(last, { text: a.text, ts: a.ts, count: (last.count || 1) + 1 });
+      else list.push({ role: 'agent', kind: 'activity', text: a.text, who: a.who, ts: a.ts, count: 1 });
     });
   }
   if (!m.rid) return;
@@ -283,7 +320,12 @@ async function command(m) {
     case 'recordStop':
       if (video?.session && m.session && video.session !== m.session) return { ok: false, error: 'this video belongs to another session' };
       return recordStop(m);
-    case 'highlight': return highlight({ ...m, session: m.session || '', tab: await tabFor(m, { show: true }) });
+    case 'highlight': {
+      const r = await highlight({ ...m, session: m.session || '', tab: await tabFor(m, { show: true }) });
+      // The agent pointing at something is part of the conversation; tour steps are not.
+      if (r.ok) await chatAgent(m.session, { kind: 'point', text: m.item?.label || '', selector: String(m.item?.selector || ''), host: hostOf(r.url || '') });
+      return r;
+    }
     // network and cpu are independent; "off" for the network without a cpu value resets both.
     case 'throttle': {
       const tab = await tabFor(m);
@@ -340,6 +382,7 @@ async function command(m) {
       const r = await startRecording(tab);
       if (r.error) return { ok: false, error: r.error };
       await S.set({ demoRequest: { id, prompt: String(m.prompt || ''), session: m.session || '' }, recordingDraft: null });
+      await chatAgent(m.session, { kind: 'request', text: String(m.prompt || '') });
       return { ok: true, requestId: id };
     }
     case 'state': {

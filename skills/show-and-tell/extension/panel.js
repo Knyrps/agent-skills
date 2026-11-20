@@ -34,11 +34,13 @@ async function render() {
   const me = await frontSession();
   const who = me?.name || s.listener || 'the agent';
   const listening = me ? me.listening : s.waiting;
-  $('listen-text').textContent = !s.connected ? 'Bridge offline · input is kept'
-    : me && !me.live ? `${who} has ended · input goes to the latest agent`
-      : listening ? `${who} is listening` : me || s.listener ? `Saved until ${who} listens` : 'No agent listening · input is kept';
+  $('who-name').textContent = me?.name || s.listener || 'show-and-tell';
+  $('listen-text').textContent = !s.connected ? 'Bridge offline · messages are kept'
+    : me && !me.live ? 'Session ended · messages go to the latest agent'
+      : listening ? 'Listening' : me || s.listener ? 'Not listening · messages wait for it' : 'No agent listening · messages are kept';
   $('listen').classList.toggle('on', !!(s.connected && listening));
-  $('listen').style.setProperty('--session', me ? GROUP[me.color] || '' : '');
+  for (const e of [$('listen'), $('avatar')]) e.style.setProperty('--session', me ? GROUP[me.color] || '' : '');
+  $('q').placeholder = `Message ${me?.name || s.listener || 'the agent'}`;
   const onTour = !!s.tour && (s.tourTab == null || s.tourTab === frontTabId);
   const label = s.video || onTour ? s.step : (s.steps || {})[me?.id || ''] || '';
   $('tour').hidden = !(onTour || label || s.video);
@@ -78,7 +80,7 @@ async function render() {
 async function refreshTab() {
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   tabUrl = t?.url || '';
-  if (frontTabId !== (t?.id ?? null)) { frontTabId = t?.id ?? null; render(); renderActivity(); renderThrottle(); }
+  if (frontTabId !== (t?.id ?? null)) { frontTabId = t?.id ?? null; render(); renderChat(true); renderThrottle(); }
   const placeholder = tabUrl.startsWith(chrome.runtime.getURL('tab.html'));
   const { hostState: hs = {}, connected } = await S.get(['hostState', 'connected']);
   const ok = hostAllowed(tabUrl, [...(await loadConfig()).allowlist, ...(hs.allow || []), ...(hs.loopback || []), ...(hs.granted || [])]);
@@ -94,22 +96,64 @@ async function refreshTab() {
   renderRecording();
 }
 
-// The agent's latest browser action; it fades after 5 s and goes after 30 s without another one.
-let activityTimer = 0;
-async function renderActivity() {
-  clearTimeout(activityTimer);
-  // The session in front, else whichever session acted last.
-  const { activities = {} } = await S.get('activities');
+// The conversation with the session in front: what the user sent and what the agent did in the browser.
+// The agent's own replies stay in the agent chat; here the agent speaks through its actions and questions.
+const clock = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const spark = () => { const s = el('span', 'spark'); s.innerHTML = '<svg><use href="#spark"/></svg>'; return s; };
+const ICON = { Annotation: '<path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/>', Recording: '<circle cx="12" cy="12" r="6"/>' };
+
+function userMsg(m) {
+  const row = el('div', 'msg user'), b = el('div', 'bubble md-typescale-body-large');
+  if (m.att?.length) {
+    const atts = el('div', 'atts');
+    for (const a of m.att) {
+      const chip = el('span', 'att md-typescale-label-large');
+      chip.innerHTML = `<svg viewBox="0 0 24 24">${ICON[a.split(' ')[0]] || ''}</svg>`;
+      chip.append(a);
+      atts.append(chip);
+    }
+    b.append(atts);
+  }
+  if (m.text) b.append(m.text);
+  row.append(b, el('div', 'meta md-typescale-label-small', `${m.acked ? 'Sent' : 'Not sent yet · bridge offline'} · ${clock(m.ts)}`));
+  return row;
+}
+
+function agentMsg(m) {
+  const row = el('div', 'msg agent'), body = el('div', 'agent-body');
+  if (m.kind === 'activity') {
+    if (Date.now() - m.ts < 5000) row.classList.add('working');
+    body.append(el('div', 'text md-typescale-body-medium', m.text.charAt(0).toUpperCase() + m.text.slice(1)),
+      el('div', 'md-typescale-label-small muted', `${m.count > 1 ? `${m.count} actions in the browser` : 'In the browser'} · ${clock(m.ts)}`));
+  } else if (m.kind === 'request') {
+    body.append(el('div', 'md-typescale-label-medium muted', 'Asked you to show it'), el('div', 'md-typescale-body-large', m.text),
+      el('div', 'md-typescale-label-small muted', clock(m.ts)));
+  } else if (m.kind === 'point') {
+    body.append(el('div', 'md-typescale-label-medium muted', `Pointed at something${m.host ? ` on ${m.host}` : ''}`),
+      el('div', 'md-typescale-body-large', m.text || m.selector), el('div', 'md-typescale-label-small muted', clock(m.ts)));
+  } else body.append(el('div', 'md-typescale-body-large', m.text || ''));
+  row.append(spark(), body);
+  return row;
+}
+
+let chatTimer = 0;
+async function renderChat(jump = false) {
+  clearTimeout(chatTimer);
+  const box = $('chat');
+  const atEnd = jump || box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+  const { chats = {}, demoRequest, hostQuestions = [] } = await S.get(['chats', 'demoRequest', 'hostQuestions']);
   const me = await frontSession();
-  const a = me ? activities[me.id] : Object.values(activities).sort((x, y) => y.ts - x.ts)[0];
-  const age = a ? Date.now() - a.ts : Infinity;
-  $('activity').hidden = age > 30000;
-  if (age > 30000) return;
-  $('activity-who').textContent = a.who ? a.who + ' is' : 'The agent is';
-  $('activity-text').textContent = a.text;
-  $('activity-age').textContent = age < 2000 ? 'now' : `${Math.round(age / 1000)} s ago`;
-  $('activity').classList.toggle('old', age > 5000);
-  activityTimer = setTimeout(renderActivity, 1000);
+  const list = chats[me?.id || ''] || [];
+  // A pending request shows as its live card instead of its history entry.
+  const shown = demoRequest ? list.filter((m, i) => !(m.kind === 'request' && i === list.findLastIndex(x => x.kind === 'request'))) : list;
+  $('log').replaceChildren(...shown.map(m => (m.role === 'user' ? userMsg(m) : agentMsg(m))));
+  $('empty').hidden = shown.length > 0 || !!demoRequest || hostQuestions.length > 0;
+  $('empty-text').textContent = me ? `Mark the page, show it by doing it, or just ask ${me.name}.` : 'Mark the page, show it by doing it, or just ask.';
+  if (atEnd) box.scrollTop = box.scrollHeight;
+  // The "working" sheen ends 5 s after the last action.
+  const last = list[list.length - 1];
+  if (last?.kind === 'activity' && Date.now() - last.ts < 5000) chatTimer = setTimeout(renderChat, 5000 - (Date.now() - last.ts) + 50);
 }
 
 async function renderThrottle() {
@@ -154,23 +198,18 @@ function toast(msg) {
   toastTimer = setTimeout(() => $('toast').classList.remove('show'), 4000);
 }
 
-async function sentText(delivered) {
-  const { waiting, listener } = await S.get(['waiting', 'listener']);
-  if (delivered && waiting) return `Sent to ${listener || 'the agent'}.`;
-  return `Saved. ${listener || 'The agent'} gets it as soon as it listens.`;
-}
-
+// The message shows up in the conversation, so only problems get a snackbar.
 async function act(type, extra = {}) {
   const r = await chrome.runtime.sendMessage({ type: 'action', action: { type, url: tabUrl, ...extra } })
     .catch(e => ({ error: e.message }));
-  if (r?.error) return toast('Error: ' + r.error);
-  if (r?.local) return;
-  toast(await sentText(r?.delivered));
+  if (r?.error) toast('Error: ' + r.error);
+  return r;
 }
 
+const clearInput = () => { $('q').value = ''; fit(); canSend(); };
 async function send() {
   const text = $('q').value.trim();
-  // Attachments go out with the question: an annotation and/or a recording, each as its own action.
+  // Attachments go out with the message: an annotation and/or a recording, each as its own action.
   const { recordingDraft, annotationDraft } = await S.get(['recordingDraft', 'annotationDraft']);
   if (recordingDraft || annotationDraft) {
     const results = [];
@@ -178,14 +217,23 @@ async function send() {
     if (recordingDraft) results.push(await chrome.runtime.sendMessage({ type: 'recSend', text, url: tabUrl }).catch(e => ({ error: e.message })));
     const failed = results.find(r => r?.error);
     if (failed) return toast('Error: ' + failed.error);
-    toast(await sentText(results.every(r => r?.delivered)));
-    $('q').value = '';
-    return;
+    return clearInput();
   }
   if (!text) { $('q').focus(); return; }
-  await act('question', { text });
-  $('q').value = '';
+  const r = await act('question', { text });
+  if (!r?.error) clearInput();
 }
+
+// The composer grows with its text up to a few lines; Send is on when there is something to send.
+function fit() { const q = $('q'); q.style.height = 'auto'; q.style.height = Math.min(q.scrollHeight, 160) + 'px'; }
+async function canSend() {
+  const { recordingDraft, annotationDraft } = await S.get(['recordingDraft', 'annotationDraft']);
+  $('send').disabled = !$('q').value.trim() && !recordingDraft && !annotationDraft;
+}
+$('q').addEventListener('input', () => { fit(); canSend(); });
+$('sug-annotate').addEventListener('click', () => $('annotate').click());
+$('sug-record').addEventListener('click', () => $('rec').click());
+$('sug-ask').addEventListener('click', () => $('q').focus());
 
 $('video-stop').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'videoStop' }));
 $('video-discard').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'videoStop', discard: true }));
@@ -201,21 +249,19 @@ async function renderRecording() {
   const { recording, recordingDraft, annotationDraft, demoRequest } = await S.get(['recording', 'recordingDraft', 'annotationDraft', 'demoRequest']);
   $('request').hidden = !demoRequest;
   if (demoRequest) $('request-text').textContent = demoRequest.prompt;
-  $('annot-chip').hidden = !annotationDraft;
+  $('annot-chip-text').hidden = !annotationDraft;
   if (annotationDraft) $('annot-chip-text').label = `Annotation · ${annotationDraft.annotations.length}`;
   $('annotate').disabled = !tabAllowed || !!recording;
   const on = !!recording;
   $('rec').classList.toggle('recording', on);
-  $('rec-label').textContent = on ? 'Stop recording' : 'Record';
-  $('rec').disabled = !on && (!tabAllowed || !!recordingDraft);
-  $('rec-chip').hidden = !recordingDraft;
-  if (recordingDraft) {
-    $('rec-chip-text').label = `Recording · ${steps(recordingDraft.steps.length - 2)}`;
-  }
-  $('rec-discard').hidden = !on;
-  $('rec-count').hidden = !on;
   // setViewport and the starting page are not the user's steps.
-  if (on) $('rec-count').textContent = steps(recording.steps.length - 2);
+  $('rec-label').textContent = on ? `Stop · ${steps(recording.steps.length - 2)}` : 'Record';
+  $('rec').disabled = !on && (!tabAllowed || !!recordingDraft);
+  $('rec-chip-text').hidden = !recordingDraft;
+  if (recordingDraft) $('rec-chip-text').label = `Recording · ${steps(recordingDraft.steps.length - 2)}`;
+  $('attachments').hidden = !annotationDraft && !recordingDraft;
+  $('rec-discard').hidden = !on;
+  canSend();
 }
 
 $('rec').addEventListener('click', async () => {
@@ -227,7 +273,7 @@ $('rec').addEventListener('click', async () => {
   }
   const r = await chrome.runtime.sendMessage({ type: 'recStop' }).catch(e => ({ error: e.message }));
   if (r?.error) return toast('Error: ' + r.error);
-  toast('Recording attached. Add a question and send it.');
+  toast('Recording attached. Add a message and send it.');
   window.focus();
   $('q').focus();
 });
@@ -236,7 +282,7 @@ $('annotate').addEventListener('click', async () => {
   const r = await chrome.runtime.sendMessage({ type: 'annotate' }).catch(e => ({ error: e.message }));
   if (r?.error) return toast('Error: ' + r.error);
   if (r?.cancelled) return toast('Annotation cancelled.');
-  toast('Annotation attached. Add a question and send it.');
+  toast('Annotation attached. Add a message and send it.');
   window.focus();
   $('q').focus();
 });
@@ -262,11 +308,11 @@ chrome.storage.onChanged.addListener((c, area) => {
   if (c.recording || c.recordingDraft || c.annotationDraft || c.demoRequest) renderRecording();
   if (c.hostState || c.connected) refreshTab();
   if (c.hostQuestions) renderHostAsk();
-  if (c.activities || c.sessionTabs) renderActivity();
+  if (c.chats || c.sessionTabs || c.sessions || c.demoRequest || c.hostQuestions) renderChat();
   if (c.throttles) renderThrottle();
 });
 renderHostAsk();
-renderActivity();
+renderChat(true);
 renderRecording();
 chrome.tabs.onActivated.addListener(refreshTab);
 chrome.tabs.onUpdated.addListener((_id, info) => { if (info.url || info.status === 'complete') refreshTab(); });

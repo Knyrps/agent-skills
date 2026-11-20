@@ -1,14 +1,19 @@
-/* Layout only; components and colors come from Material Web + vendor/m3-tokens.css. */
+/* Layout only; components and colors come from Material Web + vendor/m3-tokens.css. The panel is an agent
+   chat in the Gemini manner: top app bar, conversation, a rounded composer docked at the bottom. */
 :root {
   color-scheme: light dark;
   --md-ref-typeface-brand: system-ui, "Segoe UI", sans-serif;
   --md-ref-typeface-plain: system-ui, "Segoe UI", sans-serif;
+  --spark: url(#spark-grad);
+  /* "Connected": an M3 custom (extended) colour, green tone 40 / tone 80 like the generated roles. */
+  --sat-color-success: #146c2e;
 }
+@media (prefers-color-scheme: dark) { :root { --sat-color-success: #6dd58c; } }
 * { box-sizing: border-box; }
 html { background: var(--md-sys-color-surface); }
 body {
-  margin: 0; padding: 16px; min-height: 100vh;
-  display: flex; flex-direction: column; gap: 12px;
+  margin: 0; height: 100vh;
+  display: flex; flex-direction: column;
   background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface);
   font-family: var(--md-ref-typeface-plain);
 }
@@ -16,39 +21,44 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 [hidden] { display: none !important; }
 .muted { color: var(--md-sys-color-on-surface-variant); }
 
-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* ---- top app bar */
+.top { display: flex; align-items: center; gap: 12px; padding: 12px 16px 8px; }
+.avatar { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  background: var(--md-sys-color-surface-container-high); }
+.avatar svg { width: 20px; height: 20px; fill: var(--spark); }
+/* The session's tab group colour replaces the gradient. */
+.avatar[style*="--session"] svg { fill: var(--session); }
+.titles { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#who-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .listen { display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
 .listen .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); flex: none; }
 .listen.on { color: var(--md-sys-color-primary); }
 .listen.on .dot { background: var(--md-sys-color-primary); }
-/* The session's tab group colour: a ring while it is not listening, a filled dot while it is. */
+/* A ring while the session is not listening, a filled dot while it is. */
 .listen[style*="--session"] .dot { box-shadow: inset 0 0 0 2px var(--session); background: transparent; }
 .listen.on[style*="--session"] .dot { background: var(--session); }
-.tour { display: flex; flex-direction: column; gap: 12px; }
-.countdown { color: var(--md-sys-color-primary); }
-.card.rec { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
-.card.rec .muted, .card.rec .status { color: inherit; }
-.conn { display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
+.conn { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); }
-/* "Connected": an M3 custom (extended) colour, green tone 40 / tone 80 like the generated roles. */
-:root { --sat-color-success: #146c2e; }
-@media (prefers-color-scheme: dark) { :root { --sat-color-success: #6dd58c; } }
 .conn.ok .dot { background: var(--sat-color-success); }
 
+/* ---- pinned state */
+.pinned { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
+.pinned:not(:has(> :not([hidden]))) { display: none; }
+.tour { display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
+.countdown { color: var(--md-sys-color-primary); }
 .card {
   position: relative; overflow: hidden;
   display: flex; flex-direction: column; gap: 4px;
   padding: 12px 16px; border-radius: 16px;
   background: var(--md-sys-color-surface-container);
 }
+.card.rec { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+.card.rec .muted, .card.rec .status { color: inherit; }
 .card md-linear-progress { position: absolute; left: 0; right: 0; top: 0; --md-linear-progress-track-height: 3px; --md-linear-progress-active-indicator-height: 3px; }
 .card md-linear-progress:not([data-on]) { visibility: hidden; }
 .step { white-space: pre-wrap; overflow-wrap: anywhere; }
 .explanation { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .status { margin-top: 4px; color: var(--md-sys-color-on-surface-variant); }
-.status.waiting { color: var(--md-sys-color-primary); }
-
 .nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 .notice {
@@ -65,20 +75,6 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
   --md-text-button-focus-label-text-color: var(--md-sys-color-on-error-container);
   --md-text-button-pressed-label-text-color: var(--md-sys-color-on-error-container);
 }
-
-/* What the agent is doing in the browser right now (browser_* calls), also when nothing visible changes. */
-.activity {
-  display: flex; align-items: flex-start; gap: 8px;
-  padding: 8px 12px; border-radius: 12px;
-  background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container);
-  transition: opacity .3s;
-}
-.activity svg { flex: none; margin-top: 1px; }
-.activity-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.activity .muted { color: inherit; opacity: .75; white-space: nowrap; margin-top: 2px; }
-.activity.old { opacity: .6; }
-
-/* The tab in front is throttled like in DevTools. */
 .throttle {
   display: flex; align-items: center; gap: 8px;
   padding: 4px 4px 4px 12px; border-radius: 12px;
@@ -93,12 +89,55 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
   --md-text-button-pressed-label-text-color: var(--md-sys-color-on-tertiary-container);
 }
 
-/* The agent asks to work on a host that is not allowed (M3 dialog look, inline). */
-.host-ask {
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 20px 20px 12px; border-radius: 28px;
+/* ---- conversation */
+.chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 12px 16px 8px; scroll-behavior: smooth; }
+.log { display: flex; flex-direction: column; gap: 16px; }
+.log:empty { display: none; }
+
+.empty { margin: auto 0; display: flex; flex-direction: column; gap: 8px; padding: 8px 4px; }
+.greeting {
+  background: linear-gradient(90deg, var(--md-sys-color-primary), var(--md-sys-color-tertiary));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.suggestions { margin-top: 12px; }
+
+.msg { display: flex; gap: 12px; max-width: 100%; animation: msg-in .25s cubic-bezier(.2,0,0,1); }
+@keyframes msg-in { from { opacity: 0; translate: 0 6px; } }
+.msg.user { flex-direction: column; align-items: flex-end; gap: 4px; }
+.bubble {
+  max-width: 88%; padding: 10px 16px; border-radius: 20px 20px 4px 20px;
   background: var(--md-sys-color-surface-container-high); color: var(--md-sys-color-on-surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / .3), 0 1px 3px 1px rgb(0 0 0 / .15); /* elevation 1 */
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.bubble .atts { display: flex; flex-wrap: wrap; gap: 6px; }
+.bubble .atts:not(:last-child) { margin-bottom: 8px; }
+/* Non-interactive attachment labels, shaped like an M3 assist chip. */
+.att {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border-radius: 8px;
+  border: 1px solid var(--md-sys-color-outline-variant); color: var(--md-sys-color-on-surface-variant);
+}
+.att svg { width: 16px; height: 16px; fill: var(--md-sys-color-primary); }
+.meta { color: var(--md-sys-color-on-surface-variant); padding: 0 4px; }
+
+.msg.agent { align-items: flex-start; }
+.spark { flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin-top: -2px; }
+.spark svg { width: 22px; height: 22px; fill: var(--spark); }
+.agent-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+/* The latest browser action, while it is fresh: a moving sheen like an agent "working" line. */
+.working .text {
+  background: linear-gradient(90deg, var(--md-sys-color-on-surface-variant) 40%, var(--md-sys-color-primary) 50%, var(--md-sys-color-on-surface-variant) 60%);
+  background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: sheen 1.6s linear infinite;
+}
+@keyframes sheen { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.working .spark svg { animation: spin 2.4s cubic-bezier(.2,0,0,1) infinite; }
+@keyframes spin { to { rotate: 1turn; } }
+@media (prefers-reduced-motion: reduce) { .working .text, .working .spark svg, .msg { animation: none; } }
+
+/* Questions from the agent sit in the conversation: an inline card with actions. */
+.host-ask {
+  gap: 8px; padding: 16px 16px 8px; border-radius: 16px;
+  background: var(--md-sys-color-surface-container); color: var(--md-sys-color-on-surface);
 }
 .host-ask-head { display: flex; align-items: center; gap: 8px; color: var(--md-sys-color-secondary); }
 .host-ask-head svg { width: 20px; height: 20px; }
@@ -106,44 +145,47 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 #host-ask-text { color: var(--md-sys-color-on-surface-variant); }
 .host-ask-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
-.ask { display: flex; flex-direction: column; gap: 10px; }
-.ask md-filled-tonal-button, .ask #send { align-self: flex-start; }
-.ask #send { align-self: flex-end; }
-md-filled-tonal-button.active {
-  --md-filled-tonal-button-container-color: var(--md-sys-color-primary);
-  --md-filled-tonal-button-label-text-color: var(--md-sys-color-on-primary);
-  --md-filled-tonal-button-icon-color: var(--md-sys-color-on-primary);
-  --md-filled-tonal-button-hover-label-text-color: var(--md-sys-color-on-primary);
-  --md-filled-tonal-button-hover-icon-color: var(--md-sys-color-on-primary);
-  --md-filled-tonal-button-focus-label-text-color: var(--md-sys-color-on-primary);
-  --md-filled-tonal-button-focus-icon-color: var(--md-sys-color-on-primary);
+/* ---- composer */
+.dock { position: relative; padding: 8px 12px 12px; }
+.composer {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 8px 6px 8px; border-radius: 28px;
+  background: var(--md-sys-color-surface-container-high);
+  transition: background .15s;
 }
-md-input-chip { max-width: 100%; }
-.tool-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.ask .tool-row md-filled-tonal-button { align-self: auto; }
-.request {
-  display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 16px;
-  background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container);
+.composer:focus-within { background: var(--md-sys-color-surface-container-highest); }
+.attachments { padding: 4px 4px 0; }
+.attachments md-input-chip { max-width: 100%; }
+#q {
+  display: block; width: 100%; min-height: 40px; max-height: 160px; resize: none;
+  padding: 8px 12px 4px; border: 0; outline: 0; background: transparent;
+  color: var(--md-sys-color-on-surface); caret-color: var(--md-sys-color-primary); font-family: inherit;
 }
-.rec-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.rec-row:not(:has(> :not([hidden]))) { display: none; }
-.ask .tool-row md-filled-tonal-button { --md-filled-tonal-button-leading-space: 12px; --md-filled-tonal-button-trailing-space: 14px; }
+#q::placeholder { color: var(--md-sys-color-on-surface-variant); }
+.composer-row { display: flex; align-items: center; gap: 2px; }
+.composer-row md-text-button {
+  --md-text-button-leading-space: 12px; --md-text-button-trailing-space: 14px;
+  --md-text-button-label-text-color: var(--md-sys-color-on-surface-variant);
+  --md-text-button-icon-color: var(--md-sys-color-on-surface-variant);
+  --md-text-button-hover-label-text-color: var(--md-sys-color-on-surface);
+  --md-text-button-hover-icon-color: var(--md-sys-color-on-surface);
+}
+.grow { flex: 1; }
 #rec.recording {
-  --md-filled-tonal-button-container-color: var(--md-sys-color-error);
-  --md-filled-tonal-button-label-text-color: var(--md-sys-color-on-error);
-  --md-filled-tonal-button-icon-color: var(--md-sys-color-on-error);
-  --md-filled-tonal-button-hover-label-text-color: var(--md-sys-color-on-error);
-  --md-filled-tonal-button-hover-icon-color: var(--md-sys-color-on-error);
+  --md-text-button-label-text-color: var(--md-sys-color-error);
+  --md-text-button-icon-color: var(--md-sys-color-error);
+  --md-text-button-hover-label-text-color: var(--md-sys-color-error);
+  --md-text-button-hover-icon-color: var(--md-sys-color-error);
 }
 #rec.recording svg { animation: rec-pulse 1.2s ease-in-out infinite; }
 @keyframes rec-pulse { 50% { opacity: .35; } }
-md-outlined-text-field { width: 100%; resize: vertical; }
 
+/* M3 snackbar above the composer. */
 .toast {
-  position: fixed; left: 16px; right: 16px; bottom: 16px;
+  position: absolute; left: 12px; right: 12px; bottom: calc(100% + 4px);
   padding: 14px 16px; border-radius: 4px;
   background: var(--md-sys-color-inverse-surface); color: var(--md-sys-color-inverse-on-surface);
-  box-shadow: 0 1px 3px rgb(0 0 0 / .3), 0 4px 8px 3px rgb(0 0 0 / .15); /* M3 snackbar: elevation 3 */
+  box-shadow: 0 1px 3px rgb(0 0 0 / .3), 0 4px 8px 3px rgb(0 0 0 / .15); /* elevation 3 */
   opacity: 0; transform: translateY(8px); pointer-events: none;
   transition: opacity .15s, transform .15s;
 }

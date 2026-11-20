@@ -8,6 +8,7 @@ import '@material/web/icon/icon.js';
 import '@material/web/textfield/outlined-text-field.js';
 import '@material/web/chips/chip-set.js';
 import '@material/web/chips/input-chip.js';
+import '@material/web/chips/suggestion-chip.js';
 import '@material/web/progress/linear-progress.js';
 import '@material/web/divider/divider.js';
 import '@material/web/elevation/elevation.js';

@@ -9,6 +9,7 @@ share one browser window:
   - **Annotate**: click an element to mark it, or drag a frame, an arrow or a pen stroke, each with a note.
   - **Record**: captures what you do in the page (clicks, typing, keys, scrolling, swipes, navigation).
   - **Message** and **Send**, with the annotation or recording attached.
+  The panel reads like an agent chat: your messages, and what the agent did and asked in the browser.
   The agent hears it through a background watcher; the panel shows which session is listening.
 - **Several agents at once**: each session works in its own named, coloured tab group, and the panel talks
   to the session whose tab is in front.
@@ -109,14 +110,15 @@ Open any page on `http://localhost:<port>/` in the demo browser, then:
 
 | Test | Do | Expect |
 | --- | --- | --- |
-| Idle panel | Open the panel with no tour running | Only "Send to the agent" (Annotate, Record, message) is shown; no step card, no Back/Next |
-| Watcher | `node <skill>/bridge wait --session s1 --label mine --timeout 60`, type a message, **Send** | Panel header shows "mine is listening"; the toast says "Sent to mine." and the CLI prints the `question` |
+| Idle panel | Open the panel with no tour running | The greeting "What do you want to show?" with three suggestion chips above the composer (message field, Annotate, Record, Send arrow); no step card, no Back/Next. Send is off while there is nothing to send |
+| Conversation | Let the agent navigate, click and `highlight` with a label, then send a message | The conversation shows one "working" line per run of browser actions (with a moving sheen while fresh), "Pointed at something" with the label, and your message as a bubble with "Sent" under it. Each session whose tab is in front has its own conversation |
+| Watcher | `node <skill>/bridge wait --session s1 --label mine --timeout 60`, type a message, **Send** | The header names "mine" and says "Listening"; the message appears as a bubble with "Sent" and the CLI prints the `question` |
 | Next | `node <skill>/bridge step "1/2 – Test"`, then `wait --timeout 60` and click **Next** | Step card and Back/Next appear. The CLI prints `{"actions":[{"type":"next",…}]}` |
 | Back | Same, click **Back** | `"type":"back"` |
 | Question | Same, type a question, press Enter | `"type":"question","text":"…"` |
 | Annotate | `wait`, click **Annotate**, hover (dashed outline) and click one element, drag a frame, scroll the page and an inner scroll area with the wheel, switch to the arrow and drag one inside the scroll area (Enter after each note), click a number circle to add or change its note (Esc restores it, the bin deletes the mark), **Done**, type a question, **Send**. Esc instead of Done cancels, Ctrl+Z undoes | Clicks don't reach the page. Each mark has its own colour and number, stays on its content while scrolling, and is clipped to its scroll area. An "Annotation · N" chip appears and the drawing disappears. Output is one `"type":"annotation"` action with `annotations[]` (document coordinates, `color`, note, `elements[]` labelled 1a, 1b …), `imageArea`, `imagePath` (all marks, also those scrolled out of view) and `labelledImagePath` (plus dashed element outlines, for the model only). No "being debugged" bar appears |
-| request_demo | `node <skill>/bridge request "Show me the search"`, then `wait`, act in the page, **Stop recording**, **Send** | The panel shows the request card and recording starts by itself. Output is a `recording` action with `requestId` and `prompt`. **Discard** instead gives `demoDeclined` |
-| Record | `wait`, click **Record**, click/type/select/swipe/scroll in the page, follow a link, click **Stop recording**, type a question next to the "Recording · N steps" chip, click **Send** | The page reacts normally and the panel counts steps. Output is one `"type":"recording"` action: `recording.steps` (Recorder format plus `swipe`/`urlChange`) across both pages, passwords as `•••`, the comment in `text`. **Discard** (while recording) or the chip's × drops it |
+| request_demo | `node <skill>/bridge request "Show me the search"`, then `wait`, act in the page, **Stop recording**, **Send** | The request appears in the conversation and recording starts by itself (Record reads "Stop · N steps"). Output is a `recording` action with `requestId` and `prompt`. **Discard** instead gives `demoDeclined` |
+| Record | `wait`, click **Record**, click/type/select/swipe/scroll in the page, follow a link, click **Stop**, type a message next to the "Recording · N steps" chip, click **Send** | The page reacts normally and the panel counts steps. Output is one `"type":"recording"` action: `recording.steps` (Recorder format plus `swipe`/`urlChange`) across both pages, passwords as `•••`, the comment in `text`. **Discard** (while recording) or the chip's × drops it |
 | Step label | `node <skill>/bridge step "2/5 – Test"` | Panel shows the label |
 | Highlight | `node <skill>/bridge highlight h1 --label "Title" --style spotlight` | Blue ring and callout, rest of the page dimmed. Output `"found": true` |
 | Hide/show | `node <skill>/bridge hide`, then `show` | Highlights disappear and come back |
