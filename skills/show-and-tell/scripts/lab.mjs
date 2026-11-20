@@ -17,24 +17,27 @@ const port = +(process.argv[2] || process.env.LAB_PORT || 5191);
 // Enough cards to overflow the strip even on very wide screens.
 const cards = Array.from({ length: 20 }, (_, i) => `<div class="item md-typescale-label-large" data-n="${i + 1}">Product ${i + 1}</div>`).join('');
 
-// Raw events the debug panel can show, by group: [type, label shown when it differs from the type].
+// Raw events the debug panel can show, by group: [type, note, name in the log]. Every row shows the real
+// event name; a note only where the name does not explain itself. The log says "hover start" and "focus"
+// for the events whose DOM names are least obvious.
 const GROUPS = [
-  ['Pointer', [['pointerdown'], ['pointerup'], ['pointermove'], ['pointercancel']]],
-  ['Hover', [['mouseover', 'hover start'], ['mouseout', 'hover end']]],
-  ['Mouse', [['click'], ['dblclick'], ['auxclick'], ['contextmenu'], ['wheel']]],
+  ['Pointer', [['pointerdown'], ['pointerup'], ['pointermove'], ['pointercancel', 'the browser took over the gesture, e.g. to scroll']]],
+  ['Hover', [['mouseover', 'hover start', 'hover start'], ['mouseout', 'hover end', 'hover end']]],
+  ['Mouse', [['click'], ['dblclick'], ['auxclick', 'middle or other non-primary button'], ['contextmenu'], ['wheel']]],
   ['Keyboard', [['keydown'], ['keyup']]],
-  ['Focus', [['focusin', 'focus'], ['focusout', 'blur']]],
-  ['Input', [['beforeinput'], ['input'], ['change'], ['compositionstart'], ['compositionend']]],
+  ['Focus', [['focusin', 'focus, also from inside components', 'focus'], ['focusout', 'blur, also from inside components', 'blur']]],
+  ['Input', [['beforeinput', 'just before a field\'s value changes'], ['input'], ['change'],
+    ['compositionstart', 'IME or dead-key input begins'], ['compositionend', 'IME or dead-key input ends']]],
   ['Touch', [['touchstart'], ['touchmove'], ['touchend'], ['touchcancel']]],
   ['Drag', [['dragstart'], ['drag'], ['dragenter'], ['dragover'], ['dragleave'], ['drop'], ['dragend']]],
   ['Scroll', [['scroll']]],
   ['Clipboard', [['copy'], ['cut'], ['paste']]],
-  ['Page', [['visibilitychange', 'visibility change'], ['resize'], ['pageshow', 'page shown']]],
+  ['Page', [['visibilitychange', 'the tab was hidden or shown'], ['resize'], ['pageshow', 'also when restored from the back/forward cache']]],
 ];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const eventList = GROUPS.map(([group, types]) => `<div class="group" data-group="${group}">
   <label class="check-row group-row"><md-checkbox class="gbox" aria-label="All ${group} events"></md-checkbox><span class="md-typescale-title-small grow">${group}</span><span class="count sub md-typescale-label-medium"></span></label>
-  ${types.map(([type, label = type]) => `<label class="check-row ev" data-type="${type}" data-label="${esc(label)}" data-search="${esc(`${label} ${type} ${group}`.toLowerCase())}"><md-checkbox></md-checkbox><span class="txt"><span class="md-typescale-body-medium">${esc(label)}</span>${label !== type ? `<span class="sub md-typescale-body-small">${type}</span>` : ''}</span></label>`).join('\n  ')}
+  ${types.map(([type, note = '', label = type]) => `<label class="check-row ev" data-type="${type}" data-label="${esc(label)}" data-search="${esc(`${type} ${note} ${group}`.toLowerCase())}"><md-checkbox></md-checkbox><span class="txt"><span class="md-typescale-body-medium">${type}</span>${note ? `<span class="sub md-typescale-body-small">${esc(note)}</span>` : ''}</span></label>`).join('\n  ')}
 </div>`).join('\n');
 
 // The debug panel under the bug icon: who to show, and (Advanced) which events.
