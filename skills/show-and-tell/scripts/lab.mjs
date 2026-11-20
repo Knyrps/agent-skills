@@ -122,6 +122,7 @@ main{padding:24px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap
 md-outlined-text-field,md-outlined-select{width:100%}
 label.check{display:flex;align-items:center;gap:8px;cursor:pointer}
 md-slider{width:100%}
+.row{display:flex;flex-wrap:wrap;gap:8px}
 #menu-anchor{position:fixed;width:0;height:0}
 /* M3 terminal-style log on the inverse surface. */
 #log{grid-column:1/-1;height:160px;overflow:auto;padding:12px 16px;border-radius:12px;
@@ -347,6 +348,10 @@ $('#size').addEventListener('change', () => { set('#size-box', 'Size ' + $('#siz
 $('#vol').addEventListener('input', () => set('#vol-box', 'Volume ' + $('#vol').value));
 (await inner('#vol')).addEventListener('change', e => log('slider ' + $('#vol').value, e));
 $('#open-dlg').addEventListener('click', e => { $('#dlg').show(); log('dialog opened', e); });
+// New tabs: a link with target=_blank, window.open and a popup window, all opening the second page.
+$('#newtab-link').addEventListener('click', e => log('link to a new tab', e));
+$('#newtab-open').addEventListener('click', e => { window.open('/next?via=window.open'); log('window.open', e); });
+$('#newtab-popup').addEventListener('click', e => { window.open('/next?via=popup', 'lab-popup', 'popup,width=720,height=520'); log('popup window', e); });
 $('#dlg-ok').addEventListener('click', e => { $('#dlg').close(); set('#dlg-box', 'Dialog confirmed'); log('dialog confirmed', e); });
 addEventListener('keydown', e => { if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); set('#keys-box', 'Ctrl+K pressed'); log('shortcut Ctrl+K', e); } });
 `;
@@ -375,6 +380,8 @@ const LAB = page('Gesture lab', [
   card('vol-box', 'Slider', 'Volume 20', '<md-slider id="vol" min="0" max="100" value="20" labeled></md-slider>'),
   card('dlg-box', 'Dialog', 'Closed', '<div><md-outlined-button id="open-dlg">Open dialog</md-outlined-button></div>'),
   card('keys-box', 'Shortcut', 'Press Ctrl+K'),
+  card('tabs-box', 'New tabs', 'Opens /next in a new tab or a popup window', '<div class="row"><md-outlined-button id="newtab-link" href="/next?via=link" target="_blank">Link</md-outlined-button>'
+    + '<md-outlined-button id="newtab-open">window.open</md-outlined-button><md-outlined-button id="newtab-popup">Popup</md-outlined-button></div>', 'wide'),
   `<md-dialog id="dlg"><div slot="headline">Confirm</div><div slot="content">A modal dialog.</div>
     <div slot="actions"><md-text-button id="dlg-ok">OK</md-text-button></div></md-dialog>`,
   `<span id="menu-anchor"></span><md-menu id="menu" anchor="menu-anchor" positioning="fixed">

@@ -97,7 +97,7 @@ export function startOwner({ standalone = false } = {}) {
     const userLog = new Map(); // session -> [event]
     const calls = new Map(); // session -> { running, windows: [[start, end]] }
     const GRACE = { navigate: 3000, urlChange: 3000, newTab: 3000 };
-    const TAB_NEWS = new Set(['newTab', 'tabClosed']);
+    const TAB_NEWS = new Set(['newTab', 'tabClosed', 'workingTabClosed']);
     const callState = s => { let c = calls.get(s); if (!c) calls.set(s, c = { running: 0, since: 0, windows: [] }); return c; };
     const agentsOwn = (s, ev) => {
       const c = calls.get(s);
@@ -449,8 +449,8 @@ export function startOwner({ standalone = false } = {}) {
           broadcast({ cmd: 'setStep', label, session: body.session || '' });
           return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
         }
-        if (!['highlight', 'clearHighlights', 'hideOverlays', 'throttle', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
-        try { return json(res, 200, await requestExt(body, ['recordTour', 'highlight', 'loadTour', 'requestDemo'].includes(body.cmd) ? 150000 : 8000)); }
+        if (!['highlight', 'clearHighlights', 'hideOverlays', 'throttle', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop', 'tabs'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
+        try { return json(res, 200, await requestExt(body, ['recordTour', 'highlight', 'loadTour', 'requestDemo', 'tabs'].includes(body.cmd) ? 150000 : 8000)); }
         catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       }
       if (route === 'POST /shutdown' && standalone) { json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 50); return; }
@@ -525,8 +525,9 @@ export function userEventText(e) {
     key: () => `pressed ${e.key}${el ? ` in ${el}` : ''}`,
     navigate: () => `${e.how === 'reload' ? 'reloaded' : 'opened'} ${e.url}`,
     urlChange: () => `the page moved to ${e.url}`,
-    newTab: () => `a new tab opened${e.by === 'agent' ? ' from your last action' : ' (by the user or the page)'}: ${e.url}. Your calls now act on it`,
-    tabClosed: () => `your working tab was closed; your calls act on ${e.url} again`,
+    newTab: () => `a new tab opened${e.by === 'agent' ? ' from your last action' : ' (by the user or the page)'}: ${e.url} (tab ${e.tab}). Your calls still act on your working tab; switch with tabs({ action: 'select', id: ${e.tab} })`,
+    tabClosed: () => `your tab ${e.tab} closed (${e.url})`,
+    workingTabClosed: () => `your working tab ${e.tab} was closed (${e.url}). Pick another with tabs before your next browser call`,
   }[e.kind]?.() || `${e.kind} ${el}`;
   return `${at} ${what}`;
 }

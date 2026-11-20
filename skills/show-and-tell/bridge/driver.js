@@ -123,7 +123,14 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
       const tabs = await listTabs(c), same = tabs.filter(t => t.url === mine.url);
       const current = same.find(t => t.current);
       if (current && (same.length === 1 || confirmed === mine.tabId)) { confirmed = mine.tabId; return { url: mine.url }; }
-      if (same.length === 1) { await select(c, same[0].index); confirmed = mine.tabId; return { url: mine.url }; }
+      if (same.length === 1) {
+        await select(c, same[0].index);
+        // Playwright had moved to another tab (it follows tabs the page opens); selecting back drops the
+        // refs of the agent's last snapshot, so a ref error then gets an explanation.
+        const drifted = confirmed === mine.tabId;
+        confirmed = mine.tabId;
+        return { url: mine.url, drifted };
+      }
       for (const t of same) {
         await select(c, t.index);
         const r = await c.callTool({ name: 'browser_evaluate', arguments: { function: '() => document.documentElement.getAttribute("data-show-and-tell-tab")' } });
@@ -161,18 +168,22 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
 
   async function attempt(name, args) {
     const c = await connect();
-    let page = '';
+    let page = '', drifted = false;
     if (tab) {
       const r = await selectSessionTab(c);
       if (r.error) return { isError: true, content: [{ type: 'text', text: r.error }] };
       page = r.url;
+      drifted = !!r.drifted;
     } else if (name !== 'browser_tabs') page = await selectAppTab(c);
     const denied = await check(name, args, page);
     if (denied) return denied;
     try { onActivity(describe(name, args, page)); } catch {}
     // Input in the tab during this window is the agent's own, not the user's.
     await busy(true);
-    try { return await c.callTool({ name, arguments: args }); } finally { await busy(false); }
+    let r;
+    try { r = await c.callTool({ name, arguments: args }); } finally { await busy(false); }
+    if (drifted && r?.isError && /Ref .* not found/i.test(text(r))) r.content = [{ type: 'text', text: 'A tab opened from your page meanwhile, so the refs of your last snapshot are no longer valid (your calls still act on your working tab). Take a new browser_snapshot and use its refs.' }, ...(r.content || [])];
+    return r;
   }
 
   async function call(name, args = {}) {

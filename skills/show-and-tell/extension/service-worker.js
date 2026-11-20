@@ -237,11 +237,18 @@ function sessionTab(m, { create = true } = {}) {
         }
         return t;
       }
+      // The working tab closed while the session has others: the agent chooses where to go on, so a script
+      // never acts on a page it has not looked at.
+      if (tabsOf(e).some(id => id !== e.tabId)) {
+        if (!create) return null;
+        throw new Error(`your working tab was closed${e.lostUrl ? ` (${e.lostUrl})` : ''}; call tabs to list your other tabs and select one`);
+      }
     }
     if (!create) return null;
     const owned = new Set(Object.values(map).flatMap(tabsOf));
     const front = await activeTab();
-    let t = front && !owned.has(front.id) && !front.url.startsWith('chrome-extension://') && front.groupId < 0 && !(await isLab(front.url)) ? front : null;
+    // Only a web page in front is taken over; browser pages (new tab, settings) get a tab of the session's own.
+    let t = front && !owned.has(front.id) && /^https?:/.test(front.url) && front.groupId < 0 && !(await isLab(front.url)) ? front : null;
     t ||= await chrome.tabs.create({ windowId: front?.windowId, active: true,
       url: chrome.runtime.getURL('tab.html') + '?s=' + encodeURIComponent(m.session) + '&n=' + encodeURIComponent(m.sessionName || '') });
     const name = m.sessionName || 'agent', color = m.color || 'blue';
@@ -263,10 +270,16 @@ async function tabFor(m, { show = false } = {}) {
 // Chrome puts every tab a grouped tab opens (links with target=_blank, window.open, forms, also without a
 // click) into its group, so the group says which session a tab belongs to; Chrome's opener field is often
 // empty. Popup windows cannot hold groups: they belong to the session of the tab that opened them, which
-// Chrome does report there. A session's newest tab becomes its working tab, and the agent is told.
-const groupOf = async e => (await chrome.tabs.get(e.tabId).catch(() => null))?.groupId ?? -1;
+// Chrome does report there. Such a tab joins the session's tabs, and the agent is told; its calls stay on
+// its working tab until it switches (`tabs`), so nothing moves under a running script.
+const groupsOf = async e => new Set((await Promise.all(tabsOf(e).map(id => chrome.tabs.get(id).catch(() => null))))
+  .map(t => t?.groupId ?? -1).filter(g => g >= 0));
 // A new tab's first page load belongs to the new-tab news, not another line.
 const freshTabs = new Map(); // tabId -> until
+// Last known address per tab, for the news when one closes (chrome.tabs.onRemoved has none).
+const tabUrls = new Map();
+// Tabs created recently, for tours waiting for a tab their step opens (also without a session).
+const createdTabs = []; // { id, ts }
 async function adoptTab(tab) {
   if (!tab?.id || tab.url?.endsWith('/panel.html')) return;
   let report = null;
@@ -274,34 +287,52 @@ async function adoptTab(tab) {
     const map = await sessionTabs();
     if (Object.values(map).some(e => tabsOf(e).includes(tab.id))) return;
     let sid = '';
-    if (tab.groupId >= 0) for (const [k, e] of Object.entries(map)) { if ((await groupOf(e)) === tab.groupId) { sid = k; break; } }
+    if (tab.groupId >= 0) for (const [k, e] of Object.entries(map)) { if ((await groupsOf(e)).has(tab.groupId)) { sid = k; break; } }
     if (!sid && tab.openerTabId != null) {
       const win = await chrome.windows.get(tab.windowId).catch(() => null);
       if (win?.type === 'popup') sid = Object.keys(map).find(k => tabsOf(map[k]).includes(tab.openerTabId)) || '';
     }
     if (!sid) return;
-    const e = map[sid], from = e.tabId;
-    e.tabs = [...tabsOf(e), tab.id];
-    e.tabId = tab.id;
+    const e = map[sid];
+    e.tabs = [...tabsOf(e).filter(id => id != null), tab.id];
+    e.opened = { ...(e.opened || {}), [tab.id]: Date.now() };
     await S.set({ sessionTabs: map });
-    if (!e.ended) report = { sid, from };
+    if (!e.ended) report = sid;
   });
-  if (report) tabNews(report.sid, 'newTab', tab.id, Date.now());
+  if (report) tabNews(report, 'newTab', tab.id, Date.now());
 }
 // What the agent hears about it, once the new tab knows its address.
-async function tabNews(session, kind, tabId, ts) {
-  let url = '';
+async function tabNews(session, kind, tabId, ts, url = '') {
   for (let i = 0; i < 10 && !url; i++) {
     const t = await chrome.tabs.get(tabId).catch(() => null);
     url = t?.url || t?.pendingUrl || '';
     if (!url || url === 'about:blank') { url = ''; await new Promise(r => setTimeout(r, 200)); }
   }
-  send({ type: 'userEvent', session, event: { kind, url: url || 'about:blank', ts } });
+  send({ type: 'userEvent', session, event: { kind, url: url || 'about:blank', tab: tabId, ts } });
 }
-chrome.tabs.onCreated.addListener(tab => { freshTabs.set(tab.id, Date.now() + 5000); adoptTab(tab); });
+
+// A video records one tab; a tab or popup opened from it would go unrecorded (and push the recorded tab to
+// the background), so the video stops with an error that says why.
+async function videoSawTab(tab) {
+  const v = video;
+  if (!v || v.finishing || tab.id === v.tabId) return;
+  const rec = await chrome.tabs.get(v.tabId).catch(() => null);
+  if (tab.openerTabId !== v.tabId && !(rec && rec.groupId >= 0 && tab.groupId === rec.groupId)) return;
+  v.failure ||= `step ${v.step + 1} opened a new tab or popup window (${tab.pendingUrl || tab.url || 'about:blank'}); a video records one tab, `
+    + 'so steps must not open tabs. Open the page with the step\'s url instead';
+  v.abort = true;
+}
+
+chrome.tabs.onCreated.addListener(tab => {
+  freshTabs.set(tab.id, Date.now() + 5000);
+  createdTabs.push({ id: tab.id, ts: Date.now() }); if (createdTabs.length > 30) createdTabs.shift();
+  videoSawTab(tab);
+  adoptTab(tab);
+});
 chrome.tabs.onUpdated.addListener((id, info, tab) => {
+  if (info.url) tabUrls.set(id, info.url);
   if (!('groupId' in info)) return;
-  if (info.groupId >= 0) { adoptTab(tab); return; }
+  if (info.groupId >= 0) { videoSawTab(tab); adoptTab(tab); return; }
   // Dragged out of the group: no longer the session's (its working tab stays, the user can't lose that).
   serial(async () => {
     const map = await sessionTabs();
@@ -309,19 +340,79 @@ chrome.tabs.onUpdated.addListener((id, info, tab) => {
   });
 });
 
-// A closed tab leaves its session; when it was the working tab, the newest remaining one takes over.
+// A closed tab leaves its session, and the agent is told. When it was the working tab, no other tab is
+// picked for it: its next call fails until it selects one with `tabs` (or, without others, gets a new tab).
 chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
+  const url = tabUrls.get(tabId) || ''; tabUrls.delete(tabId);
   const map = await sessionTabs();
   const sid = Object.keys(map).find(k => tabsOf(map[k]).includes(tabId));
   if (!sid) return;
-  const e = map[sid], rest = tabsOf(e).filter(x => x !== tabId);
+  const e = map[sid], rest = tabsOf(e).filter(x => x !== tabId && x != null);
   if (!rest.length) delete map[sid];
   else {
     e.tabs = rest;
-    if (e.tabId === tabId) { e.tabId = rest[rest.length - 1]; if (!e.ended) tabNews(sid, 'tabClosed', e.tabId, Date.now()); }
+    if (e.opened) delete e.opened[tabId];
+    const working = e.tabId === tabId;
+    if (working) { e.tabId = null; e.lostUrl = url; }
+    if (!e.ended) tabNews(sid, working ? 'workingTabClosed' : 'tabClosed', tabId, Date.now(), url || 'a page');
   }
   await S.set({ sessionTabs: map });
 }));
+
+// The `tabs` tool: list the session's tabs, select one as the working tab, or wait for one to open.
+// `since`: the start of the agent's previous call, so a tab its last click opened counts as new.
+async function sessionTabsCmd(m) {
+  const describe = async e => {
+    const out = [];
+    for (const id of tabsOf(e)) {
+      const t = await chrome.tabs.get(id).catch(() => null);
+      if (!t) continue;
+      const win = await chrome.windows.get(t.windowId).catch(() => null);
+      out.push({ id, url: t.url || t.pendingUrl, title: t.title, working: id === e.tabId, ...(win?.type === 'popup' && { popup: true }), ...(t.active && { inFront: true }) });
+    }
+    return out;
+  };
+  const map = await sessionTabs(), e = map[m.session || ''];
+  if (!e) return { ok: true, tabs: [], note: 'no tab yet; your first browser call opens one' };
+  if (m.action === 'select') {
+    const id = +m.id;
+    if (!tabsOf(e).includes(id) || !(await chrome.tabs.get(id).catch(() => null))) return { ok: false, error: `tab ${m.id} is not one of yours`, tabs: await describe(e) };
+    await serial(async () => { const mp = await sessionTabs(); if (mp[m.session]) { mp[m.session].tabId = id; delete mp[m.session].lostUrl; await S.set({ sessionTabs: mp }); } });
+    return { ok: true, selected: id, tabs: await describe((await sessionTabs())[m.session]) };
+  }
+  if (m.action === 'waitForNew') {
+    const since = e.tabsSeenAt || 0, end = Date.now() + Math.min(60000, Math.max(0, +m.timeoutMs || 10000));
+    for (;;) {
+      const cur = (await sessionTabs())[m.session];
+      const fresh = cur && Object.entries(cur.opened || {}).filter(([, ts]) => ts >= since - 200).sort((a, b) => b[1] - a[1])[0];
+      if (fresh) {
+        const id = +fresh[0];
+        if (m.select) await sessionTabsCmd({ ...m, action: 'select', id });
+        const all = await describe((await sessionTabs())[m.session]);
+        return { ok: true, tab: all.find(t => t.id === id), tabs: all };
+      }
+      if (Date.now() > end) return { ok: false, error: 'no new tab opened', tabs: cur ? await describe(cur) : [] };
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  return { ok: true, tabs: await describe(e) };
+}
+// waitForNew counts tabs opened since the agent's previous tabs call.
+const sessionTabsSeen = async (m, out) => { await serial(async () => { const mp = await sessionTabs(); if (mp[m.session]) { mp[m.session].tabsSeenAt = Date.now(); await S.set({ sessionTabs: mp }); } }); return out; };
+
+// Tours: wait for a tab the step opened (in the tour tab's group, from it, or a popup it opened).
+async function waitForTabFrom(fromId, since, ms) {
+  const from = await chrome.tabs.get(fromId).catch(() => null);
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    for (const c of createdTabs.filter(x => x.ts >= since - 200 && x.id !== fromId).reverse()) {
+      const t = await chrome.tabs.get(c.id).catch(() => null);
+      if (t && (t.openerTabId === fromId || (from && from.groupId >= 0 && t.groupId === from.groupId))) return t;
+    }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return null;
+}
 
 // ------------------------------------------------------------------ cleanup of ended sessions
 // Only sessions the bridge reports as ended are touched: their MCP process has exited, so no chat can use
@@ -349,10 +440,10 @@ function sweepTabs(live, endedIds) {
       if (!tabs.length) { delete map[sid]; changed = true; continue; }
       if (tabs.length !== tabsOf(e).length) {
         e.tabs = tabs.map(t => t.id);
-        if (!e.tabs.includes(e.tabId)) e.tabId = e.tabs[e.tabs.length - 1];
+        if (!e.tabs.includes(e.tabId)) e.tabId = null; // closed while the worker slept: the agent picks
         changed = true;
       }
-      const t = tabs.find(x => x.id === e.tabId);
+      const t = tabs.find(x => x.id === e.tabId) || tabs[0];
       // The pid goes back to a new bridge after a handover, so it can still tell when this session ends.
       const pid = live.find(s => s.id === sid)?.pid;
       if (pid && e.pid !== pid) { e.pid = pid; changed = true; }
@@ -402,7 +493,8 @@ async function adoptRestored(live) {
     if (!names.has(name)) continue;
     const tabs = (await chrome.tabs.query({ groupId: g.id })).filter(t => !owned.has(t.id));
     if (!tabs.length) continue;
-    const s = live.find(x => x.name === name && !map[x.id]);
+    // A grey "· ended" group belonged to a session that is gone; a new one with the same name must not get it.
+    const s = startup && !/ · ended$/.test(g.title || '') && live.find(x => x.name === name && !map[x.id]);
     if (s) {
       const keep = tabs.find(t => !isPlaceholder(t.url)) || tabs[0];
       map[s.id] = { tabId: keep.id, tabs: [...tabs.filter(t => t !== keep).map(t => t.id), keep.id], name: s.name, color: s.color };
@@ -477,14 +569,17 @@ async function command(m) {
     if (tab) await chrome.tabs.sendMessage(tab.tabId, { cmd: 'agentBusy', on: !!m.on }).catch(() => {});
     return { ok: true };
   }
-  if (video && !['state', 'recordStop', 'setStep', 'askHost'].includes(m.cmd)) {
+  if (video && !['state', 'recordStop', 'setStep', 'askHost', 'tabs'].includes(m.cmd)) {
     const who = video.session && video.session !== m.session ? ` by ${(await sessionTabs())[video.session]?.name || 'another session'}` : '';
     return { ok: false, error: `a video is being recorded${who}; ${who ? 'wait until it is done' : 'wait for videoReady or call recordStop'}` };
   }
   switch (m.cmd) {
     // The bridge asks for the session's tab before each browser_* call.
     case 'sessionTab': {
-      const t = await sessionTab(m);
+      // Playwright cannot act in a background tab (it waits for animation frames, which Chrome pauses
+      // there), so a tab that opened on top is put behind the working tab again for the call.
+      let t = await sessionTab(m);
+      if (t && !t.active) t = await chrome.tabs.update(t.id, { active: true }).catch(() => t);
       return t ? { ok: true, tabId: t.id, url: t.pendingUrl || t.url } : { ok: false, error: 'could not open a tab for this session' };
     }
     // The bridge asks on behalf of the browser_* tools; it records the grant itself.
@@ -500,6 +595,7 @@ async function command(m) {
       const e = await permitTour(m.tour, 'record a video there', tab);
       return e ? { ok: false, error: e } : recordTour(m, tab);
     }
+    case 'tabs': return sessionTabsSeen(m, await sessionTabsCmd(m));
     case 'recordStop':
       if (video?.session && m.session && video.session !== m.session) return { ok: false, error: 'this video belongs to another session' };
       return recordStop(m);
@@ -537,7 +633,7 @@ async function command(m) {
       const tab = await tabFor(m, { show: true });
       const e = await permitTour(m.tour, 'run a tour there', tab);
       if (e) return { ok: false, error: e };
-      await S.set({ tour: validTour(m.tour), tourIndex: -1, tourRunning: false, tourSession: m.session || '', tourTab: tab?.id ?? null });
+      await S.set({ tour: validTour(m.tour), tourIndex: -1, tourRunning: false, tourSession: m.session || '', tourTab: tab?.id ?? null, tourHome: tab?.id ?? null, tourStepTabs: {}, tourStack: [] });
       gotoStep(m.start ?? 0, { replay: true });
       return { ok: true, steps: m.tour.steps.length };
     }
@@ -553,7 +649,7 @@ async function command(m) {
       const { tourSession: ts = '', tourTab: tt, tourThrottled } = await S.get(['tourSession', 'tourTab', 'tourThrottled']);
       await clearSessionHighlights(ts);
       if (tourThrottled && tt != null) await throttleOff(tt);
-      await S.set({ tour: null, tourIndex: -1, explanation: '', step: '', tourRunning: false, tourSession: '', tourTab: null, tourThrottled: false });
+      await S.set({ tour: null, tourIndex: -1, explanation: '', step: '', tourRunning: false, tourSession: '', tourTab: null, tourHome: null, tourStepTabs: {}, tourStack: [], tourThrottled: false });
       return { ok: true };
     }
     // The agent asks the user to show something: the panel shows the prompt and recording starts.
@@ -639,7 +735,7 @@ function validTour(tour) {
 let running = false;
 
 async function gotoStep(index, { replay }) {
-  const { tour, tourSession: owner = '', tourTab } = await S.get(['tour', 'tourSession', 'tourTab']);
+  const { tour, tourSession: owner = '', tourTab, tourHome, tourStepTabs = {}, tourStack = [] } = await S.get(['tour', 'tourSession', 'tourTab', 'tourHome', 'tourStepTabs', 'tourStack']);
   if (!tour) return { ok: false, error: 'no tour loaded' };
   if (running) return { ok: false, error: 'a step is still running' };
   const steps = tour.steps;
@@ -658,7 +754,7 @@ async function gotoStep(index, { replay }) {
       await enqueue({ type: 'agentStep', step: index, title: step.title }, owner);
       return { ok: true, step: index, agent: true };
     }
-    const tab = tourTab != null ? await chrome.tabs.get(tourTab).catch(() => null) : await activeTab();
+    let tab = tourTab != null ? await chrome.tabs.get(tourTab).catch(() => null) : await activeTab();
     if (!tab) throw new Error('the tour\'s tab was closed');
     // Going back (or jumping) replays from the last navigation, so the page state matches the step.
     // `network` / `cpu` throttle the tour's tab from this step on ("off" / 1 end it); so does ending the tour.
@@ -670,11 +766,22 @@ async function gotoStep(index, { replay }) {
     }
     let from = index;
     if (replay) while (from > 0 && !steps[from].url) from--;
+    // A step can move the tour to a tab it opened (waitForTab) and back (backToTab); each step remembers
+    // the tab it started on, so Back replays on the right one.
+    const ctx = { home: tourHome ?? tab.id, stack: [] };
+    if (replay && tourStepTabs[from]) {
+      const t = await chrome.tabs.get(tourStepTabs[from].tab).catch(() => null);
+      if (t) { tab = t; ctx.stack = [...tourStepTabs[from].stack]; }
+      else { tab = (await chrome.tabs.get(ctx.home).catch(() => null)) || tab; }
+    } else ctx.stack = [...tourStack];
     for (let i = from; i <= index; i++) {
       const s = steps[i];
+      tourStepTabs[i] = { tab: tab.id, stack: [...ctx.stack] };
       if (s.url && i === from) await navigate(tab.id, s.url);
-      if (s.actions?.length) await run(tab.id, s.actions, i);
+      if (s.actions?.length) tab = await chrome.tabs.get(await run(tab.id, s.actions, i, false, ctx));
     }
+    await S.set({ tourTab: tab.id, tourStepTabs, tourStack: ctx.stack });
+    if (!tab.active) await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
     for (const [i, h] of (step.highlights || []).entries()) {
       await run(tab.id, [{ waitFor: h.selector, text: h.text, after: 0 }], index);
       const r = await highlight({ item: { id: h.id || 'h' + i, ...h }, keep: i > 0, tab: await chrome.tabs.get(tab.id), session: owner });
@@ -694,13 +801,35 @@ async function gotoStep(index, { replay }) {
 
 // One action per message: an action that loads a new page closes the message channel, which then
 // counts as done once the new page is ready.
-async function run(tabId, actions, i, cinematic = false) {
-  ownNav.set(tabId, Date.now() + 600000);
-  try { await runNow(tabId, actions, i, cinematic); } finally { ownNav.set(tabId, Date.now() + 1500); }
+// Scripted clicks are untrusted, so Chrome's popup blocker would drop a window.open they trigger, unlike a
+// person's click. Tours and videos run on allowed hosts only; popups are allowed there for their steps.
+const popupsAllowed = new Set();
+async function allowPopups(tabId) {
+  try {
+    const u = new URL((await chrome.tabs.get(tabId)).url);
+    if (!/^https?:$/.test(u.protocol) || popupsAllowed.has(u.origin)) return;
+    await chrome.contentSettings.popups.set({ primaryPattern: `${u.protocol}//${u.hostname}/*`, setting: 'allow', scope: 'regular' });
+    popupsAllowed.add(u.origin);
+  } catch {}
 }
 
-async function runNow(tabId, actions, i, cinematic) {
+// Returns the tab the actions ended on (tours can move to a tab a step opened).
+async function run(tabId, actions, i, cinematic = false, ctx = null) {
+  ownNav.set(tabId, Date.now() + 600000);
+  try { return await runNow(tabId, actions, i, cinematic, ctx); } finally { ownNav.set(tabId, Date.now() + 1500); }
+}
+
+async function runNow(tabId, actions, i, cinematic, ctx) {
+  let prevStart = Date.now();
+  await allowPopups(tabId);
   for (const a of actions) {
+    if (a.waitForTab != null || a.backToTab != null) {
+      if (!ctx) throw new Error(`step ${i + 1}: waitForTab and backToTab work in tours only; a video records one tab`);
+      tabId = a.waitForTab != null ? await tourWaitForTab(tabId, prevStart, +a.waitForTab || 10000, i, ctx) : await tourBackToTab(tabId, a, i, ctx);
+      ownNav.set(tabId, Date.now() + 600000);
+      continue;
+    }
+    prevStart = Date.now();
     let r;
     try { r = await chrome.tabs.sendMessage(tabId, { cmd: 'runActions', actions: [a], cinematic, accent: cinematic ? video?.stage?.branding?.accent : '' }); }
     catch (e) {
@@ -712,6 +841,32 @@ async function runNow(tabId, actions, i, cinematic) {
     const t = await chrome.tabs.get(tabId);
     if (t.status === 'loading') await pageReady(tabId);
   }
+  return tabId;
+}
+
+// { waitForTab: ms }: the previous action opened a tab or popup; the tour goes on there.
+async function tourWaitForTab(fromId, since, ms, i, ctx) {
+  const t = await waitForTabFrom(fromId, since, ms);
+  if (!t) throw new Error(`step ${i + 1}: no new tab opened within ${ms} ms`);
+  let url = '';
+  for (let k = 0; k < 50 && !/^https?:/.test(url); k++) { url = (await chrome.tabs.get(t.id).catch(() => null))?.url || ''; if (!/^https?:/.test(url)) await new Promise(r => setTimeout(r, 200)); }
+  const denied = await permit(url || t.pendingUrl || 'about:blank', 'continue the tour there');
+  if (denied) throw new Error(`step ${i + 1}: ${denied}`);
+  await pageReady(t.id);
+  ctx.stack.push(fromId);
+  await chrome.tabs.update(t.id, { active: true }).catch(() => {});
+  return t.id;
+}
+
+// { backToTab: 'previous' | 'home', close?: true }: back to the tab before the last waitForTab, or the tour's
+// first tab; close: true closes the tab it leaves.
+async function tourBackToTab(fromId, a, i, ctx) {
+  const target = a.backToTab === 'home' ? ctx.home : ctx.stack.pop() ?? ctx.home;
+  if (a.backToTab === 'home') ctx.stack = [];
+  if (!(await chrome.tabs.get(target).catch(() => null))) throw new Error(`step ${i + 1}: the tab to go back to was closed`);
+  if (a.close && fromId !== target) await chrome.tabs.remove(fromId).catch(() => {});
+  await chrome.tabs.update(target, { active: true }).catch(() => {});
+  return target;
 }
 
 async function pageReady(tabId, ms = 120000) {
@@ -1388,8 +1543,9 @@ async function handle(m, sender) {
     // Messages and Next/Back go to the session whose tab is in front.
     case 'action': {
       const front = await activeTab();
-      const { tourIndex = -1, tour, tourTab, tourSession = '' } = await S.get(['tourIndex', 'tour', 'tourTab', 'tourSession']);
-      const onTour = tour && (tourTab == null || tourTab === front?.id);
+      const { tourIndex = -1, tour, tourTab, tourHome, tourSession = '' } = await S.get(['tourIndex', 'tour', 'tourTab', 'tourHome', 'tourSession']);
+      // While the tour works in a popup window, the panel stays with the tour's first tab.
+      const onTour = tour && (tourTab == null || tourTab === front?.id || tourHome === front?.id);
       if (onTour) { const local = await tourAction(m.action); if (local) return local; }
       const to = onTour ? tourSession : front ? await sessionOfTab(front.id) : '';
       return enqueue(onTour ? { ...m.action, step: tourIndex } : m.action, to);
@@ -1501,7 +1657,7 @@ async function userEvent(tabId, event) {
 }
 const userNav = (kind, { tabId, frameId, url, transitionType }) => {
   if (frameId !== 0 || (ownNav.get(tabId) || 0) > Date.now() || !/^https?:/.test(url)) return;
-  if (kind === 'navigate' && (freshTabs.get(tabId) || 0) > Date.now()) { freshTabs.delete(tabId); return; }
+  if (kind === 'navigate' && (freshTabs.get(tabId) || 0) > Date.now()) return;
   if (transitionType === 'auto_subframe') return;
   userEvent(tabId, { kind, url, ts: Date.now(), ...(transitionType && { how: transitionType }) });
 };

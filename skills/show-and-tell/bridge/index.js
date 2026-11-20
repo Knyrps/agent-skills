@@ -77,6 +77,9 @@ async function runCli() {
     case 'goto': return call('POST', '/cmd', { cmd: 'gotoStep', index: +positional[0] });
     case 'end': return call('POST', '/cmd', { cmd: 'endTour' });
     case 'request': return call('POST', '/cmd', { cmd: 'requestDemo', prompt: positional.join(' ') });
+    // tabs --session s [select <id> | wait [--timeout ms] [--select]]
+    case 'tabs': return call('POST', '/cmd', { cmd: 'tabs', session: opt('session'), action: positional[0] === 'select' ? 'select' : positional[0] === 'wait' ? 'waitForNew' : 'list',
+      id: positional[1] && +positional[1], timeoutMs: opt('timeout') && +opt('timeout') * 1000, select: rest.includes('--select') });
     // say --session s <text>; the text may also come on stdin (`say --session s -`).
     case 'say': {
       const text = positional[0] === '-' ? fs.readFileSync(0, 'utf8') : positional.join(' ');
@@ -133,7 +136,8 @@ async function runMcp() {
   // panel for this session, like the tools above.
   const driver = createDriver({ cdp: `http://127.0.0.1:${CDP_PORT}`, outputDir: path.join(DATA, 'playwright'),
     before: async () => {
-      if (!(await browserVersion())) await ensureBrowser();
+      // Also right after a browser (re)start: wait until the extension is connected again.
+      await ensureBrowser();
       await call('POST', '/claim', { session: SESSION, label: LABEL }).catch(() => {});
     },
     // Hosts that are not allowed are put to the user in the side panel; the call waits for the answer.
@@ -150,7 +154,9 @@ async function runMcp() {
     url: { type: 'string', description: 'Navigate here first; omit to continue on the current page' },
     actions: { type: 'array', items: { type: 'object' }, description: '{click|fill|waitFor|hover|doubleClick|rightClick|longPress|swipe|drag|scroll: css, '
       + 'text?, value? (fill), to? (drag/swipe end css), by? (drag offset [dx, dy] in px or "40%" of in), direction? (swipe), ms? (longPress/hover), touch? (finger instead of cursor), after?: ms}, {scrollBy: px|{x,y}, in?: css}, '
-      + '{press: key, on?: css} or {wait: ms}. In a video a drawn cursor or finger performs them visibly.' },
+      + '{press: key, on?: css} or {wait: ms}. In a video a drawn cursor or finger performs them visibly. Tours only: {waitForTab: ms} after an action '
+      + 'that opens a tab or popup moves the tour there; {backToTab: "previous"|"home", close?: true} returns (close: closes the tab it leaves). '
+      + 'A video stops with videoError when a step opens a tab.' },
     section: { type: 'string', description: 'Video only: a section name; a section slide appears when it changes' },
     network: { type: 'string', enum: [...NETWORK_PRESETS, 'off'], description: 'Throttle the network from this step on, like DevTools; "off" ends it (so does the end of the tour or video)' },
     cpu: { type: 'number', description: 'CPU slowdown factor from this step on, like DevTools (4, 6, …); 1 ends it' },
@@ -190,6 +196,17 @@ async function runMcp() {
     { name: 'stop_recording', description: 'Stop the video being recorded. discard=true deletes it; otherwise the part recorded so far is '
       + 'kept and delivered as videoReady with partial: true.',
     inputSchema: { type: 'object', properties: { discard: { type: 'boolean' } } } },
+    { name: 'tabs', description: 'Your tabs in the shared browser: the one you started in plus every tab or popup window opened from them (by '
+      + 'your clicks, the user or the page). Your browser_* calls, highlights and tours act on the working tab only; a new tab never '
+      + 'takes over by itself, you are only told. action list (default) shows them; select { id } makes one the working tab; '
+      + 'waitForNew { timeoutMs, select? } waits for a tab opened since your previous browser call began (e.g. by the click that '
+      + 'opened a popup) and returns it, selecting it with select: true. Go back with select and the earlier id.',
+    inputSchema: { type: 'object', properties: {
+      action: { type: 'string', enum: ['list', 'select', 'waitForNew'] },
+      id: { type: 'number', description: 'select: the tab id from list or from the new-tab note' },
+      timeoutMs: { type: 'number', description: 'waitForNew: how long to wait (default 10000, max 60000)' },
+      select: { type: 'boolean', description: 'waitForNew: also make the new tab the working tab' },
+    } } },
     { name: 'say', description: 'Reply to the user in the show-and-tell side panel\'s conversation (Markdown). Use it to answer '
       + 'what the user sent from the panel (messages, marks, recordings): they are looking at the panel, not at your chat.',
     inputSchema: { type: 'object', required: ['text'], properties: { text: { type: 'string', description: 'Markdown: paragraphs, lists, **bold**, `code`, code blocks, links' } } } },
@@ -282,6 +299,7 @@ async function runMcp() {
           pace: a.pace, captions: a.captions, cards: a.cards, zoom: a.zoom, hidpi: a.hidpi, out: a.out }));
         case 'stop_recording': return done(await cmd({ cmd: 'recordStop', discard: !!a.discard }));
         case 'request_demo': return done(await cmd({ cmd: 'requestDemo', prompt: String(a.prompt || '') }));
+        case 'tabs': return done(await cmd({ cmd: 'tabs', action: a.action || 'list', id: a.id, timeoutMs: a.timeoutMs, select: !!a.select }));
         case 'say': return done(await call('POST', '/say', { session: SESSION, label: LABEL, text: String(a.text || '') }));
         case 'goto_step': return done(await cmd({ cmd: 'gotoStep', index: +a.index }));
         case 'end_tour': return done(await cmd({ cmd: 'endTour' }));

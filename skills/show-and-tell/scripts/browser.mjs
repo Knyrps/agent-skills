@@ -91,10 +91,10 @@ async function start() {
 async function openLab() {
   const pages = (await getJson(`${BASE}/json/list`)).filter(t => t.type === 'page');
   const offline = `chrome-extension://${EXT_ID}/lab-offline.html`;
-  if (pages.some(t => t.url.startsWith(LAB_URL) || t.url.startsWith(offline))) return;
+  const hasLab = pages.some(t => t.url.startsWith(LAB_URL) || t.url.startsWith(offline));
   const browser = await cdpSession((await version()).webSocketDebuggerUrl);
   try {
-    await browser.send('Target.createTarget', { url: LAB_URL });
+    if (!hasLab) await browser.send('Target.createTarget', { url: LAB_URL });
     for (const t of pages.filter(t => /^chrome:\/\/new-?tab/.test(t.url))) await browser.send('Target.closeTarget', { targetId: t.id }).catch(() => {});
   } finally { browser.close(); }
 }

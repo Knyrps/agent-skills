@@ -16,7 +16,7 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
 - **Browser**: Chrome for Testing on its own profile, CDP `127.0.0.1:9334`, extension preloaded.
   `start_browser` launches it (idempotent) and opens the panel; it outlives the session.
 - **show-and-tell MCP**: `start_browser`, `status`, `highlight`, `clear_highlights`, `hide_overlays`, `get_queue`,
-  `wait_for_action`, `say`, `request_demo`, `throttle`, `set_step`, `load_tour`, `goto_step`, `end_tour`, `record_tour`,
+  `wait_for_action`, `say`, `tabs`, `request_demo`, `throttle`, `set_step`, `load_tour`, `goto_step`, `end_tour`, `record_tour`,
   `stop_recording`. Each also exists as a CLI: `node "<skill>/bridge" <start|status|highlight <css> [--label t]
   [--gesture g] [--direction d] [--to css] [--url u] [--style s] [--keep]|clear|hide|show|queue [--recent]|wait|cancel|
   say --session <id> <text|->|request <prompt>|throttle <preset|off> [--cpu n]|step <label>|tour <file>|goto <n>|end|
@@ -33,9 +33,17 @@ Several agent sessions can share the browser. Each works in its own tab, grouped
 (`status` → `you`, e.g. "app 2" when another session runs in the same folder). Everything you do (`browser_*`,
 highlights, tours, `request_demo`, videos) happens in that tab; there is no switching to other tabs
 (`browser_tabs` is not offered). A tab opened from yours (a link with `target="_blank"`, `window.open`, a
-popup window; by your click, the user or the page) joins your group and becomes your working tab: your calls
-act there, and your next result says so ("a new tab opened …"). When it closes you are back on the tab it
-came from ("your working tab was closed …"). Showing something brings your tab to the front. What the user sends while
+popup window; by your click, the user or the page) joins your tabs, and your next result says so ("a new tab
+opened … (tab 123)"). Your calls stay on your working tab until you switch, so a running sequence of calls is
+never moved; decide whether the new tab matters:
+- `tabs()` lists your tabs; `tabs({ action: "select", id })` makes one the working tab; select the earlier id
+  to go back.
+- A flow that opens a popup on purpose: click, then `tabs({ action: "waitForNew", select: true })` (it finds a
+  tab your last call opened even if it appeared before), act there, then select the original tab again.
+- If your working tab closes, your next browser call fails until you select another tab.
+- Tours: `{ waitForTab: ms }` after the action that opens a tab moves the tour there; `{ backToTab:
+  "previous" | "home", close?: true }` returns. Videos record one tab: a step that opens one ends the video
+  with `videoError`; open the page with the step's `url` instead. Showing something brings your tab to the front. What the user sends while
 your tab is in front comes to you. Only one tour and one video run at a time: if another session's is
 running, you get a busy error; wait or tell the user.
 

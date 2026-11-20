@@ -28,7 +28,7 @@ async function frontSession() {
 
 async function render() {
   const s = await S.get(['step', 'steps', 'waiting', 'listener', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning',
-    'tourTab', 'explanation', 'video']);
+    'tourTab', 'tourHome', 'explanation', 'video']);
   const pending = (s.outbox || []).length;
   $('conn-text').textContent = (s.connected ? 'Connected' : 'Offline') + (pending ? ` · ${pending} pending` : '');
   $('conn').classList.toggle('ok', !!s.connected);
@@ -42,7 +42,7 @@ async function render() {
   $('listen').classList.toggle('on', !!(s.connected && listening));
   for (const e of [$('listen'), $('avatar')]) e.style.setProperty('--session', me ? GROUP[me.color] || '' : '');
   $('q').placeholder = `Message ${me?.name || s.listener || 'the agent'}`;
-  const onTour = !!s.tour && (s.tourTab == null || s.tourTab === frontTabId);
+  const onTour = !!s.tour && (s.tourTab == null || s.tourTab === frontTabId || s.tourHome === frontTabId);
   const label = s.video || onTour ? s.step : (s.steps || {})[me?.id || ''] || '';
   $('tour').hidden = !(onTour || label || s.video);
   $('step').textContent = label || '—';

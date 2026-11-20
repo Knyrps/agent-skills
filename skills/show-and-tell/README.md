@@ -18,8 +18,8 @@ share one browser window:
   acting on a state that no longer holds.
 - **Several agents at once**: each session works in its own named, coloured tab group, and the panel talks
   to the session whose tab is in front. Tabs opened from a session's tab (links, `window.open`, forms, popup
-  windows) belong to it: they join its group, the agent's calls move to the newest one, and the agent is
-  told. When a session's MCP process has exited, its tab group turns grey
+  windows) belong to it: they join its group and the agent is told, but its calls stay on its working tab until it
+  switches with the `tabs` tool. Tours can follow a tab a step opens (`waitForTab`, `backToTab`). When a session's MCP process has exited, its tab group turns grey
   ("… · ended") and closes 15 minutes later (kept, ungrouped, if you looked at it). Sessions that are
   only quiet are never touched.
 - **Guided tours** with Back / Next, and **review videos** (MP4 with captions, chapter labels, progress bar,
@@ -176,7 +176,7 @@ By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo br
 | Window lock | During a video, resize or maximize the window | It snaps back to the recording size at once; the panel says the size is locked until the video is done. The video keeps its size |
 | Reply in the panel | Send a message from the panel to a listening session; it answers with `say` (or `node <skill>/bridge say --session <id> "**Hi**"`) | "Thinking…" under your message, then the reply rendered as Markdown (raw HTML is shown as text). Without a reply, after two minutes it notes the answer may be in the agent chat |
 | Your input in its tab | While an agent works in its tab, click and type there yourself, then let it call any show-and-tell tool | Its result starts with "The user worked in your browser tab …" listing your clicks, edits (passwords masked) and navigations, not the agent's own input. A field the agent typed into and you only left is not listed |
-| New tabs | In an agent's tab, open a link in a new tab (or let the page call `window.open`), then let the agent call any show-and-tell tool; close the new tab and let it call again | The tab joins the agent's group; the result says "a new tab opened … Your calls now act on it" and acts there. After closing: "your working tab was closed; your calls act on … again". A popup window belongs to the agent too (no group: popup windows can't hold one) |
+| New tabs | In an agent's tab, open a link in a new tab (or let the page call `window.open`), then let the agent call any show-and-tell tool; close the new tab and let it call again | The tab joins the agent's group; the result says "a new tab opened … (tab N). Your calls still act on your working tab", and they do until `tabs({ action: "select", id: N })`. Closing the working tab makes the next browser call fail until another is selected. A popup window belongs to the agent too (no group: popup windows can't hold one). A video step that opens a tab ends the video with `videoError` |
 | Ended session | End an agent session (close its chat or the MCP process) | Within about 15 s its tab group turns grey, "<name> · ended"; a placeholder tab closes at once. 15 minutes later the tab closes, or is only ungrouped if you opened it meanwhile or it is in front. A quiet but running session is never touched |
 | Browser restart | Restart the demo browser while a session runs | Chrome restores the group; it goes back to its running session. Groups of sessions that are gone are ungrouped |
 
