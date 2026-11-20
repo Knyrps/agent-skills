@@ -47,16 +47,41 @@ function fail(error) {
   try { if (rec?.state !== 'inactive') rec.stop(); } catch {}
 }
 
+// The file records one generated track; frames come from the captured tab of the moment, so the video can
+// move to a tab or popup a step opened (switch) without starting a new file. Frames get a steady clock of
+// their own, so a switch leaves no jump. A popup of another size is scaled into the frame (letterboxed).
+let gen = null, writer = null, feeding = 0, source = null, constraints = null;
+const capture = streamId => navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: {
+  chromeMediaSource: 'tab', chromeMediaSourceId: streamId, ...constraints } } });
+async function feed(s) {
+  const token = ++feeding, [track] = s.getVideoTracks();
+  track.addEventListener('ended', () => { if (token === feeding && !ending) fail('the tab capture ended (tab closed or capture taken over)'); });
+  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  const old = source; source = s;
+  (async () => {
+    for (;;) {
+      const { value: frame, done } = await reader.read().catch(() => ({ done: true }));
+      if (done) return;
+      if (token !== feeding) { frame.close(); reader.cancel().catch(() => {}); return; }
+      if (old) { old.getTracks().forEach(t => t.stop()); }
+      const out = new VideoFrame(frame, { timestamp: Math.round(performance.now() * 1000) });
+      frame.close();
+      try { await writer.write(out); } catch { out.close(); return; }
+    }
+  })();
+  return track;
+}
+
 async function start(m) {
   const { bridgeUrl } = await loadConfig();
   base = bridgeUrl.replace(/^ws/, 'http').replace(/\/ext$/, '');
-  stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: {
-    chromeMediaSource: 'tab', chromeMediaSourceId: m.streamId,
-    minWidth: m.width, maxWidth: m.width, minHeight: m.height, maxHeight: m.height,
-    maxFrameRate: m.fps, minFrameRate: m.minFps ?? m.fps,
-  } } });
-  const [track] = stream.getVideoTracks();
-  track.addEventListener('ended', () => fail('the tab capture ended (tab closed or capture taken over)'));
+  constraints = { minWidth: m.width, maxWidth: m.width, minHeight: m.height, maxHeight: m.height, maxFrameRate: m.fps, minFrameRate: m.minFps ?? m.fps };
+  gen = new MediaStreamTrackGenerator({ kind: 'video' });
+  writer = gen.writable.getWriter();
+  stream = new MediaStream([gen]);
+  const first = await capture(m.streamId);
+  const capTrack = await feed(first);
+  const track = gen;
   const mimeType = (m.mimeType && MediaRecorder.isTypeSupported(m.mimeType) && m.mimeType)
     || TYPES.find(t => MediaRecorder.isTypeSupported(t));
   if (!mimeType) throw new Error('this browser cannot record video (no MP4 or WebM encoder)');
@@ -74,7 +99,7 @@ async function start(m) {
   rec.start(m.timeslice ?? 1000);
   await begun;
   heartbeat = setInterval(() => post({ type: 'tick', t: now() }), 1000);
-  const s = track.getSettings();
+  const s = capTrack.getSettings();
   return { id, mimeType, ext, width: s.width, height: s.height, frameRate: s.frameRate };
 }
 
@@ -87,6 +112,8 @@ async function stop({ meta = {}, discard = false } = {}) {
     rec.stop();
     await Promise.race([done, sleep(10000)]);
   }
+  feeding++;
+  source?.getTracks().forEach(t => t.stop());
   stream?.getTracks().forEach(t => t.stop());
   await upload;
   if (!id) return { ok: true, discarded: true };
@@ -108,6 +135,8 @@ async function onCommand(m) {
     case 'resume':
       if (rec?.state === 'paused') { rec.resume(); pausedTotal += performance.now() - pausedAt; pausedAt = 0; }
       return { t: now() };
+    // Go on recording another tab (a tab or popup a step opened, or back).
+    case 'switch': { await feed(await capture(m.streamId)); return { t: now() }; }
     case 'stop': return stop(m);
     default: throw new Error('unknown command ' + m.cmd);
   }

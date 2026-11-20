@@ -44,6 +44,10 @@ Page loads are cut out. The real mouse and keyboard are blocked while recording;
 | `{ longPress: css, ms? }` | finger hold with a filling ring |
 | `{ drag: css, to: css }` | press, move with a trail, drop (HTML5 drag events when draggable) |
 | `{ drag: css, by: [dx, dy], in?: css }` | drag by an offset, e.g. a slider handle; `"40%"` is relative to the `in` element (default: the parent) |
+| `{ waitForTab: ms }` | after an action that opens a tab or popup window: the video moves there, and a Chrome-style tab with the page's icon and title slides in at the top ("New tab" / "Popup window"). A popup of another size is letterboxed |
+| `{ backToTab: "previous" \| "home", close?: true }` | back to the tab before (or the first one), with a "Back to" tab chip; `close` closes the tab it leaves |
+
+A step that opens a tab without `waitForTab` ends the video with `videoError`: it would happen off camera.
 | `{ waitFor: css, text? }`, `{ wait: ms }` | waits, nothing shown |
 
 Every action takes `after` (ms of pause afterwards); clicks and drags take `touch: true` to show a finger instead of the cursor (phone-sized videos). Actions use synthetic events: CSS `:hover` styles

@@ -5,6 +5,10 @@ const $ = id => document.getElementById(id);
 const S = chrome.storage.session;
 let tabUrl = '', toastTimer = 0, tabAllowed = false;
 const steps = n => { n = Math.max(0, n); return `${n} step${n === 1 ? '' : 's'}`; };
+// The user's own steps (not the start or the tab markers), plus how many tabs a recording spans.
+const MARKERS = ['newTab', 'switchTab', 'closeTab'];
+const recLabel = r => steps(r.steps.filter(s => !MARKERS.includes(s.type)).length - 2)
+  + ((r.tabs?.length || r.tabs || 1) > 1 ? ` · ${r.tabs.length || r.tabs} tabs` : '');
 
 // The open port tells the worker (and through it the agent) that the panel is visible.
 (function connectPort() {
@@ -276,10 +280,10 @@ async function renderRecording() {
   const on = !!recording;
   $('rec').classList.toggle('recording', on);
   // setViewport and the starting page are not the user's steps.
-  $('rec-label').textContent = on ? `Stop · ${steps(recording.steps.length - 2)}` : 'Record';
+  $('rec-label').textContent = on ? `Stop · ${recLabel(recording)}` : 'Record';
   $('rec').disabled = !on && (!tabAllowed || !!recordingDraft);
   $('rec-chip-text').hidden = !recordingDraft;
-  if (recordingDraft) $('rec-chip-text').label = `Recording · ${steps(recordingDraft.steps.length - 2)}`;
+  if (recordingDraft) $('rec-chip-text').label = `Recording · ${recLabel(recordingDraft)}`;
   $('attachments').hidden = !annotationDraft && !recordingDraft;
   $('rec-discard').hidden = !on;
   canSend();

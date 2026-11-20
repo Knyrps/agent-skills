@@ -164,10 +164,12 @@ const chatEdit = fn => serial(async () => {
   await S.set({ chats });
 });
 
+// The user's own steps, without the setViewport/navigate it starts with and the tab markers.
+const recSteps = (steps = []) => Math.max(0, steps.filter(s => !['newTab', 'switchTab', 'closeTab'].includes(s.type)).length - 2);
 // An annotation and a recording sent with one message arrive as two actions: one bubble.
 function chatUser(to, id, a) {
   const att = a.type === 'annotation' ? `Annotation · ${a.annotations?.length || 0}`
-    : a.type === 'recording' ? `Recording · ${Math.max(0, (a.recording?.steps?.length || 2) - 2)} steps` : '';
+    : a.type === 'recording' ? `Recording · ${recSteps(a.recording?.steps)} steps${a.recording?.tabs ? ` · ${a.recording.tabs} tabs` : ''}` : '';
   return chatEdit(chats => {
     const list = chats[to || ''] ||= [];
     const last = list[list.length - 1];
@@ -318,9 +320,7 @@ async function videoSawTab(tab) {
   if (!v || v.finishing || tab.id === v.tabId) return;
   const rec = await chrome.tabs.get(v.tabId).catch(() => null);
   if (tab.openerTabId !== v.tabId && !(rec && rec.groupId >= 0 && tab.groupId === rec.groupId)) return;
-  v.failure ||= `step ${v.step + 1} opened a new tab or popup window (${tab.pendingUrl || tab.url || 'about:blank'}); a video records one tab, `
-    + 'so steps must not open tabs. Open the page with the step\'s url instead';
-  v.abort = true;
+  v.opened?.add(tab.id); // checked after the step: followed with waitForTab, or an error
 }
 
 chrome.tabs.onCreated.addListener(tab => {
@@ -824,7 +824,7 @@ async function runNow(tabId, actions, i, cinematic, ctx) {
   await allowPopups(tabId);
   for (const a of actions) {
     if (a.waitForTab != null || a.backToTab != null) {
-      if (!ctx) throw new Error(`step ${i + 1}: waitForTab and backToTab work in tours only; a video records one tab`);
+      if (!ctx) throw new Error(`step ${i + 1}: waitForTab and backToTab go in a step's actions`);
       tabId = a.waitForTab != null ? await tourWaitForTab(tabId, prevStart, +a.waitForTab || 10000, i, ctx) : await tourBackToTab(tabId, a, i, ctx);
       ownNav.set(tabId, Date.now() + 600000);
       continue;
@@ -844,6 +844,17 @@ async function runNow(tabId, actions, i, cinematic, ctx) {
   return tabId;
 }
 
+// The video goes on in another tab: the recorder switches its source, the stage moves along, and a tab chip
+// with the page's real title says where the viewer is now.
+async function videoSwitch(v, tabId, kind) {
+  v.followed.add(tabId); v.visited.add(tabId);
+  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  await videoCmd({ cmd: 'switch', streamId });
+  v.tabId = tabId;
+  const t = await chrome.tabs.get(tabId);
+  await stage(v, { tabChip: { kind, title: t.title || '', favicon: t.favIconUrl || '', url: t.url, at: Date.now() } });
+}
+
 // { waitForTab: ms }: the previous action opened a tab or popup; the tour goes on there.
 async function tourWaitForTab(fromId, since, ms, i, ctx) {
   const t = await waitForTabFrom(fromId, since, ms);
@@ -855,6 +866,10 @@ async function tourWaitForTab(fromId, since, ms, i, ctx) {
   await pageReady(t.id);
   ctx.stack.push(fromId);
   await chrome.tabs.update(t.id, { active: true }).catch(() => {});
+  if (ctx.video) {
+    const win = await chrome.windows.get(t.windowId).catch(() => null);
+    await videoSwitch(ctx.video, t.id, win?.type === 'popup' ? 'Popup window' : 'New tab');
+  }
   return t.id;
 }
 
@@ -864,8 +879,10 @@ async function tourBackToTab(fromId, a, i, ctx) {
   const target = a.backToTab === 'home' ? ctx.home : ctx.stack.pop() ?? ctx.home;
   if (a.backToTab === 'home') ctx.stack = [];
   if (!(await chrome.tabs.get(target).catch(() => null))) throw new Error(`step ${i + 1}: the tab to go back to was closed`);
-  if (a.close && fromId !== target) await chrome.tabs.remove(fromId).catch(() => {});
   await chrome.tabs.update(target, { active: true }).catch(() => {});
+  // A video switches its capture first: closing the tab it records would end the recording.
+  if (ctx.video) await videoSwitch(ctx.video, target, 'Back to');
+  if (a.close && fromId !== target) await chrome.tabs.remove(fromId).catch(() => {});
   return target;
 }
 
@@ -1359,6 +1376,9 @@ async function logoData(file) {
 
 async function runVideo(v) {
   const { tour, opts } = v, steps = tour.steps, pace = opts.pace;
+  // The video can move to tabs and popups a step opens (waitForTab) and back (backToTab).
+  const vctx = { home: v.tabId, stack: [], video: v };
+  v.opened = new Set(); v.followed = new Set(); v.visited = new Set([v.tabId]);
   const chapters = [], cues = [];
   const shown = steps.filter(s => s.video !== false);
   const sections = [...new Set(shown.map(s => s.section).filter(Boolean))];
@@ -1429,7 +1449,14 @@ async function runVideo(v) {
           lower: { n, of: shown.length, title: s.title },
           caption: opts.captions ? timing.pages[0] || null : null });
       }
-      if (s.actions?.length) { await run(v.tabId, s.actions, i, v.onCamera); await settle(v); }
+      if (s.actions?.length) {
+        await run(v.tabId, s.actions, i, v.onCamera, vctx);
+        await settle(v);
+        // A tab the step opened but did not follow (waitForTab) would happen off camera.
+        const stray = [...v.opened].filter(id => !v.followed.has(id));
+        if (stray.length) throw new Error(`step ${i + 1} opened a new tab or popup window; follow it with { waitForTab: ms } after the action that opens it `
+          + `(the video moves there and shows the tab), or open the page with the step's url`);
+      }
       const tab = await chrome.tabs.get(v.tabId);
       for (const [k, h] of (s.highlights || []).entries()) {
         await run(v.tabId, [{ waitFor: h.selector, text: h.text, after: 0 }], i);
@@ -1485,7 +1512,7 @@ async function runVideo(v) {
     await enqueue({ type: 'videoError', step: v.step, error: 'finishing the video failed: ' + (e?.message || e) }, v.session);
   } finally {
     await chrome.offscreen.closeDocument().catch(() => {});
-    await chrome.tabs.sendMessage(v.tabId, { cmd: 'stage', end: true }).catch(() => {});
+    for (const id of v.visited || [v.tabId]) await chrome.tabs.sendMessage(id, { cmd: 'stage', end: true }).catch(() => {});
     await chrome.tabs.sendMessage(v.tabId, { cmd: 'pointerHide' }).catch(() => {});
     await S.set({ pointerAt: null });
     v.locked = null;
@@ -1554,8 +1581,8 @@ async function handle(m, sender) {
       if (!sender.tab) return {};
       await serial(async () => {
         const { recording } = await S.get('recording');
-        if (!recording || recording.tabId !== sender.tab.id) return;
-        recording.steps.push(m.step);
+        if (!recording || !recTabs(recording).includes(sender.tab.id)) return;
+        recPush(recording, sender.tab.id, m.step);
         await S.set({ recording });
       });
       return {};
@@ -1568,8 +1595,11 @@ async function handle(m, sender) {
         if (demoRequest) await enqueue({ type: 'demoDeclined', requestId: demoRequest.id, prompt: demoRequest.prompt }, demoRequest.session);
         return { ok: true, discarded: true };
       }
+      // Across tabs, every step says which tab (1 = where it started; newTab/switchTab/closeTab mark changes).
+      const multi = recTabs(recording).length > 1;
+      const steps = multi ? recording.steps.map(s => ('tab' in s ? s : { ...s, tab: 1 })) : recording.steps;
       await S.set({ recording: null, recordingDraft: { title: 'show-and-tell recording', startedAt: recording.startedAt,
-        duration: Date.now() - recording.startedAt, steps: recording.steps, tabId: recording.tabId } });
+        duration: Date.now() - recording.startedAt, steps, ...(multi && { tabs: recTabs(recording).length }), tabId: recording.tabId } });
       return { ok: true };
     }
     // Recordings and marks go to the session that asked for them, else to the one owning their tab.
@@ -1628,16 +1658,58 @@ async function startRecording(tab) {
   return { ok: true };
 }
 
+// ------------------------------------------------------------------ recording across tabs
+// A recording follows tabs and popup windows opened from a recorded tab (same group, or opened by it), so a
+// flow through a popup arrives whole. Tabs are numbered 1, 2, … in the order they joined; markers say when
+// one opened (newTab), when the user went on in another (switchTab) and when one closed (closeTab).
+const recTabs = r => r.tabs || [r.tabId];
+const recNo = (r, id) => recTabs(r).indexOf(id) + 1;
+function recPush(r, tabId, step, { quiet = false } = {}) {
+  const n = recNo(r, tabId), multi = recTabs(r).length > 1;
+  if (multi && !quiet && n !== (r.lastTab || 1)) r.steps.push({ type: 'switchTab', tab: n, ts: Date.now() });
+  if (!quiet) r.lastTab = n;
+  r.steps.push(multi ? { ...step, tab: n } : step);
+}
+async function recordingSawTab(tab) {
+  if (!tab?.id) return;
+  await serial(async () => {
+    const { recording: r } = await S.get('recording');
+    if (!r || recTabs(r).includes(tab.id)) return;
+    let opener = recTabs(r).includes(tab.openerTabId) ? tab.openerTabId : null;
+    if (!opener && tab.groupId >= 0) {
+      for (const id of recTabs(r)) if ((await chrome.tabs.get(id).catch(() => null))?.groupId === tab.groupId) { opener = id; break; }
+    }
+    if (!opener) return;
+    const win = await chrome.windows.get(tab.windowId).catch(() => null);
+    r.tabs = [...recTabs(r), tab.id];
+    r.steps.push({ type: 'newTab', tab: r.tabs.length, openedBy: recNo(r, opener), url: tab.pendingUrl || tab.url || '',
+      ...(win?.type === 'popup' && { popup: true }), ts: Date.now() });
+    await S.set({ recording: r });
+  });
+}
+chrome.tabs.onCreated.addListener(tab => { recordingSawTab(tab); });
+chrome.tabs.onUpdated.addListener((id, info, tab) => { if (info.groupId >= 0) recordingSawTab(tab); });
+chrome.tabs.onRemoved.addListener(tabId => serial(async () => {
+  const { recording: r } = await S.get('recording');
+  if (!r || !recTabs(r).includes(tabId) || recTabs(r).length < 2) return;
+  r.steps.push({ type: 'closeTab', tab: recNo(r, tabId), ts: Date.now() });
+  await S.set({ recording: r });
+}));
+
 // URL changes in the recorded tab: a full page load (`navigate`, a replay loads it) or an SPA route
 // change (`urlChange`, a replay gets there by repeating the click before it).
 function recordUrl(type, { tabId, frameId, url }) {
   if (frameId !== 0) return;
   serial(async () => {
     const { recording } = await S.get('recording');
-    if (!recording || recording.tabId !== tabId) return;
-    const last = recording.steps[recording.steps.length - 1];
+    if (!recording || !recTabs(recording).includes(tabId)) return;
+    const n = recNo(recording, tabId);
+    const last = recording.steps.findLast(s => (s.tab || 1) === n || recTabs(recording).length === 1);
     if (type === 'navigate' && last?.type === 'navigate' && last.url === url) return;
-    recording.steps.push({ type, url, ts: Date.now() });
+    // A new tab's first address goes into its newTab marker.
+    const opened = recording.steps.find(s => s.type === 'newTab' && s.tab === n);
+    if (opened && (!opened.url || opened.url === 'about:blank')) opened.url = url;
+    recPush(recording, tabId, { type, url, ts: Date.now() }, { quiet: true });
     await S.set({ recording });
   });
 }
@@ -1650,7 +1722,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener(d => recordUrl('urlChange
 async function userEvent(tabId, event) {
   if (video?.tabId === tabId) return;
   const { recording } = await S.get('recording');
-  if (recording?.tabId === tabId) return;
+  if (recording && recTabs(recording).includes(tabId)) return;
   // A tab no session owns is nobody's business; guessing a session would tell the wrong agent.
   const session = await sessionOfTab(tabId);
   if (session) send({ type: 'userEvent', session, event });

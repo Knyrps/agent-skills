@@ -41,9 +41,9 @@ never moved; decide whether the new tab matters:
 - A flow that opens a popup on purpose: click, then `tabs({ action: "waitForNew", select: true })` (it finds a
   tab your last call opened even if it appeared before), act there, then select the original tab again.
 - If your working tab closes, your next browser call fails until you select another tab.
-- Tours: `{ waitForTab: ms }` after the action that opens a tab moves the tour there; `{ backToTab:
-  "previous" | "home", close?: true }` returns. Videos record one tab: a step that opens one ends the video
-  with `videoError`; open the page with the step's `url` instead. Showing something brings your tab to the front. What the user sends while
+- Tours and videos: `{ waitForTab: ms }` after the action that opens a tab moves the tour there; `{ backToTab:
+  "previous" | "home", close?: true }` returns. A video follows along and shows a tab chip with the page's title at
+  the top; a video step that opens a tab without `waitForTab` ends with `videoError`. Showing something brings your tab to the front. What the user sends while
 your tab is in front comes to you. Only one tour and one video run at a time: if another session's is
 running, you get a busy error; wait or tell the user.
 
@@ -132,6 +132,9 @@ add one line at most ("Answered in the panel."). Questions asked in your chat ar
   and `prompt`). `recording.steps` follows Chrome DevTools Recorder's format (`navigate`, `click` with
   `button: "secondary"` and `modifiers`, `doubleClick`, `change`, `keyDown`, `scroll`) plus `longPress`,
   `swipe` and `urlChange`; element steps carry `selectors`, `tag`, `text`. `text` is the user's comment.
+  A recording follows tabs and popup windows opened from the recorded tab: then `recording.tabs` is their count,
+  every step has `tab` (1 = where it started), and `newTab { tab, openedBy, url, popup? }`, `switchTab { tab }` and
+  `closeTab { tab }` mark the changes; in a tour, `waitForTab`/`backToTab` replay them.
   `demoDeclined`: the user discarded your request.
 - Tour and video events: `next`/`back`, `agentStep`, `stepError`, `tourEnd`, `videoReady`, `videoError`,
   `videoDiscarded` (sections below).

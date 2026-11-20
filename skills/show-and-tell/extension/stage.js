@@ -42,7 +42,22 @@
     .list{display:grid;grid-template-columns:auto 1fr;gap:6px 20px;margin-top:8px;font:400 16px/24px ${FONT};letter-spacing:.5px}
     .list .tm{font-variant-numeric:tabular-nums;color:var(--md-sys-color-on-surface-variant)}
     .foot{margin-top:12px;padding-top:16px;border-top:1px solid var(--md-sys-color-outline-variant);align-self:stretch;
-      font:400 14px/20px ${FONT};letter-spacing:.25px;color:var(--md-sys-color-on-surface-variant)}`;
+      font:400 14px/20px ${FONT};letter-spacing:.25px;color:var(--md-sys-color-on-surface-variant)}
+    /* The video moved to another tab: a Chrome-style tab with the page's icon and title slides in at the top. */
+    .tabbar{position:fixed;top:0;left:50%;translate:-50% 0;display:flex;align-items:flex-end;gap:16px;padding:8px 24px 0;
+      border-radius:0 0 16px 16px;background:var(--md-sys-color-surface-container-highest);box-shadow:${EL2};
+      transition:opacity .35s cubic-bezier(.2,0,0,1),translate .35s cubic-bezier(.2,0,0,1)}
+    .tabbar.hide{translate:-50% -110%}
+    .tabbar .kind{align-self:center;padding-bottom:8px;font:500 12px/16px ${FONT};letter-spacing:.5px;color:var(--md-sys-color-primary)}
+    .tab{position:relative;display:flex;align-items:center;gap:8px;height:36px;max-width:min(380px,60vw);padding:0 12px;
+      border-radius:10px 10px 0 0;background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);font:500 14px/20px ${FONT};letter-spacing:.1px}
+    .tab::before,.tab::after{content:'';position:absolute;bottom:0;width:10px;height:10px}
+    .tab::before{left:-10px;background:radial-gradient(circle at 0 0,transparent 9.5px,var(--md-sys-color-surface) 10px)}
+    .tab::after{right:-10px;background:radial-gradient(circle at 100% 0,transparent 9.5px,var(--md-sys-color-surface) 10px)}
+    .tab .ic{flex:none;width:16px;height:16px;border-radius:2px}
+    .tab .ic.globe{fill:var(--md-sys-color-on-surface-variant)}
+    .tab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tab .x{flex:none;width:16px;height:16px;margin-left:4px;fill:var(--md-sys-color-on-surface-variant)}`;
 
   let host = null, root = null, els = {}, state = {};
   const tokens = fetch(chrome.runtime.getURL('vendor/m3-tokens.css')).then(r => r.text())
@@ -59,8 +74,8 @@
       root = host.attachShadow({ mode: 'closed' });
       root.innerHTML = `<style class="tokens"></style><style>${STYLES}</style><div class="shield"></div>
         <div class="bar"><div class="fill"></div></div>
-        <div class="cap hide"><div class="ch"></div><div class="tx"></div></div><div class="card hide"><div class="in"></div></div>`;
-      for (const k of ['shield', 'bar', 'fill', 'cap', 'ch', 'tx', 'card', 'in']) els[k] = root.querySelector('.' + k);
+        <div class="cap hide"><div class="ch"></div><div class="tx"></div></div><div class="tabbar hide"></div><div class="card hide"><div class="in"></div></div>`;
+      for (const k of ['shield', 'bar', 'fill', 'cap', 'ch', 'tx', 'tabbar', 'card', 'in']) els[k] = root.querySelector('.' + k);
       const style = root.querySelector('.tokens');
       tokens.then(css => { style.textContent = css; });
     }
@@ -156,11 +171,31 @@
       els.tx.textContent = s.caption || '';
     }
     els.cap.classList.toggle('hide', !on);
+    tabChip(s);
     els.card.classList.toggle('hide', !s.card);
     if (s.card) {
       const html = cardHtml(s.card, b);
       if (els.in.dataset.html !== html) { els.in.innerHTML = html; els.in.dataset.html = html; els.in.style.animation = 'none'; void els.in.offsetWidth; els.in.style.animation = ''; }
     }
+  }
+
+  // { kind, title, favicon, at }: shown for 3.5 s from t, the same in every tab the video passes through.
+  const GLOBE = '<svg class="ic globe" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 6h-2.9a15.7 15.7 0 0 0-1.4-3.6A8 8 0 0 1 18.9 8zM12 4c.8 1.2 1.5 2.5 1.9 4h-3.8c.4-1.5 1.1-2.8 1.9-4zM4.3 14a8.2 8.2 0 0 1 0-4h3.4a16.5 16.5 0 0 0 0 4H4.3zm.8 2h2.9c.3 1.3.8 2.5 1.4 3.6A8 8 0 0 1 5.1 16zM8 8H5.1a8 8 0 0 1 4.3-3.6C8.8 5.5 8.3 6.7 8 8zm4 12c-.8-1.2-1.5-2.5-1.9-4h3.8c-.4 1.5-1.1 2.8-1.9 4zm2.3-6H9.7a14.7 14.7 0 0 1 0-4h4.6a14.7 14.7 0 0 1 0 4zm.3 5.6c.6-1.1 1.1-2.3 1.4-3.6h2.9a8 8 0 0 1-4.3 3.6zm1.7-5.6a16.5 16.5 0 0 0 0-4h3.4a8.2 8.2 0 0 1 0 4h-3.4z"/></svg>';
+  const X = '<svg class="x" viewBox="0 0 24 24"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg>';
+  let chipTimer = 0;
+  function tabChip(s) {
+    const t = s.tabChip, left = t ? 3500 - (Date.now() - (t.at || 0)) : 0, on = !!t && !s.card && left > 0;
+    if (on) {
+      const html = `<span class="kind">${esc(t.kind || 'New tab')}</span><span class="tab">`
+        + (t.favicon ? `<img class="ic" alt="" src="${esc(t.favicon)}">` : GLOBE) + `<span class="t">${esc(t.title || t.url || '')}</span>${X}</span>`;
+      if (els.tabbar.dataset.html !== html) {
+        els.tabbar.innerHTML = html; els.tabbar.dataset.html = html;
+        const img = els.tabbar.querySelector('img.ic');
+        if (img) img.onerror = () => { img.outerHTML = GLOBE; };
+      }
+      clearTimeout(chipTimer); chipTimer = setTimeout(() => tabChip(state), left);
+    }
+    els.tabbar.classList.toggle('hide', !on);
   }
 
   function end() {
