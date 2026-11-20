@@ -111,7 +111,19 @@ async function runMcp() {
     return running ? { running } : { running, command: WATCH,
       todo: 'Start this command now as a background shell job (no waiting on it); it wakes you when the user sends something from the browser.' };
   };
-  const done = async body => reply({ ...body, watcher: await watcher() });
+  // What the user did in this session's tab since the last call, so the agent does not act on a page
+  // state that no longer holds. Read once; empty most of the time.
+  const userActivity = async () => {
+    const r = await call('GET', `/user-events?session=${SESSION}`).catch(() => null);
+    return r?.events?.length ? r.events.map(e => e.text) : null;
+  };
+  const userNote = lines => 'The user worked in your browser tab since your last show-and-tell call:\n'
+    + lines.map(l => '- ' + l).join('\n')
+    + '\nThe page may have changed: re-read it (browser_snapshot) before relying on earlier refs or state.';
+  const done = async body => {
+    const user = await userActivity();
+    return reply({ ...(user && { userActivity: user }), ...body, watcher: await watcher() });
+  };
   // browser_* tools: Playwright MCP on the shared browser. Using them starts the browser and claims the
   // panel for this session, like the tools above.
   const driver = createDriver({ cdp: `http://127.0.0.1:${CDP_PORT}`, outputDir: path.join(DATA, 'playwright'),
@@ -123,6 +135,7 @@ async function runMcp() {
     guard: (url, why) => call('POST', '/host/check', { url, why, ask: true, session: SESSION }).catch(e => ({ ok: false, error: e.message })),
     // Each session works in its own tab, so parallel sessions don't navigate under each other.
     tab: () => call('POST', '/tab', { session: SESSION, label: LABEL }).catch(e => ({ ok: false, error: e.message })),
+    busy: on => call('POST', '/busy', { session: SESSION, on }).catch(() => {}),
     // The panel shows what the agent does in the browser, also when nothing visible changes.
     onActivity: text => { call('POST', '/activity', { text, session: SESSION, label: LABEL }).catch(() => {}); } });
 
@@ -236,7 +249,11 @@ async function runMcp() {
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const a = req.params.arguments || {};
     if (req.params.name.startsWith('browser_')) {
-      try { return await driver.call(req.params.name, a); }
+      try {
+        const r = await driver.call(req.params.name, a);
+        const user = await userActivity();
+        return user ? { ...r, content: [{ type: 'text', text: userNote(user) }, ...(r.content || [])] } : r;
+      }
       catch (e) { return reply({ ok: false, error: String(e.message || e) }); }
     }
     try {

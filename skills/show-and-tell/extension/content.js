@@ -142,8 +142,36 @@
       if (area === 'session' && ch.recording) setRecording(!!ch.recording.newValue);
     });
     S.get('recording').then(s => setRecording(!!s.recording));
+    watchUser();
     chrome.runtime.onMessage.addListener(onMessage);
     setInterval(kick, 500); // picks up SPA route changes and top-layer changes
+  }
+
+  // ---------------------------------------------------------------- what the user does, for the agent
+  // Trusted clicks, edits and keys go to the worker, which tells the agent session owning this tab. The
+  // bridge drops what happens while one of the agent's own calls runs (Playwright's input is trusted too);
+  // the skill's scripted actions are synthetic and never reported.
+  const userEvt = ev => chrome.runtime.sendMessage({ type: 'userEvent', event: { ...ev, url: location.href, ts: Date.now() } }).catch(() => {});
+  const what = el => { const d = describe(el); return { selector: d.selector, tag: d.tag, text: d.text.slice(0, 60) }; };
+  function watchUser() {
+    addEventListener('click', e => {
+      if (!e.isTrusted || ours(e) || !(e.target instanceof Element)) return;
+      userEvt({ kind: e.detail === 2 ? 'doubleClick' : 'click', target: what(e.target) });
+    }, true);
+    addEventListener('change', e => {
+      const el = e.target;
+      if (!e.isTrusted || ours(e) || !(el instanceof Element)) return;
+      const value = el.type === 'password' ? '•••' : el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? 'checked' : 'unchecked')
+        : el.tagName === 'SELECT' ? [...el.selectedOptions].map(o => o.text.trim()).join(', ') : String(el.value ?? '').slice(0, 120);
+      userEvt({ kind: 'change', target: what(el), value });
+    }, true);
+    addEventListener('keydown', e => {
+      if (!e.isTrusted || ours(e) || ['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+      const combo = e.ctrlKey || e.metaKey || e.altKey;
+      if (!combo && !['Enter', 'Escape', 'Tab'].includes(e.key)) return;
+      const key = [e.ctrlKey && 'Ctrl', e.metaKey && 'Meta', e.altKey && 'Alt', e.shiftKey && 'Shift', e.key.length === 1 ? e.key.toUpperCase() : e.key].filter(Boolean).join('+');
+      userEvt({ kind: 'key', key, ...(e.target instanceof Element && e.target !== document.body && { target: what(e.target) }) });
+    }, true);
   }
 
   // ---------------------------------------------------------------- "Record" recorder

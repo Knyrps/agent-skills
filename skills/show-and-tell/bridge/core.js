@@ -89,6 +89,36 @@ export function startOwner({ standalone = false } = {}) {
       sessions.set(id, { id, label: base, name: unique(base, null), color, auto: !label, seen: Date.now() });
     };
     const nameOf = id => sessions.get(id)?.name || '';
+
+    // The user's own input in a session's tab, so the agent knows the page changed under it. Playwright's
+    // input is trusted too, so what happens while one of the session's calls runs (plus a grace period for
+    // the page reacting to it) is the agent's own and dropped.
+    const userLog = new Map(); // session -> [event]
+    const calls = new Map(); // session -> { running, windows: [[start, end]] }
+    const GRACE = { navigate: 3000, urlChange: 3000 };
+    const callState = s => { let c = calls.get(s); if (!c) calls.set(s, c = { running: 0, since: 0, windows: [] }); return c; };
+    const agentsOwn = (s, ev) => {
+      const c = calls.get(s);
+      if (!c) return false;
+      if (c.running && ev.ts >= c.since - 200) return true;
+      return c.windows.some(([a, b]) => {
+        if (ev.ts < a - 200 || ev.ts > b + (GRACE[ev.kind] || 250)) return false;
+        // A page load right after an agent call is the agent's, unless the user acted after that call.
+        if (ev.ts > b && GRACE[ev.kind] && (userLog.get(s) || []).some(u => u.ts > b && u.ts <= ev.ts)) return false;
+        return true;
+      });
+    };
+    function onUserEvent(msg) {
+      const s = msg.session || owner || '';
+      const ev = msg.event || {};
+      if (!s || !ev.kind || agentsOwn(s, ev)) return;
+      const list = userLog.get(s) || [];
+      const last = list[list.length - 1];
+      // A field edited twice in a row keeps only its final value.
+      if (last && ev.kind === 'change' && last.kind === 'change' && last.target?.selector === ev.target?.selector) list.pop();
+      list.push({ ...ev, ts: ev.ts || Date.now() });
+      userLog.set(s, list.slice(-40));
+    }
     const ownerAlive = () => [...waiters].some(w => w.session === owner) || Date.now() - (sessions.get(owner)?.seen || 0) < 90000;
     function recipients() {
       if (owner && !ownerAlive()) owner = null;
@@ -325,6 +355,23 @@ export function startOwner({ standalone = false } = {}) {
             : `could not ask about ${r.host}: ${decision.replace(/^offline:/, '')}`;
         return json(res, 200, { ok: false, host: r.host, decision, error });
       }
+      // A session's browser call starts or ends (only the driver of that session sends this).
+      if (route === 'POST /busy') {
+        let body = {};
+        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
+        if (!body.session) return json(res, 400, { error: 'session is required' });
+        const c = callState(body.session), t = Date.now();
+        if (body.on) { if (!c.running++) c.since = t; }
+        else if (c.running > 0 && !--c.running) { c.windows.push([c.since, t]); c.windows = c.windows.slice(-20); }
+        return json(res, 200, { ok: true });
+      }
+      // What the user did in the session's tab since the last time it asked; read once.
+      if (route === 'GET /user-events') {
+        const s = url.searchParams.get('session') || '';
+        const events = userLog.get(s) || [];
+        userLog.delete(s);
+        return json(res, 200, { events: events.map(e => ({ ...e, text: userEventText(e) })) });
+      }
       if (route === 'POST /activity') {
         let body = {};
         try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
@@ -382,6 +429,7 @@ export function startOwner({ standalone = false } = {}) {
         if (msg.type === 'action' && msg.id && msg.action) onAction(conn, msg).catch(e => log('action failed', e));
         else if (msg.type === 'result' && msg.rid) { const { type, rid: r, ...rest } = msg; replies.get(r)?.(rest); }
         else if (msg.type === 'panel') state.panelOpen = !!msg.open;
+        else if (msg.type === 'userEvent') onUserEvent(msg);
         // The user allowed a host from the panel (on their own, or answering the extension's question).
         else if (msg.type === 'hostGrant') { try { hosts.grant(msg.host, msg.mode); } catch (e) { log(e.message); } pushHosts(true); }
         else if (msg.type === 'ping') conn.send('{"type":"pong"}');
@@ -395,6 +443,21 @@ export function startOwner({ standalone = false } = {}) {
 }
 
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
+
+// One line per user event, e.g. `14:02:11 clicked button "Sortieren"`.
+export function userEventText(e) {
+  const t = e.target, el = t ? `${t.tag}${t.text ? ` "${t.text.slice(0, 40)}"` : ''} (${t.selector})` : '';
+  const at = new Date(e.ts || Date.now()).toLocaleTimeString('en-GB', { hour12: false });
+  const what = {
+    click: () => `clicked ${el}`,
+    doubleClick: () => `double-clicked ${el}`,
+    change: () => `set ${el} to "${e.value}"`,
+    key: () => `pressed ${e.key}${el ? ` in ${el}` : ''}`,
+    navigate: () => `${e.how === 'reload' ? 'reloaded' : 'opened'} ${e.url}`,
+    urlChange: () => `the page moved to ${e.url}`,
+  }[e.kind]?.() || `${e.kind} ${el}`;
+  return `${at} ${what}`;
+}
 
 function json(res, status, body) {
   if (res.writableEnded || res.destroyed) return;

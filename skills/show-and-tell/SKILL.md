@@ -44,6 +44,14 @@ offline handling and slow devices. It stays on until off (the panel shows it, an
 so turn it off when you are done. In tours and videos a step's `network` and `cpu` fields do the same from
 that step on; they end with the tour or video.
 
+## When the user acts in your tab
+
+The user can click, type and navigate in your tab while you work. What they did since your last call comes
+first in your next show-and-tell result (`userActivity` in JSON results, a leading note on `browser_*`
+results), e.g. `14:02:11 clicked button "Sortieren" (#sort)`. Your own `browser_*` input is never listed.
+When it is there: re-read the page (`browser_snapshot`) before using earlier refs, and take the user's
+changes into account instead of undoing them; ask if their intent is unclear.
+
 ## Working where the user watches
 
 The user follows the shared browser; the panel shows each `browser_*` call ("clicking …", "requesting

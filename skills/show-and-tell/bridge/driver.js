@@ -67,7 +67,7 @@ export function describe(name, args = {}, page = '') {
 // tab() -> { ok, tabId, url, error }: this session's own tab (the extension creates it on first use).
 // Without it the calls go to the first app tab (single-session use, tests).
 export function createDriver({ cdp, outputDir, before = async () => {}, guard = async () => ({ ok: true }),
-  onActivity = () => {}, tab = null, command } = {}) {
+  onActivity = () => {}, tab = null, busy = async () => {}, command } = {}) {
   let client = null, connecting = null, tools = null, confirmed = null; // confirmed: Chrome tab id the child is on
   // With session tabs, switching tabs would act on (and bring up) another session's tab.
   const hidden = new Set([...HIDDEN, ...(tab ? ['browser_tabs'] : [])]);
@@ -170,7 +170,9 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
     const denied = await check(name, args, page);
     if (denied) return denied;
     try { onActivity(describe(name, args, page)); } catch {}
-    return c.callTool({ name, arguments: args });
+    // Input in the tab during this window is the agent's own, not the user's.
+    await busy(true);
+    try { return await c.callTool({ name, arguments: args }); } finally { await busy(false); }
   }
 
   async function call(name, args = {}) {

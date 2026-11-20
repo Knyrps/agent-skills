@@ -512,6 +512,11 @@ async function gotoStep(index, { replay }) {
 // One action per message: an action that loads a new page closes the message channel, which then
 // counts as done once the new page is ready.
 async function run(tabId, actions, i, cinematic = false) {
+  ownNav.set(tabId, Date.now() + 600000);
+  try { await runNow(tabId, actions, i, cinematic); } finally { ownNav.set(tabId, Date.now() + 1500); }
+}
+
+async function runNow(tabId, actions, i, cinematic) {
   for (const a of actions) {
     let r;
     try { r = await chrome.tabs.sendMessage(tabId, { cmd: 'runActions', actions: [a], cinematic, accent: cinematic ? video?.stage?.branding?.accent : '' }); }
@@ -540,7 +545,14 @@ async function pageReady(tabId, ms = 120000) {
   throw new Error('page load timed out');
 }
 
+// Tabs the extension is navigating itself (tours, highlight with url, videos): not the user.
+const ownNav = new Map(); // tabId -> until
 async function navigate(tabId, url) {
+  ownNav.set(tabId, Date.now() + 120000);
+  try { return await navigateNow(tabId, url); } finally { ownNav.set(tabId, Date.now() + 1500); }
+}
+
+async function navigateNow(tabId, url) {
   const done = new Promise((resolve, reject) => {
     const t = setTimeout(() => { chrome.tabs.onUpdated.removeListener(on); reject(new Error('page load timed out: ' + url)); }, 120000);
     const on = (id, info) => { if (id === tabId && info.status === 'complete') { clearTimeout(t); chrome.tabs.onUpdated.removeListener(on); resolve(); } };
@@ -1149,6 +1161,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
 async function handle(m, sender) {
   switch (m.type) {
     case 'videoStop': return video ? recordStop(m) : { ok: false };
+    case 'userEvent': if (sender.tab) await userEvent(sender.tab.id, m.event); return {};
     case 'annotateKey': {
       const t = await activeTab();
       return t ? chrome.tabs.sendMessage(t.id, { cmd: 'annotateKey', key: m.key, ctrl: !!m.ctrl }).catch(() => ({ ok: false })) : { ok: false };
@@ -1275,6 +1288,23 @@ function recordUrl(type, { tabId, frameId, url }) {
 }
 chrome.webNavigation.onCommitted.addListener(d => recordUrl('navigate', d));
 chrome.webNavigation.onHistoryStateUpdated.addListener(d => recordUrl('urlChange', d));
+
+// ------------------------------------------------------------------ the user's input in agent tabs
+// Reported to the bridge per session; the bridge drops what falls into the agent's own calls. Nothing is
+// reported while a video runs (the stage blocks input) or while the user records that tab on purpose.
+async function userEvent(tabId, event) {
+  if (video?.tabId === tabId) return;
+  const { recording } = await S.get('recording');
+  if (recording?.tabId === tabId) return;
+  send({ type: 'userEvent', session: await sessionOfTab(tabId), event });
+}
+const userNav = (kind, { tabId, frameId, url, transitionType }) => {
+  if (frameId !== 0 || (ownNav.get(tabId) || 0) > Date.now() || !/^https?:/.test(url)) return;
+  if (transitionType === 'auto_subframe') return;
+  userEvent(tabId, { kind, url, ts: Date.now(), ...(transitionType && { how: transitionType }) });
+};
+chrome.webNavigation.onCommitted.addListener(d => userNav('navigate', d));
+chrome.webNavigation.onHistoryStateUpdated.addListener(d => userNav('urlChange', d));
 
 chrome.runtime.onConnect.addListener(port => {
   if (port.name === 'video') return onVideoPort(port);

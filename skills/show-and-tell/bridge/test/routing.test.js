@@ -101,6 +101,34 @@ test('input for a session that is not listening yet waits for it', async () => {
   assert.equal((await wait('two')).actions[0].text, 'later');
 });
 
+test('the user\'s input reaches the session; input during its own browser calls does not', async () => {
+  const ev = (kind, extra = {}) => ext.send(JSON.stringify({ type: 'userEvent', session: 'two',
+    event: { kind, ts: Date.now(), target: { tag: 'button', text: 'Sortieren', selector: '#sort' }, ...extra } }));
+  await call('POST', '/busy', { session: 'two', on: true });
+  ev('click'); // Playwright clicking for the agent: trusted, but the agent's own
+  await sleep(50);
+  await call('POST', '/busy', { session: 'two', on: false });
+  ev('navigate', { url: 'http://localhost/after-click', target: undefined }); // the page reacting to the agent's click
+  await sleep(1000);
+  ev('click');
+  ev('change', { target: { tag: 'input', text: '', selector: '#q' }, value: 'L' });
+  ev('change', { target: { tag: 'input', text: '', selector: '#q' }, value: 'LKX' });
+  await sleep(100);
+  const { events } = await call('GET', '/user-events?session=two');
+  assert.deepEqual(events.map(e => e.kind), ['click', 'change']);
+  assert.match(events[0].text, /^\d\d:\d\d:\d\d clicked button "Sortieren" \(#sort\)$/);
+  assert.match(events[1].text, /set input \(#q\) to "LKX"$/);
+  assert.deepEqual((await call('GET', '/user-events?session=two')).events, [], 'read once');
+  // Right after an agent call, a page load the user caused (by clicking) is still the user's.
+  await call('POST', '/busy', { session: 'two', on: true });
+  await call('POST', '/busy', { session: 'two', on: false });
+  await sleep(400);
+  ev('click');
+  ev('navigate', { url: 'http://localhost/next', target: undefined });
+  await sleep(100);
+  assert.deepEqual((await call('GET', '/user-events?session=two')).events.map(e => e.kind), ['click', 'navigate']);
+});
+
 test('cancel can target one session', async () => {
   const g = wait('gamma', 5), d = wait('delta', 5);
   await sleep(50);
