@@ -7,6 +7,8 @@
   --spark: url(#spark-grad);
   /* "Connected": an M3 custom (extended) colour, green tone 40 / tone 80 like the generated roles. */
   --sat-color-success: #146c2e;
+  /* Spacing on the M3 4 px grid: page edge, gap between blocks, gap inside a group. */
+  --edge: 16px; --gap: 16px; --tight: 8px;
 }
 @media (prefers-color-scheme: dark) { :root { --sat-color-success: #6dd58c; } }
 * { box-sizing: border-box; }
@@ -22,7 +24,7 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .muted { color: var(--md-sys-color-on-surface-variant); }
 
 /* ---- top app bar */
-.top { display: flex; align-items: center; gap: 12px; padding: 12px 16px 8px; }
+.top { display: flex; align-items: center; gap: 12px; padding: 12px var(--edge) 8px; }
 .avatar { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
   background: var(--md-sys-color-surface-container-high); }
 .avatar svg { width: 20px; height: 20px; fill: var(--spark); }
@@ -30,21 +32,21 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .avatar[style*="--session"] svg { fill: var(--session); }
 .titles { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #who-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.listen { display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
+.listen { display: inline-flex; align-items: center; gap: 8px; color: var(--md-sys-color-on-surface-variant); }
 .listen .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); flex: none; }
 .listen.on { color: var(--md-sys-color-primary); }
 .listen.on .dot { background: var(--md-sys-color-primary); }
 /* A ring while the session is not listening, a filled dot while it is. */
 .listen[style*="--session"] .dot { box-shadow: inset 0 0 0 2px var(--session); background: transparent; }
 .listen.on[style*="--session"] .dot { background: var(--session); }
-.conn { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
+.conn { flex: none; display: inline-flex; align-items: center; gap: 8px; color: var(--md-sys-color-on-surface-variant); }
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); }
 .conn.ok .dot { background: var(--sat-color-success); }
 
 /* ---- pinned state */
-.pinned { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
+.pinned { display: flex; flex-direction: column; gap: var(--tight); padding: 4px var(--edge) 8px; }
 .pinned:not(:has(> :not([hidden]))) { display: none; }
-.tour { display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
+.tour { display: flex; flex-direction: column; gap: var(--tight); }
 .countdown { color: var(--md-sys-color-primary); }
 .card {
   position: relative; overflow: hidden;
@@ -59,11 +61,11 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .step { white-space: pre-wrap; overflow-wrap: anywhere; }
 .explanation { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .status { margin-top: 4px; color: var(--md-sys-color-on-surface-variant); }
-.nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.nav { display: grid; grid-template-columns: 1fr 1fr; gap: var(--tight); }
 
 .notice {
   display: flex; flex-direction: column; gap: 4px;
-  padding: 12px 12px 4px; border-radius: 12px;
+  padding: 12px 8px 4px 16px; border-radius: 12px;
   background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container);
 }
 .notice-row { display: flex; gap: 8px; align-items: flex-start; }
@@ -77,7 +79,7 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 }
 .throttle {
   display: flex; align-items: center; gap: 8px;
-  padding: 4px 4px 4px 12px; border-radius: 12px;
+  padding: 4px 4px 4px 16px; border-radius: 12px;
   background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container);
 }
 .throttle svg { flex: none; }
@@ -90,35 +92,34 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 }
 
 /* ---- conversation */
-.chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 12px 16px 8px; scroll-behavior: smooth; }
-.log { display: flex; flex-direction: column; gap: 16px; }
+.chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--gap); padding: 8px var(--edge) var(--gap); scroll-behavior: smooth; }
+.log { display: flex; flex-direction: column; gap: var(--gap); }
 .log:empty { display: none; }
 
-.empty { margin: auto 0; display: flex; flex-direction: column; gap: 8px; padding: 8px 4px; }
+.empty { margin: auto 0; display: flex; flex-direction: column; gap: var(--tight); }
 .greeting {
   background: linear-gradient(90deg, var(--md-sys-color-primary), var(--md-sys-color-tertiary));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-.suggestions { margin-top: 12px; }
+.suggestions { margin-top: var(--tight); }
 
 .msg { display: flex; gap: 12px; max-width: 100%; animation: msg-in .25s cubic-bezier(.2,0,0,1); }
 @keyframes msg-in { from { opacity: 0; translate: 0 6px; } }
+/* The user's message: attachment cards, then the bubble, then the status line, all right-aligned. */
 .msg.user { flex-direction: column; align-items: flex-end; gap: 4px; }
 .bubble {
-  max-width: 88%; padding: 10px 16px; border-radius: 20px 20px 4px 20px;
+  max-width: 85%; padding: 10px 16px; border-radius: 20px 4px 20px 20px;
   background: var(--md-sys-color-surface-container-high); color: var(--md-sys-color-on-surface);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.bubble .atts { display: flex; flex-wrap: wrap; gap: 6px; }
-.bubble .atts:not(:last-child) { margin-bottom: 8px; }
-/* Non-interactive attachment labels, shaped like an M3 assist chip. */
+.atts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--tight); max-width: 85%; }
+/* Non-interactive attachment label, shaped like an M3 assist chip (32 px, 8 px corners, outline). */
 .att {
-  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 16px 0 8px; border-radius: 8px;
   border: 1px solid var(--md-sys-color-outline-variant); color: var(--md-sys-color-on-surface-variant);
 }
-.att svg { width: 16px; height: 16px; fill: var(--md-sys-color-primary); }
-.meta { color: var(--md-sys-color-on-surface-variant); padding: 0 4px; }
-
+.att svg { width: 18px; height: 18px; fill: var(--md-sys-color-primary); }
+.meta { color: var(--md-sys-color-on-surface-variant); }
 .msg.agent { align-items: flex-start; }
 .spark { flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin-top: -2px; }
 .spark svg { width: 22px; height: 22px; fill: var(--spark); }
@@ -145,11 +146,12 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 #host-ask-text { color: var(--md-sys-color-on-surface-variant); }
 .host-ask-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
-/* ---- composer */
-.dock { position: relative; padding: 8px 12px 12px; }
+/* ---- composer: a pill docked at the bottom, like Gemini's input. Message on top, tools and the round
+   send button on one 40 px row below, 8 px from the pill's edge. */
+.dock { position: relative; padding: 0 var(--edge) var(--edge); }
 .composer {
   display: flex; flex-direction: column; gap: 4px;
-  padding: 8px 8px 6px 8px; border-radius: 28px;
+  padding: 8px; border-radius: 28px;
   background: var(--md-sys-color-surface-container-high);
   transition: background .15s;
 }
@@ -158,19 +160,31 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .attachments md-input-chip { max-width: 100%; }
 #q {
   display: block; width: 100%; min-height: 40px; max-height: 160px; resize: none;
-  padding: 8px 12px 4px; border: 0; outline: 0; background: transparent;
+  padding: 8px 12px; border: 0; outline: 0; background: transparent;
   color: var(--md-sys-color-on-surface); caret-color: var(--md-sys-color-primary); font-family: inherit;
 }
 #q::placeholder { color: var(--md-sys-color-on-surface-variant); }
-.composer-row { display: flex; align-items: center; gap: 2px; }
+.composer-row { display: flex; align-items: center; gap: 4px; min-height: 40px; }
 .composer-row md-text-button {
-  --md-text-button-leading-space: 12px; --md-text-button-trailing-space: 14px;
+  --md-text-button-container-height: 40px;
+  --md-text-button-leading-space: 12px; --md-text-button-trailing-space: 16px;
   --md-text-button-label-text-color: var(--md-sys-color-on-surface-variant);
   --md-text-button-icon-color: var(--md-sys-color-on-surface-variant);
   --md-text-button-hover-label-text-color: var(--md-sys-color-on-surface);
   --md-text-button-hover-icon-color: var(--md-sys-color-on-surface);
+  --md-text-button-focus-label-text-color: var(--md-sys-color-on-surface);
+  --md-text-button-pressed-label-text-color: var(--md-sys-color-on-surface);
 }
 .grow { flex: 1; }
+/* Send: a 40 px round filled button; quiet (no container) while there is nothing to send. */
+#send {
+  flex: none;
+  --md-filled-icon-button-container-width: 40px; --md-filled-icon-button-container-height: 40px;
+  --md-filled-icon-button-icon-size: 20px;
+  --md-filled-icon-button-disabled-container-color: transparent; --md-filled-icon-button-disabled-container-opacity: 0;
+  --md-filled-icon-button-disabled-icon-color: var(--md-sys-color-on-surface); --md-filled-icon-button-disabled-icon-opacity: .38;
+}
+#send svg, #rec-discard svg { width: 20px; height: 20px; }
 #annotate.active {
   --md-text-button-label-text-color: var(--md-sys-color-primary);
   --md-text-button-icon-color: var(--md-sys-color-primary);
@@ -183,10 +197,9 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 }
 #rec.recording svg { animation: rec-pulse 1.2s ease-in-out infinite; }
 @keyframes rec-pulse { 50% { opacity: .35; } }
-
 /* M3 snackbar above the composer. */
 .toast {
-  position: absolute; left: 12px; right: 12px; bottom: calc(100% + 4px);
+  position: absolute; left: var(--edge); right: var(--edge); bottom: calc(100% + 8px);
   padding: 14px 16px; border-radius: 4px;
   background: var(--md-sys-color-inverse-surface); color: var(--md-sys-color-inverse-on-surface);
   box-shadow: 0 1px 3px rgb(0 0 0 / .3), 0 4px 8px 3px rgb(0 0 0 / .15); /* elevation 3 */

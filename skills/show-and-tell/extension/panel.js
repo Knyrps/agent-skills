@@ -104,7 +104,8 @@ const spark = () => { const s = el('span', 'spark'); s.innerHTML = '<svg><use hr
 const ICON = { Annotation: '<path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/>', Recording: '<circle cx="12" cy="12" r="6"/>' };
 
 function userMsg(m) {
-  const row = el('div', 'msg user'), b = el('div', 'bubble md-typescale-body-large');
+  // Attachments sit above the bubble as their own cards, right-aligned; the bubble holds only the text.
+  const row = el('div', 'msg user');
   if (m.att?.length) {
     const atts = el('div', 'atts');
     for (const a of m.att) {
@@ -113,10 +114,10 @@ function userMsg(m) {
       chip.append(a);
       atts.append(chip);
     }
-    b.append(atts);
+    row.append(atts);
   }
-  if (m.text) b.append(m.text);
-  row.append(b, el('div', 'meta md-typescale-label-small', `${m.acked ? 'Sent' : 'Not sent yet · bridge offline'} · ${clock(m.ts)}`));
+  if (m.text) row.append(el('div', 'bubble md-typescale-body-large', m.text));
+  row.append(el('div', 'meta md-typescale-label-small', `${m.acked ? 'Sent' : 'Not sent yet · bridge offline'} · ${clock(m.ts)}`));
   return row;
 }
 
