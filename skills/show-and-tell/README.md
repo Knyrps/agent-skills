@@ -9,12 +9,21 @@ share one browser window:
   - **Annotate**: click an element to mark it, or drag a frame, an arrow or a pen stroke, each with a note.
   - **Record**: captures what you do in the page (clicks, typing, keys, scrolling, swipes, navigation).
   - **Message** and **Send**, with the annotation or recording attached.
-  The panel reads like an agent chat: your messages, and what the agent did and asked in the browser.
-  The agent hears it through a background watcher; the panel shows which session is listening.
+  The panel reads like an agent chat: your messages, what the agent did and asked in the browser, and its
+  replies (the `say` tool, Markdown; "Thinking…" until it answers). The agent hears you through a
+  background watcher; the panel shows which session is listening. It is a side channel, not a copy of
+  the agent chat, and says so at the top of the conversation.
+- **You can work in the agent's tab too**: what you click, type and open there (not what the agent does)
+  is listed at the start of the agent's next show-and-tell result, so it re-reads the page instead of
+  acting on a state that no longer holds.
 - **Several agents at once**: each session works in its own named, coloured tab group, and the panel talks
-  to the session whose tab is in front.
+  to the session whose tab is in front. When a session's MCP process has exited, its tab group turns grey
+  ("… · ended") and closes 15 minutes later (kept, ungrouped, if you looked at it). Sessions that are
+  only quiet are never touched.
 - **Guided tours** with Back / Next, and **review videos** (MP4 with captions, chapter labels, progress bar,
-  intro/section/outro cards and a drawn cursor or finger) are layers on top.
+  intro/section/outro cards and a drawn cursor or finger) are layers on top. While a video records, the
+  window keeps its recording size: resizing or maximizing it is undone at once.
+- **Throttling** of the network and CPU per tab, like DevTools, shown in the panel with a Turn off button.
 
 ```
 agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node bridge wait` (background job)
@@ -37,9 +46,10 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
 | `references/video.md` | How the agent writes review videos |
 | `bridge/` | MCP server, bridge server and CLI (`index.js`); `driver.js` runs Playwright MCP on the shared browser. Dependencies: `@modelcontextprotocol/sdk`, `@playwright/mcp` |
 | `config/` | MCP config snippets per agent host |
-| `vendor-src/` | Rebuilds `extension/vendor/` (Material Web bundle, M3 colour tokens). Not needed at runtime |
+| `vendor-src/` | Rebuilds `extension/vendor/` (Material Web bundle, M3 colour tokens) and `scripts/lab-vendor/`. Not needed at runtime |
+| `scripts/lab.mjs`, `scripts/real-input-check.mjs` | Test page and the end-to-end check with real input (see below) |
 
-Works on Windows, macOS and Linux with Node.js 18 or newer.
+Works on Windows, macOS and Linux with Node.js 20 or newer.
 
 ## Why Chrome for Testing
 
@@ -106,13 +116,28 @@ When the agent host runs the show-and-tell MCP, that process owns the bridge por
 
 ## Manual test of every control
 
-`node <skill>/scripts/lab.mjs` serves a test page on `http://localhost:5191/` (and `/next`): every element
-reacts to real mouse, touch and keyboard input and to the skill's scripted actions, and a log at the bottom
-says whether each event was trusted. `node <skill>/scripts/real-input-check.mjs` then drives the lab and the
-side panel with real input (CDP `Input.*`, trusted like a person's) and checks every element and control:
-taps, double taps, long press, pinch, swipe, drag and drop, clicks, menus, typing, forms, dialogs, shortcuts,
-Annotate (including Esc while the panel has focus), Record, Send, throttling, the host question and notice,
-tour Next/Back and video Discard. It needs the browser, a bridge and the lab running.
+`node <skill>/scripts/lab.mjs` serves a test page on `http://localhost:5191/` (and `/next`), built like a
+Material 3 app with Material Web components (their controls live in shadow DOM, as in real apps). Every
+element reacts to real mouse, touch and keyboard input and to the skill's scripted actions, and a log at
+the bottom says who caused each event:
+
+- `[user]`: real input outside the agent's calls.
+- `[agent]`: input during one of the agent's `browser_*` calls. Playwright's input is as trusted as a
+  person's, so the extension marks the tab with `<html data-show-and-tell-agent="call">` meanwhile.
+- `[agent · scripted]`: the extension playing the agent's tour or video steps (`data-show-and-tell-agent="scripted"`).
+- `[… · component]`: an event a component fires itself, credited to whoever acted last.
+
+The bug icon in the lab's top bar opens a debug panel: **Log events from** (User + Agent, User, Agent) and,
+under **Advanced…**, **Demo reactions** (the cards' own lines, the default log) plus every raw event type in
+groups, with search, All, None and Reset. Every event is kept in a buffer of 5,000 lines and the settings
+only filter what is shown, so changing them also shows or hides earlier events.
+
+`node <skill>/scripts/real-input-check.mjs` then drives the lab and the side panel with real input (CDP
+`Input.*`, trusted like a person's) and checks every element and control: taps, double taps, long press,
+pinch, swipe, drag and drop, clicks, menus, typing, forms, dialogs, shortcuts, Annotate (including Esc while
+the panel has focus), Record, Send, throttling, the host question and notice, tour Next/Back and video
+Discard. It needs the browser, a bridge and the lab running. It starts by emptying the panel's message
+queue, and each run leaves a temporary `*.nip.io` host allowed until the browser restarts.
 
 By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo browser, then:
 
@@ -139,6 +164,11 @@ By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo br
 | Cancel | `wait` in one terminal, `node <skill>/bridge cancel` in another | The wait prints `{"actions":[],"cancelled":true}` |
 | Gestures | `node <skill>/bridge highlight button --gesture double-tap --label Here --url http://localhost:<port>/`, then with `--gesture swipe --direction left --keep` on another element | The page opens; a finger dot taps twice with a ripple; the swipe shows a dotted path and a trail. An unknown gesture name returns the list of valid ones |
 | Video | `node <skill>/bridge record tour.json --name test`, then `wait --timeout 300` | 3-2-1 countdown in the panel, the window shrinks to a 1:1 size, intro card, chapter labels, captions, a gliding cursor; Esc in the page or **Stop and save** keeps a partial video. `videoReady` has `path`, `vtt`, `chapters` and the window is restored |
+| Window lock | During a video, resize or maximize the window | It snaps back to the recording size at once; the panel says the size is locked until the video is done. The video keeps its size |
+| Reply in the panel | Send a message from the panel to a listening session; it answers with `say` (or `node <skill>/bridge say --session <id> "**Hi**"`) | "Thinking…" under your message, then the reply rendered as Markdown (raw HTML is shown as text). Without a reply, after two minutes it notes the answer may be in the agent chat |
+| Your input in its tab | While an agent works in its tab, click and type there yourself, then let it call any show-and-tell tool | Its result starts with "The user worked in your browser tab …" listing your clicks, edits (passwords masked) and navigations, not the agent's own input. A field the agent typed into and you only left is not listed |
+| Ended session | End an agent session (close its chat or the MCP process) | Within about 15 s its tab group turns grey, "<name> · ended"; a placeholder tab closes at once. 15 minutes later the tab closes, or is only ungrouped if you opened it meanwhile or it is in front. A quiet but running session is never touched |
+| Browser restart | Restart the demo browser while a session runs | Chrome restores the group; it goes back to its running session. Groups of sessions that are gone are ungrouped |
 
 ## Verify the browser_* tools drive this browser
 

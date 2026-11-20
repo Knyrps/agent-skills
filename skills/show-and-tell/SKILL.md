@@ -16,10 +16,11 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
 - **Browser**: Chrome for Testing on its own profile, CDP `127.0.0.1:9334`, extension preloaded.
   `start_browser` launches it (idempotent) and opens the panel; it outlives the session.
 - **show-and-tell MCP**: `start_browser`, `status`, `highlight`, `clear_highlights`, `hide_overlays`, `get_queue`,
-  `wait_for_action`, `request_demo`, `set_step`, `load_tour`, `goto_step`, `end_tour`, `record_tour`, `stop_recording`.
-  Each also exists as a CLI: `node "<skill>/bridge" <start|status|highlight <css> [--label t] [--gesture g]
-  [--direction d] [--to css] [--url u] [--style s] [--keep]|clear|hide|show|queue [--recent]|wait|cancel|request <prompt>|
-  step <label>|tour <file>|goto <n>|end|record <file> [--name n] [--size s]|record-stop|record-cancel>`.
+  `wait_for_action`, `say`, `request_demo`, `throttle`, `set_step`, `load_tour`, `goto_step`, `end_tour`, `record_tour`,
+  `stop_recording`. Each also exists as a CLI: `node "<skill>/bridge" <start|status|highlight <css> [--label t]
+  [--gesture g] [--direction d] [--to css] [--url u] [--style s] [--keep]|clear|hide|show|queue [--recent]|wait|cancel|
+  say --session <id> <text|->|request <prompt>|throttle <preset|off> [--cpu n]|step <label>|tour <file>|goto <n>|end|
+  record <file> [--name n] [--size s]|record-stop|record-cancel>`.
 - **`browser_*` tools** of the same MCP (Playwright MCP, attached to this browser) drive the page when you
   need more than `highlight` can do: `browser_snapshot`, `browser_click`, `browser_type`,
   `browser_evaluate`, `browser_navigate`, … They start the browser if needed and act in the app tab, never
