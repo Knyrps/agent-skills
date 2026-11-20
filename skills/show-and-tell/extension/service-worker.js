@@ -846,12 +846,32 @@ async function runNow(tabId, actions, i, cinematic, ctx) {
 
 // The video goes on in another tab: the recorder switches its source, the stage moves along, and a tab chip
 // with the page's real title says where the viewer is now.
-async function videoSwitch(v, tabId, kind) {
+// The two tabs in their real tab-strip order (the group's tabs, or the window's; a popup window comes
+// after them). Other tabs are not listed: one "…" tab in the middle says there are more, wherever they sit.
+async function stripOf(aId, bId, a, b) {
+  const ta = await chrome.tabs.get(aId).catch(() => null), tb = await chrome.tabs.get(bId).catch(() => null);
+  const normal = [ta, tb].find(t => t && t.windowId != null && t.index != null && t.windowId === ta?.windowId && t.windowId === tb?.windowId) || ta || tb;
+  let strip = [];
+  if (normal) {
+    const win = await chrome.windows.get(normal.windowId).catch(() => null);
+    if (win?.type === 'normal') {
+      strip = (await chrome.tabs.query({ windowId: normal.windowId, ...(normal.groupId >= 0 && { groupId: normal.groupId }) }))
+        .sort((x, y) => x.index - y.index).map(t => t.id);
+    }
+  }
+  for (const id of [aId, bId]) if (!strip.includes(id)) strip.push(id); // popups, or a tab outside the group
+  const [ia, ib] = [strip.indexOf(aId), strip.indexOf(bId)];
+  const [first, second] = ia < ib ? [a, b] : [b, a];
+  return strip.length > 2 ? [first, { more: strip.length - 2 }, second] : [first, second];
+}
+
+// closing: going back closes the tab the video leaves; the strip shows its X being clicked.
+async function videoSwitch(v, tabId, kind, { closing = false } = {}) {
   v.followed.add(tabId); v.visited.add(tabId);
   const info = async id => { const x = await chrome.tabs.get(id).catch(() => null); return { title: x?.title || '', url: x?.url || '', favicon: x?.favIconUrl || '' }; };
-  const from = await info(v.tabId), to = await info(tabId);
-  // In tab-strip order: going to a new tab puts it after the one it came from; going back, the other way.
-  const tabs = kind === 'Back to' ? [{ ...to, active: true }, { ...from, active: false }] : [{ ...from, active: false }, { ...to, active: true }];
+  const from = { ...(await info(v.tabId)), active: false, closing: kind === 'Back to' && closing };
+  const to = { ...(await info(tabId)), active: true, new: kind !== 'Back to' };
+  const tabs = await stripOf(v.tabId, tabId, from, to);
   const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
   await videoCmd({ cmd: 'switch', streamId });
   v.tabId = tabId;
@@ -885,7 +905,7 @@ async function tourBackToTab(fromId, a, i, ctx) {
   if (!(await chrome.tabs.get(target).catch(() => null))) throw new Error(`step ${i + 1}: the tab to go back to was closed`);
   await chrome.tabs.update(target, { active: true }).catch(() => {});
   // A video switches its capture first: closing the tab it records would end the recording.
-  if (ctx.video) await videoSwitch(ctx.video, target, 'Back to');
+  if (ctx.video) await videoSwitch(ctx.video, target, 'Back to', { closing: !!a.close && fromId !== target });
   if (a.close && fromId !== target) await chrome.tabs.remove(fromId).catch(() => {});
   return target;
 }
