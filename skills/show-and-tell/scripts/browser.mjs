@@ -94,8 +94,14 @@ async function openLab() {
   const hasLab = pages.some(t => t.url.startsWith(LAB_URL) || t.url.startsWith(offline));
   const browser = await cdpSession((await version()).webSocketDebuggerUrl);
   try {
-    if (!hasLab) await browser.send('Target.createTarget', { url: LAB_URL });
-    for (const t of pages.filter(t => /^chrome:\/\/new-?tab/.test(t.url))) await browser.send('Target.closeTarget', { targetId: t.id }).catch(() => {});
+    // Chrome's start tab (its new tab page, which the extension may already be turning into the test page)
+    // becomes the test page; only without one is a tab opened. Further empty new tabs are closed.
+    const blank = pages.filter(t => /^chrome:\/\/new-?tab/.test(t.url));
+    if (!hasLab && blank.length) {
+      const s = await cdpSession(blank[0].webSocketDebuggerUrl);
+      try { await s.send('Page.navigate', { url: LAB_URL }); } finally { s.close(); }
+    } else if (!hasLab) await browser.send('Target.createTarget', { url: LAB_URL });
+    for (const t of blank.slice(hasLab ? 0 : 1)) await browser.send('Target.closeTarget', { targetId: t.id }).catch(() => {});
   } finally { browser.close(); }
 }
 

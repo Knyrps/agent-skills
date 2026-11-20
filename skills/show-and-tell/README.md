@@ -120,7 +120,8 @@ When the agent host runs the show-and-tell MCP, that process owns the bridge por
 ## Manual test of every control
 
 The bridge serves a test page on `http://localhost:47614/` (and `/next`; `DEMO_LAB_PORT` changes the port)
-whenever it runs, and the browser opens it on start as a pinned tab. It is not a separate process: while no bridge runs
+whenever it runs, and the browser opens it on start as a pinned tab. New tabs (Ctrl+T, the panel's **+**) open it too:
+the extension sends Chrome's new tab page there (redirecting, not overriding it, so Chrome doesn't ask "Change back to Google?"). It is not a separate process: while no bridge runs
 (no agent session with show-and-tell, no `bridge serve`), its tab shows a notice and switches to the page
 once a bridge is up. Agent sessions never take the lab tab over as their own. The page is built like a
 Material 3 app with Material Web components (their controls live in shadow DOM, as in real apps). Every

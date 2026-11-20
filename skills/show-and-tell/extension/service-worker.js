@@ -311,7 +311,7 @@ async function tabNews(session, kind, tabId, ts, url = '') {
   for (let i = 0; i < 10 && !url; i++) {
     const t = await chrome.tabs.get(tabId).catch(() => null);
     url = t?.url || t?.pendingUrl || '';
-    if (!url || url === 'about:blank') { url = ''; await new Promise(r => setTimeout(r, 200)); }
+    if (!url || url === 'about:blank' || NEW_TAB.test(url)) { url = ''; await new Promise(r => setTimeout(r, 200)); }
   }
   send({ type: 'userEvent', session, event: { kind, url: url || 'about:blank', tab: tabId, ts, ...(by && { by }) } });
 }
@@ -1793,6 +1793,15 @@ async function pinLab() {
   await chrome.tabs.update(tabs[0].id, { pinned: true }).catch(() => {});
 }
 chrome.tabs.onUpdated.addListener((id, info) => { if (info.status === 'complete') pinLab().catch(() => {}); });
+
+// Chrome's own new tab page becomes the test page. Done by redirecting, not by overriding the new tab page,
+// which would make Chrome ask "Change back to Google?".
+const NEW_TAB = /^chrome:\/\/(newtab|new-tab-page)\/?$/;
+const toLab = async tab => {
+  if (NEW_TAB.test(tab.pendingUrl || tab.url || '')) await chrome.tabs.update(tab.id, { url: await labUrl() }).catch(() => {});
+};
+chrome.tabs.onCreated.addListener(toLab);
+chrome.tabs.onUpdated.addListener((id, info, tab) => { if (info.url) toLab(tab); });
 
 chrome.webNavigation.onErrorOccurred.addListener(async d => {
   if (d.frameId !== 0 || /ERR_ABORTED/.test(d.error) || !(await isLab(d.url))) return;
