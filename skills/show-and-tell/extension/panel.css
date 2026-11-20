@@ -133,6 +133,19 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 @keyframes talk { 50% { scale: .55; opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .working .text, .working .spark svg circle, .msg { animation: none; } }
 
+/* The agent's replies (Markdown). */
+.md { display: flex; flex-direction: column; gap: var(--tight); overflow-wrap: anywhere; }
+.md p, .md ul, .md ol, .md pre, .md blockquote { margin: 0; }
+.md ul, .md ol { padding-left: 24px; display: flex; flex-direction: column; gap: 4px; }
+.md .h { font: 500 16px/24px var(--md-ref-typeface-plain); letter-spacing: .15px; }
+.md .h1 { font: 400 22px/28px var(--md-ref-typeface-brand); }
+.md code { font: 400 .9em/1.4 ui-monospace, Consolas, monospace; padding: 1px 6px; border-radius: 6px;
+  background: var(--md-sys-color-surface-container-high); }
+.md pre { padding: 12px 16px; border-radius: 12px; background: var(--md-sys-color-surface-container); overflow-x: auto; }
+.md pre code { padding: 0; background: none; font-size: 13px; line-height: 20px; white-space: pre; }
+.md blockquote { padding-left: 12px; border-left: 3px solid var(--md-sys-color-outline-variant); color: var(--md-sys-color-on-surface-variant); }
+.md a { color: var(--md-sys-color-primary); }
+
 /* Questions from the agent sit in the conversation: an inline card with actions. */
 .host-ask {
   gap: 8px; padding: 16px 16px 8px; border-radius: 16px;

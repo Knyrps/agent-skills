@@ -77,6 +77,11 @@ async function runCli() {
     case 'goto': return call('POST', '/cmd', { cmd: 'gotoStep', index: +positional[0] });
     case 'end': return call('POST', '/cmd', { cmd: 'endTour' });
     case 'request': return call('POST', '/cmd', { cmd: 'requestDemo', prompt: positional.join(' ') });
+    // say --session s <text>; the text may also come on stdin (`say --session s -`).
+    case 'say': {
+      const text = positional[0] === '-' ? fs.readFileSync(0, 'utf8') : positional.join(' ');
+      return call('POST', '/say', { session: opt('session'), label: opt('label'), text });
+    }
     case 'record': {
       if (!(await browserVersion())) await ensureBrowser();
       return call('POST', '/cmd', { cmd: 'recordTour', tour: JSON.parse(fs.readFileSync(positional[0], 'utf8')),
@@ -185,6 +190,9 @@ async function runMcp() {
     { name: 'stop_recording', description: 'Stop the video being recorded. discard=true deletes it; otherwise the part recorded so far is '
       + 'kept and delivered as videoReady with partial: true.',
     inputSchema: { type: 'object', properties: { discard: { type: 'boolean' } } } },
+    { name: 'say', description: 'Reply to the user in the show-and-tell side panel\'s conversation (Markdown). Use it to answer '
+      + 'what the user sent from the panel (messages, marks, recordings): they are looking at the panel, not at your chat.',
+    inputSchema: { type: 'object', required: ['text'], properties: { text: { type: 'string', description: 'Markdown: paragraphs, lists, **bold**, `code`, code blocks, links' } } } },
     { name: 'request_demo', description: 'Ask the user to show something in the page ("Show me where you would expect the filter"). '
       + 'The panel shows the prompt and starts recording; the user acts, stops and sends. Then wait: you get a recording action '
       + 'with requestId and prompt (clicks, right clicks, double clicks, long presses, typing, keys, shortcuts, swipes, scrolls, '
@@ -274,6 +282,7 @@ async function runMcp() {
           pace: a.pace, captions: a.captions, cards: a.cards, zoom: a.zoom, hidpi: a.hidpi, out: a.out }));
         case 'stop_recording': return done(await cmd({ cmd: 'recordStop', discard: !!a.discard }));
         case 'request_demo': return done(await cmd({ cmd: 'requestDemo', prompt: String(a.prompt || '') }));
+        case 'say': return done(await call('POST', '/say', { session: SESSION, label: LABEL, text: String(a.text || '') }));
         case 'goto_step': return done(await cmd({ cmd: 'gotoStep', index: +a.index }));
         case 'end_tour': return done(await cmd({ cmd: 'endTour' }));
         case 'set_step': return done(await cmd({ cmd: 'setStep', label: String(a.label ?? '') }));

@@ -269,6 +269,11 @@ async function onBridge(m) {
   }
   if (m.cmd === 'setWaiting') return S.set({ waiting: !!m.waiting, listener: String(m.listener || ''), sessions: m.sessions || [] });
   if (m.cmd === 'hosts') return setHostState(m);
+  if (m.cmd === 'thinking') return serial(async () => { const { thinking = {} } = await S.get('thinking'); thinking[m.session] = m.ts; await S.set({ thinking }); });
+  if (m.cmd === 'say') {
+    await serial(async () => { const { thinking = {} } = await S.get('thinking'); delete thinking[m.session]; await S.set({ thinking }); });
+    return chatAgent(m.session, { kind: 'say', text: String(m.text || '') });
+  }
   if (m.cmd === 'activity') {
     const a = { text: String(m.text || ''), who: String(m.who || ''), session: String(m.session || ''), ts: Date.now() };
     // A run of browser actions is one entry that updates in place, like an agent's "working" line.

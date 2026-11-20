@@ -1,4 +1,5 @@
 import { loadConfig, hostAllowed } from './allow.js';
+import { markdown } from './markdown.js';
 
 const $ = id => document.getElementById(id);
 const S = chrome.storage.session;
@@ -133,7 +134,22 @@ function agentMsg(m) {
   } else if (m.kind === 'point') {
     body.append(el('div', 'md-typescale-label-medium muted', `Pointed at something${m.host ? ` on ${m.host}` : ''}`),
       el('div', 'md-typescale-body-large', m.text || m.selector), el('div', 'md-typescale-label-small muted', clock(m.ts)));
+  } else if (m.kind === 'say') {
+    const md = markdown(m.text || '');
+    md.classList.add('md-typescale-body-large');
+    body.append(md, el('div', 'md-typescale-label-small muted', clock(m.ts)));
   } else body.append(el('div', 'md-typescale-body-large', m.text || ''));
+  row.append(spark(), body);
+  return row;
+}
+
+// Between the user's message reaching the agent and its reply here. A reply that never comes here (the
+// agent answered in its own chat, or the harness has no panel replies) is pointed out after 2 minutes.
+function thinkingMsg(since) {
+  const row = el('div', 'msg agent'), body = el('div', 'agent-body');
+  const late = Date.now() - since > 120000;
+  if (!late) row.classList.add('working');
+  body.append(el('div', 'text md-typescale-body-medium', late ? 'No reply here yet. It may have answered in the agent chat.' : 'Thinking…'));
   row.append(spark(), body);
   return row;
 }
@@ -143,18 +159,20 @@ async function renderChat(jump = false) {
   clearTimeout(chatTimer);
   const box = $('chat');
   const atEnd = jump || box.scrollHeight - box.scrollTop - box.clientHeight < 48;
-  const { chats = {}, demoRequest, hostQuestions = [] } = await S.get(['chats', 'demoRequest', 'hostQuestions']);
+  const { chats = {}, demoRequest, hostQuestions = [], thinking = {} } = await S.get(['chats', 'demoRequest', 'hostQuestions', 'thinking']);
   const me = await frontSession();
   const list = chats[me?.id || ''] || [];
   // A pending request shows as its live card instead of its history entry.
   const shown = demoRequest ? list.filter((m, i) => !(m.kind === 'request' && i === list.findLastIndex(x => x.kind === 'request'))) : list;
-  $('log').replaceChildren(...shown.map(m => (m.role === 'user' ? userMsg(m) : agentMsg(m))));
+  const since = me && thinking[me.id];
+  $('log').replaceChildren(...shown.map(m => (m.role === 'user' ? userMsg(m) : agentMsg(m))), ...(since ? [thinkingMsg(since)] : []));
+  if (since && Date.now() - since <= 120000) chatTimer = setTimeout(renderChat, 120000 - (Date.now() - since) + 100);
   $('empty').hidden = shown.length > 0 || !!demoRequest || hostQuestions.length > 0;
   $('empty-text').textContent = me ? `Mark the page, show it by doing it, or just ask ${me.name}.` : 'Mark the page, show it by doing it, or just ask.';
   if (atEnd) box.scrollTop = box.scrollHeight;
   // The "working" sheen ends 5 s after the last action.
   const last = list[list.length - 1];
-  if (last?.kind === 'activity' && Date.now() - last.ts < 5000) chatTimer = setTimeout(renderChat, 5000 - (Date.now() - last.ts) + 50);
+  if (last?.kind === 'activity' && Date.now() - last.ts < 5000) { clearTimeout(chatTimer); chatTimer = setTimeout(renderChat, 5000 - (Date.now() - last.ts) + 50); }
 }
 
 async function renderThrottle() {
@@ -323,7 +341,7 @@ chrome.storage.onChanged.addListener((c, area) => {
   if (c.recording || c.recordingDraft || c.annotationDraft || c.demoRequest) renderRecording();
   if (c.hostState || c.connected) refreshTab();
   if (c.hostQuestions) renderHostAsk();
-  if (c.chats || c.sessionTabs || c.sessions || c.demoRequest || c.hostQuestions) renderChat();
+  if (c.chats || c.sessionTabs || c.sessions || c.demoRequest || c.hostQuestions || c.thinking) renderChat();
   if (c.throttles) renderThrottle();
 });
 renderHostAsk();

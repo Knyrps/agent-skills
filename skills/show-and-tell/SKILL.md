@@ -101,9 +101,14 @@ The user can send at any time. You hear it through a **watcher**, a background s
 
 ## What the user sends
 
-Every item in `actions` has a `type` (and `step` while a tour runs):
+Every item in `actions` has a `type` (and `step` while a tour runs).
 
-- `question`: a message (`text`). Answer it in chat.
+**Answer where the user asked.** The user who writes, marks or records in the panel is looking at the panel:
+reply with `say({ text })` (Markdown; shell-only hosts: `node "<skill>/bridge" say --session <id> -` with the
+text on stdin, the id is in the watcher command). The panel shows "Thinking…" until you do. In your own chat
+add one line at most ("Answered in the panel."). Questions asked in your chat are answered in your chat.
+
+- `question`: a message (`text`).
 - `annotation`: the user marked the page ("Annotate": a click marks an element, dragging draws) and wrote
   `text`. You get an inline image only you see: the user's numbered, coloured marks and notes plus dashed
   outlines labelled `1a`, `1b`… around the elements each mark refers to. `annotations[]` is the legend: `n`,

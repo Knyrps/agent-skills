@@ -204,6 +204,10 @@ export function startOwner({ standalone = false } = {}) {
       queue = keep;
       persist();
       setWaiters(() => { for (const [w, actions] of deliveries) { clearTimeout(w.timer); json(w.res, 200, { actions }); waiters.delete(w); } });
+      // The user's message reached a session: the panel shows it thinking until it replies there.
+      for (const [w, actions] of deliveries) {
+        if (w.session && actions.some(a => ['question', 'annotation', 'recording'].includes(a.type))) broadcast({ cmd: 'thinking', session: w.session, ts: Date.now() });
+      }
     }
 
     async function onAction(conn, msg) {
@@ -354,6 +358,16 @@ export function startOwner({ standalone = false } = {}) {
           : decision === 'timeout' ? `the user did not answer the question about ${r.host} in the side panel (is it open?)`
             : `could not ask about ${r.host}: ${decision.replace(/^offline:/, '')}`;
         return json(res, 200, { ok: false, host: r.host, decision, error });
+      }
+      // The agent answers in the panel's conversation (Markdown).
+      if (route === 'POST /say') {
+        let body = {};
+        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
+        const text = String(body.text || '').trim().slice(0, 20000);
+        if (!body.session || !text) return json(res, 400, { error: 'session and text are required' });
+        touch(body.session, body.label);
+        broadcast({ cmd: 'say', session: body.session, text, who: nameOf(body.session) });
+        return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
       }
       // A session's browser call starts or ends (only the driver of that session sends this).
       if (route === 'POST /busy') {
