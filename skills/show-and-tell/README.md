@@ -97,7 +97,7 @@ whatever Chromium is listening on that port.
    The rule covers the `browser_*` tools too; the agent can ask but never grant.
 
 Environment overrides: `DEMO_BROWSER_PATH` (any Chromium that honours `--load-extension`, for
-example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_DATA`
+example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_LAB_PORT` (47614, the test page), `DEMO_DATA`
 (queue, screenshots and profile; default `%LOCALAPPDATA%\show-and-tell` on Windows,
 `~/Library/Application Support/show-and-tell` on macOS, `~/.local/share/show-and-tell` on Linux).
 
@@ -116,7 +116,10 @@ When the agent host runs the show-and-tell MCP, that process owns the bridge por
 
 ## Manual test of every control
 
-`node <skill>/scripts/lab.mjs` serves a test page on `http://localhost:5191/` (and `/next`), built like a
+The bridge serves a test page on `http://localhost:47614/` (and `/next`; `DEMO_LAB_PORT` changes the port)
+whenever it runs, and the browser opens it on start. It is not a separate process: while no bridge runs
+(no agent session with show-and-tell, no `bridge serve`), its tab shows a notice and switches to the page
+once a bridge is up. Agent sessions never take the lab tab over as their own. The page is built like a
 Material 3 app with Material Web components (their controls live in shadow DOM, as in real apps). Every
 element reacts to real mouse, touch and keyboard input and to the skill's scripted actions, and a log at
 the bottom says who caused each event:
@@ -140,7 +143,7 @@ only filter what is shown, so changing them also shows or hides earlier events.
 `Input.*`, trusted like a person's) and checks every element and control: taps, double taps, long press,
 pinch, swipe, drag and drop, clicks, menus, typing, forms, dialogs, shortcuts, Annotate (including Esc while
 the panel has focus), Record, Send, throttling, the host question and notice, tour Next/Back and video
-Discard. It needs the browser, a bridge and the lab running. It starts by emptying the panel's message
+Discard. It needs the browser and a bridge running. It starts by emptying the panel's message
 queue, and each run leaves a temporary `*.nip.io` host allowed until the browser restarts.
 
 By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo browser, then:

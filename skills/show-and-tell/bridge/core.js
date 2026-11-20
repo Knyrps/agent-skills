@@ -8,6 +8,7 @@ import path from 'node:path';
 import { acceptUpgrade, rejectUpgrade } from './ws.js';
 import { defragment } from './mp4.js';
 import { createHosts } from './hosts.js';
+import { labHandler, LAB_PORT, LAB_URL } from '../scripts/lab.mjs';
 
 export const PORT = +(process.env.DEMO_BRIDGE_PORT || 47613);
 export const CDP_PORT = +(process.env.DEMO_CDP_PORT || 9334);
@@ -30,7 +31,7 @@ const QUEUE_FILE = path.join(DATA, 'queue.json');
 // owner hands the port over when a newer bridge asks (POST /yield), so an edit takes effect without
 // hunting down stale processes.
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
-export const VERSION = Math.max(...['core.js', 'index.js', 'ws.js', 'hosts.js', 'driver.js', '../scripts/browser.mjs']
+export const VERSION = Math.max(...['core.js', 'index.js', 'ws.js', 'hosts.js', 'driver.js', '../scripts/browser.mjs', '../scripts/lab.mjs']
   .map(f => { try { return fs.statSync(path.join(HERE, f)).mtimeMs; } catch { return 0; } }));
 const SHOTS = path.join(DATA, 'shots');
 export const VIDEOS = path.join(DATA, 'videos');
@@ -177,6 +178,7 @@ export function startOwner({ standalone = false } = {}) {
       for (const [session, label] of state.steps) c.send(JSON.stringify({ cmd: 'setStep', label, session }));
       c.send(JSON.stringify({ cmd: 'setWaiting', ...listener() }));
       c.send(JSON.stringify({ cmd: 'hosts', ...hosts.state() }));
+      c.send(JSON.stringify({ cmd: 'lab', url: LAB_URL }));
     };
     // Commands that need an answer (highlight etc.) go to the most recently connected extension.
     const requestExt = (msg, ms = 8000) => new Promise((resolve, reject) => {
@@ -311,7 +313,7 @@ export function startOwner({ standalone = false } = {}) {
         return;
       }
       if (route === 'GET /status') return json(res, 200, { ok: true, pid: process.pid, standalone, version: VERSION,
-        extensionConnected: exts.size > 0, panelOpen: exts.size > 0 && state.panelOpen,
+        extensionConnected: exts.size > 0, panelOpen: exts.size > 0 && state.panelOpen, lab: LAB_URL,
         steps: Object.fromEntries([...state.steps].map(([s, l]) => [nameOf(s) || s, l])), queued: queue.length, waiters: waiters.size,
         owner: owner && { session: owner, label: nameOf(owner) || owner }, listening: listener().waiting,
         sessions: listener().sessions,
@@ -488,11 +490,25 @@ export function startOwner({ standalone = false } = {}) {
     });
 
     server.once('error', reject);
-    server.listen(PORT, '127.0.0.1', () => { server.off('error', reject); resolve(server); });
+    server.listen(PORT, '127.0.0.1', () => { server.off('error', reject); serveLab(server); resolve(server); });
   });
 }
 
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
+
+// The test page (scripts/lab.mjs) on its own port, for as long as this process owns the bridge port. A
+// handover closes it with the bridge; the new owner may need a moment until the port is free again.
+function serveLab(bridge) {
+  let lab = null, tries = 0, stopped = false;
+  const start = () => {
+    if (stopped) return;
+    const s = http.createServer(labHandler);
+    s.once('error', e => { if (++tries < 20) setTimeout(start, 500).unref(); else log('test page not served:', e.message); });
+    s.listen(LAB_PORT, '127.0.0.1', () => { lab = s; });
+  };
+  bridge.on('close', () => { stopped = true; lab?.close(); lab?.closeAllConnections?.(); });
+  start();
+}
 
 // One line per user event, e.g. `14:02:11 clicked button "Sortieren"`.
 export function userEventText(e) {

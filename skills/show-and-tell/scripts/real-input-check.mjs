@@ -1,7 +1,7 @@
 // End-to-end check with real input: CDP Input.* events, which pages receive as trusted, like a person's
 // mouse, touch and keyboard. Covers every element of the lab page and every control of the side panel.
-// Needs: the browser (node scripts/browser.mjs start), the bridge (an agent session or `node bridge serve`)
-// and the lab (node scripts/lab.mjs). Run: node scripts/real-input-check.mjs
+// Needs the browser (node scripts/browser.mjs start) and a bridge (an agent session or `node bridge serve`),
+// which serves the lab page. Run: node scripts/real-input-check.mjs
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SKILL = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const LAB = process.env.LAB_URL || 'http://localhost:5191/';
+const LAB = process.env.LAB_URL || `http://localhost:${process.env.DEMO_LAB_PORT || 47614}/`;
 const CDP = 'http://127.0.0.1:' + (process.env.DEMO_CDP_PORT || 9334);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const results = [];

@@ -2,18 +2,21 @@
 // skill's scripted actions), and a log at the bottom lists what happened, trusted or synthetic. It is built
 // like a Material 3 app (M3 color tokens, type scale, Material Web components), so the controls live in
 // shadow DOM the way they do in real apps.
-// node scripts/lab.mjs [port]  → http://localhost:5191/  (and /next for a second page)
+// The bridge serves it on http://localhost:47614/ (and /next for a second page) whenever it runs, and the
+// browser opens it on start. On its own: node scripts/lab.mjs [port]
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Its own port, not the bridge's: the page's scripts must not reach the bridge API.
+export const LAB_PORT = +(process.env.DEMO_LAB_PORT || 47614);
+export const LAB_URL = `http://localhost:${LAB_PORT}/`;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FILES = {
   '/material-lab.js': [path.join(here, 'lab-vendor', 'material-lab.js'), 'text/javascript'],
   '/m3-tokens.css': [path.join(here, '..', 'extension', 'vendor', 'm3-tokens.css'), 'text/css'],
 };
-const port = +(process.argv[2] || process.env.LAB_PORT || 5191);
 // Enough cards to overflow the strip even on very wide screens.
 const cards = Array.from({ length: 20 }, (_, i) => `<div class="item md-typescale-label-large" data-n="${i + 1}">Product ${i + 1}</div>`).join('');
 
@@ -381,14 +384,22 @@ const LAB = page('Gesture lab', [
 
 const NEXT = page('Next page', card('second', 'Second page', 'For recordings that span pages.', '', 'wide'));
 
-http.createServer((q, r) => {
+// Static pages only (GET/HEAD). Any host name is accepted: the real-input check reaches the lab through a
+// *.nip.io name to test a host that is not allowed yet.
+export function labHandler(q, r) {
+  if (q.method !== 'GET' && q.method !== 'HEAD') { r.writeHead(405); return r.end(); }
   const p = new URL(q.url, 'http://x').pathname;
   if (FILES[p]) {
     const [file, type] = FILES[p];
     r.writeHead(200, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-store' });
-    return fs.createReadStream(file).pipe(r);
+    return q.method === 'HEAD' ? r.end() : fs.createReadStream(file).pipe(r);
   }
   if (p !== '/' && p !== '/next') { r.writeHead(404); return r.end(); }
   r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-  r.end(p === '/next' ? NEXT : LAB);
-}).listen(port, '127.0.0.1', () => console.log(`lab on http://localhost:${port}/`));
+  r.end(q.method === 'HEAD' ? undefined : p === '/next' ? NEXT : LAB);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const port = +(process.argv[2] || LAB_PORT);
+  http.createServer(labHandler).listen(port, '127.0.0.1', () => console.log(`lab on http://localhost:${port}/`));
+}

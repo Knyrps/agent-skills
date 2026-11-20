@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cdpSession } from '../bridge/ws.js';
 import { getJson, EXT_ID, DATA } from '../bridge/core.js';
+import { LAB_URL } from './lab.mjs';
 
 const SKILL = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXT = path.join(SKILL, 'extension');
@@ -80,8 +81,22 @@ async function start() {
   }
   let panel = false, panelError;
   try { await openPanel(); panel = true; } catch (e) { panelError = e.message; }
+  if (!reused) await openLab().catch(e => log('test page not opened:', e.message));
   return { ok: true, cdpEndpoint: BASE, reused, browser: BROWSER, profile: PROFILE, panel,
     ...(panelError && { panelError, hint: 'click the show-and-tell icon in the toolbar (puzzle menu) to open the side panel' }) };
+}
+
+// The test page is the browser's start page: opened on start unless a restored tab already shows it. It
+// replaces the empty new tab Chrome opens on a fresh profile.
+async function openLab() {
+  const pages = (await getJson(`${BASE}/json/list`)).filter(t => t.type === 'page');
+  const offline = `chrome-extension://${EXT_ID}/lab-offline.html`;
+  if (pages.some(t => t.url.startsWith(LAB_URL) || t.url.startsWith(offline))) return;
+  const browser = await cdpSession((await version()).webSocketDebuggerUrl);
+  try {
+    await browser.send('Target.createTarget', { url: LAB_URL });
+    for (const t of pages.filter(t => /^chrome:\/\/new-?tab/.test(t.url))) await browser.send('Target.closeTarget', { targetId: t.id }).catch(() => {});
+  } finally { browser.close(); }
 }
 
 // Chrome keeps an unpacked extension's service-worker script cached in the profile while the manifest

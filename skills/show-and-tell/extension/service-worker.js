@@ -238,7 +238,7 @@ function sessionTab(m, { create = true } = {}) {
     if (!create) return null;
     const owned = new Set(Object.values(map).map(x => x.tabId));
     const front = await activeTab();
-    let t = front && !owned.has(front.id) && !front.url.startsWith('chrome-extension://') && front.groupId < 0 ? front : null;
+    let t = front && !owned.has(front.id) && !front.url.startsWith('chrome-extension://') && front.groupId < 0 && !(await isLab(front.url)) ? front : null;
     t ||= await chrome.tabs.create({ windowId: front?.windowId, active: true,
       url: chrome.runtime.getURL('tab.html') + '?s=' + encodeURIComponent(m.session) + '&n=' + encodeURIComponent(m.sessionName || '') });
     const name = m.sessionName || 'agent', color = m.color || 'blue';
@@ -367,6 +367,7 @@ async function onBridge(m) {
     return sweepTabs(m.sessions || [], m.ended || []);
   }
   if (m.cmd === 'hosts') return setHostState(m);
+  if (m.cmd === 'lab') return S.set({ labUrl: String(m.url || LAB_DEFAULT) });
   if (m.cmd === 'thinking') return serial(async () => { const { thinking = {} } = await S.get('thinking'); thinking[m.session] = m.ts; await S.set({ thinking }); });
   if (m.cmd === 'say') {
     await serial(async () => { const { thinking = {} } = await S.get('thinking'); delete thinking[m.session]; await S.set({ thinking }); });
@@ -1431,6 +1432,18 @@ const userNav = (kind, { tabId, frameId, url, transitionType }) => {
 };
 chrome.webNavigation.onCommitted.addListener(d => userNav('navigate', d));
 chrome.webNavigation.onHistoryStateUpdated.addListener(d => userNav('urlChange', d));
+// ------------------------------------------------------------------ the test page
+// The bridge serves it (scripts/lab.mjs) and the browser opens it on start. While no bridge runs, its tab
+// shows a notice that switches to the page once a bridge is up, instead of Chrome's error page. Sessions
+// never take the lab tab over as their own; they open a tab of their own next to it.
+const LAB_DEFAULT = 'http://localhost:47614/';
+const labUrl = async () => (await S.get('labUrl')).labUrl || LAB_DEFAULT;
+async function isLab(url) { try { return new URL(url).origin === new URL(await labUrl()).origin; } catch { return false; } }
+chrome.webNavigation.onErrorOccurred.addListener(async d => {
+  if (d.frameId !== 0 || /ERR_ABORTED/.test(d.error) || !(await isLab(d.url))) return;
+  await chrome.tabs.update(d.tabId, { url: chrome.runtime.getURL('lab-offline.html') + '?u=' + encodeURIComponent(d.url) }).catch(() => {});
+});
+
 // Jumps within the page (#anchors, a table of contents) change only the fragment.
 chrome.webNavigation.onReferenceFragmentUpdated.addListener(d => userNav('urlChange', d));
 
