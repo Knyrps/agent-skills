@@ -32,7 +32,7 @@ async function ensureBrowser({ force = false } = {}) {
 const [cmd, ...rest] = process.argv.slice(2);
 const opt = name => { const i = rest.indexOf('--' + name); return i >= 0 ? rest[i + 1] : undefined; };
 const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out', '--zoom', '--gesture', '--direction', '--to', '--url',
-  '--session', '--label', '--download', '--upload', '--latency']);
+  '--session', '--label', '--download', '--upload', '--latency', '--cpu']);
 const NETWORK_PRESETS = ['fast-4g', 'slow-4g', '3g', 'offline'];
 const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
 const positional = rest.filter((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
@@ -70,7 +70,8 @@ async function runCli() {
     case 'clear': return call('POST', '/cmd', { cmd: 'clearHighlights', id: positional[0] });
     case 'hide': return call('POST', '/cmd', { cmd: 'hideOverlays', hidden: true });
     case 'throttle': return call('POST', '/cmd', { cmd: 'throttle', network: opt('download')
-      ? { downloadKbps: +opt('download'), uploadKbps: opt('upload') && +opt('upload'), latencyMs: +(opt('latency') || 0) } : positional[0] || 'off' });
+      ? { downloadKbps: +opt('download'), uploadKbps: opt('upload') && +opt('upload'), latencyMs: +(opt('latency') || 0) }
+      : positional[0] || (opt('cpu') ? undefined : 'off'), cpu: opt('cpu') && +opt('cpu') });
     case 'show': return call('POST', '/cmd', { cmd: 'hideOverlays', hidden: false });
     case 'tour': return call('POST', '/cmd', { cmd: 'loadTour', tour: JSON.parse(fs.readFileSync(positional[0], 'utf8')), start: +(opt('start') || 0) });
     case 'goto': return call('POST', '/cmd', { cmd: 'gotoStep', index: +positional[0] });
@@ -134,6 +135,7 @@ async function runMcp() {
       + '{press: key, on?: css} or {wait: ms}. In a video a drawn cursor or finger performs them visibly.' },
     section: { type: 'string', description: 'Video only: a section name; a section slide appears when it changes' },
     network: { type: 'string', enum: [...NETWORK_PRESETS, 'off'], description: 'Throttle the network from this step on, like DevTools; "off" ends it (so does the end of the tour or video)' },
+    cpu: { type: 'number', description: 'CPU slowdown factor from this step on, like DevTools (4, 6, …); 1 ends it' },
     highlights: { type: 'array', description: 'Same fields as highlight() incl. gesture/direction/to; the first replaces, the rest are kept', items: { type: 'object' } },
     agent: { type: 'boolean', description: 'The agent performs this step itself (it receives an agentStep action)' },
     caption: { type: ['string', 'boolean'], description: 'Video only: subtitle text instead of explanation; false = none' },
@@ -204,11 +206,13 @@ async function runMcp() {
     } } },
     { name: 'clear_highlights', description: 'Remove one highlight by id, or all highlights when id is omitted.',
       inputSchema: { type: 'object', properties: { id: { type: 'string' } } } },
-    { name: 'throttle', description: 'Throttle the network of your tab like Chrome DevTools: a preset (fast-4g, slow-4g, 3g, offline), '
-      + 'custom kbit/s and latency, or off. It stays until off, the tab closes or the browser restarts; the panel shows it and lets the user turn it off. '
-      + 'Useful to show or check loading states, spinners and offline handling.',
+    { name: 'throttle', description: 'Throttle your tab like Chrome DevTools: the network (a preset fast-4g, slow-4g, 3g, offline, or custom kbit/s '
+      + 'and latency) and/or the CPU (slowdown factor, e.g. 4 or 6). Each is set on its own; preset "off" without cpu resets both. It stays until off, '
+      + 'the tab closes or the browser restarts; the panel shows it and lets the user turn it off. Useful to show or check loading states, spinners, '
+      + 'offline handling and how the page behaves on slow devices.',
     inputSchema: { type: 'object', properties: {
-      preset: { type: 'string', enum: [...NETWORK_PRESETS, 'off'] },
+      preset: { type: 'string', enum: [...NETWORK_PRESETS, 'off'], description: 'Network preset; "off" ends network throttling' },
+      cpu: { type: 'number', description: 'CPU slowdown factor 1-20 like DevTools (4 = "4× slowdown"); 1 ends it' },
       downloadKbps: { type: 'number', description: 'Custom download speed in kbit/s (instead of preset)' },
       uploadKbps: { type: 'number', description: 'Custom upload speed in kbit/s (default: same as download)' },
       latencyMs: { type: 'number', description: 'Custom added latency in ms' },
@@ -261,8 +265,11 @@ async function runMcp() {
           gesture: a.gesture, direction: a.direction, to: a.to, url: a.url } }));
         case 'clear_highlights': return done(await cmd({ cmd: 'clearHighlights', id: a.id }));
         case 'hide_overlays': return done(await cmd({ cmd: 'hideOverlays', hidden: a.hidden !== false }));
-        case 'throttle': return done(await cmd({ cmd: 'throttle', network: a.downloadKbps
-          ? { downloadKbps: a.downloadKbps, uploadKbps: a.uploadKbps, latencyMs: a.latencyMs } : a.preset || 'off' }));
+        case 'throttle': {
+          const network = a.downloadKbps ? { downloadKbps: a.downloadKbps, uploadKbps: a.uploadKbps, latencyMs: a.latencyMs } : a.preset;
+          if (network === undefined && a.cpu === undefined) return reply({ ok: false, error: 'give preset, downloadKbps or cpu ("off" resets both)' });
+          return done(await cmd({ cmd: 'throttle', network, cpu: a.cpu }));
+        }
         case 'get_queue': return withShots(await call('GET', '/queue' + (a.recent ? '?recent=1' : '')));
         case 'wait_for_action': {
           const t = Math.max(1, Math.min(86400, +(a.timeoutSec || 600)));

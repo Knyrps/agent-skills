@@ -26,6 +26,7 @@ Page loads are cut out. The real mouse and keyboard are blocked while recording;
 | `dwell` | ms the step stays on screen; default is the reading time of the caption |
 | `section` | Section name; a slide appears when it changes |
 | `video: false` | The step runs off camera (sign-ins, resets) |
+| `cpu` | CPU slowdown from this step on (`4`, `6`; `1` ends it), e.g. to show how the page feels on a slow device |
 | `network` | Throttle from this step on: `fast-4g`, `slow-4g`, `3g`, `offline`, `off`. Full page loads are cut out of the video, so it shows what loads within a page (spinners, lazy lists, offline messages) |
 
 ## Actions

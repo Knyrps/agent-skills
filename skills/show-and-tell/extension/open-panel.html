@@ -1,7 +1,12 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head><meta charset="utf-8"><title>show-and-tell</title>
-<style>html,body{margin:0;height:100%}button{all:unset;position:fixed;inset:0;display:grid;place-items:center;
-font:16px "Segoe UI",system-ui,sans-serif;color:#64748b;cursor:pointer}</style></head>
-<body><button id="open">Open the show-and-tell panel</button><script src="open-panel.js"></script></body>
+<link rel="stylesheet" href="vendor/m3-tokens.css">
+<!-- The whole page is the button (a click anywhere opens the panel); it looks like an M3 filled tonal button. -->
+<style>html,body{margin:0;height:100%;background:var(--md-sys-color-surface)}
+button{all:unset;position:fixed;inset:0;display:grid;place-items:center;cursor:pointer}
+button span{padding:10px 24px;border-radius:20px;background:var(--md-sys-color-secondary-container);
+color:var(--md-sys-color-on-secondary-container);font:500 14px/20px system-ui,"Segoe UI",Roboto,sans-serif;letter-spacing:.1px}
+button:hover span{background:color-mix(in srgb,var(--md-sys-color-on-secondary-container) 8%,var(--md-sys-color-secondary-container))}</style></head>
+<body><button id="open"><span>Open the show-and-tell panel</span></button><script src="open-panel.js"></script></body>
 </html>

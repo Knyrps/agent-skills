@@ -116,11 +116,11 @@ async function renderThrottle() {
   const { throttles = {} } = await S.get('throttles');
   const t = frontTabId != null ? throttles[frontTabId] : null;
   $('throttle').hidden = !t;
-  if (t) $('throttle-label').textContent = t.label;
+  if (t) $('throttle-label').textContent = [t.network && `Network ${t.network}`, t.cpu && `CPU ${t.cpu}× slower`].filter(Boolean).join(' · ');
 }
 $('throttle-off').addEventListener('click', async () => {
   const r = await chrome.runtime.sendMessage({ type: 'throttleOff' });
-  toast(r?.ok ? 'Network throttling is off for this tab.' : 'Could not turn throttling off.');
+  toast(r?.ok ? 'Throttling is off for this tab.' : 'Could not turn throttling off.');
 });
 
 // The agent wants to work on a host that is not allowed; the user decides here.

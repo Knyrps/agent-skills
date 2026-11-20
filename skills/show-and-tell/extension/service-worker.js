@@ -284,10 +284,15 @@ async function command(m) {
       if (video?.session && m.session && video.session !== m.session) return { ok: false, error: 'this video belongs to another session' };
       return recordStop(m);
     case 'highlight': return highlight({ ...m, session: m.session || '', tab: await tabFor(m, { show: true }) });
+    // network and cpu are independent; "off" for the network without a cpu value resets both.
     case 'throttle': {
       const tab = await tabFor(m);
       if (!tab) return { ok: false, error: 'no tab' };
-      return { ...(await setNetwork(tab.id, m.network)), tabId: tab.id };
+      if (m.network === 'off' && m.cpu === undefined) return { ...(await throttleOff(tab.id)), tabId: tab.id };
+      const out = { ok: true, tabId: tab.id };
+      if (m.network !== undefined) Object.assign(out, await setNetwork(tab.id, m.network));
+      if (out.ok && m.cpu !== undefined) Object.assign(out, await setCpu(tab.id, m.cpu));
+      return out;
     }
     // A session clears its own highlights only.
     case 'clearHighlights':
@@ -322,7 +327,7 @@ async function command(m) {
       if (busy) return { ok: false, error: busy };
       const { tourSession: ts = '', tourTab: tt, tourThrottled } = await S.get(['tourSession', 'tourTab', 'tourThrottled']);
       await clearSessionHighlights(ts);
-      if (tourThrottled && tt != null) await setNetwork(tt, 'off');
+      if (tourThrottled && tt != null) await throttleOff(tt);
       await S.set({ tour: null, tourIndex: -1, explanation: '', step: '', tourRunning: false, tourSession: '', tourTab: null, tourThrottled: false });
       return { ok: true };
     }
@@ -430,11 +435,12 @@ async function gotoStep(index, { replay }) {
     const tab = tourTab != null ? await chrome.tabs.get(tourTab).catch(() => null) : await activeTab();
     if (!tab) throw new Error('the tour\'s tab was closed');
     // Going back (or jumping) replays from the last navigation, so the page state matches the step.
-    // `network` throttles the tour's tab from this step on ("off" ends it); ending the tour ends it too.
-    if (step.network !== undefined) {
-      const r = await setNetwork(tab.id, step.network);
-      if (!r.ok) throw new Error(`step ${index + 1}: ${r.error}`);
-      await S.set({ tourThrottled: r.network !== 'off' });
+    // `network` / `cpu` throttle the tour's tab from this step on ("off" / 1 end it); so does ending the tour.
+    if (step.network !== undefined || step.cpu !== undefined) {
+      for (const r of [step.network !== undefined && await setNetwork(tab.id, step.network), step.cpu !== undefined && await setCpu(tab.id, step.cpu)]) {
+        if (r && !r.ok) throw new Error(`step ${index + 1}: ${r.error}`);
+      }
+      await S.set({ tourThrottled: true });
     }
     let from = index;
     if (replay) while (from > 0 && !steps[from].url) from--;
@@ -537,12 +543,26 @@ const NETWORK = {
   offline: { label: 'Offline', offline: true, download: 0, upload: 0, latency: 0 },
 };
 const attachedTabs = new Set();
-const throttles = () => S.get('throttles').then(r => r.throttles || {});
+const throttles = () => S.get('throttles').then(r => r.throttles || {}); // tabId -> { network?, cpu? }
+const setThrottleState = (tabId, patch) => serial(async () => {
+  const t = await throttles();
+  const next = { ...(t[tabId] || {}), ...patch };
+  for (const k of Object.keys(next)) if (next[k] == null) delete next[k];
+  if (Object.keys(next).length) t[tabId] = next; else delete t[tabId];
+  await S.set({ throttles: t });
+  return next;
+});
 
 async function attachDebugger(tabId) {
   if (attachedTabs.has(tabId)) return;
   await chrome.debugger.attach({ tabId }, '1.3');
   attachedTabs.add(tabId);
+}
+// Nothing throttled any more: let go of the tab.
+async function detachIfIdle(tabId, state) {
+  if (Object.keys(state).length || !attachedTabs.has(tabId)) return;
+  await chrome.debugger.detach({ tabId }).catch(() => {});
+  attachedTabs.delete(tabId);
 }
 chrome.debugger.onDetach.addListener(({ tabId }) => {
   attachedTabs.delete(tabId);
@@ -555,10 +575,8 @@ async function setNetwork(tabId, spec) {
     if (attachedTabs.has(tabId)) {
       await chrome.debugger.sendCommand({ tabId }, 'Network.emulateNetworkConditions',
         { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }).catch(() => {});
-      await chrome.debugger.detach({ tabId }).catch(() => {});
-      attachedTabs.delete(tabId);
     }
-    await serial(async () => { const t = await throttles(); delete t[tabId]; await S.set({ throttles: t }); });
+    await detachIfIdle(tabId, await setThrottleState(tabId, { network: null }));
     return { ok: true, network: 'off' };
   }
   let n;
@@ -574,8 +592,29 @@ async function setNetwork(tabId, spec) {
   await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
   await chrome.debugger.sendCommand({ tabId }, 'Network.emulateNetworkConditions',
     { offline: !!n.offline, latency: n.latency, downloadThroughput: n.download, uploadThroughput: n.upload });
-  await serial(async () => { const t = await throttles(); t[tabId] = { label: n.label }; await S.set({ throttles: t }); });
+  await setThrottleState(tabId, { network: n.label });
   return { ok: true, network: n.label };
+}
+
+// CPU slowdown as in DevTools ("4× slowdown"): rate 1 (or "off") is full speed, at most 20.
+async function setCpu(tabId, rate) {
+  const r = rate === 'off' || rate == null ? 1 : Math.round(+rate * 10) / 10;
+  if (!(r >= 1 && r <= 20)) return { ok: false, error: 'cpu must be a slowdown factor from 1 (off) to 20, e.g. 4 or 6' };
+  if (r === 1) {
+    if (attachedTabs.has(tabId)) await chrome.debugger.sendCommand({ tabId }, 'Emulation.setCPUThrottlingRate', { rate: 1 }).catch(() => {});
+    await detachIfIdle(tabId, await setThrottleState(tabId, { cpu: null }));
+    return { ok: true, cpu: 'off' };
+  }
+  await attachDebugger(tabId);
+  await chrome.debugger.sendCommand({ tabId }, 'Emulation.setCPUThrottlingRate', { rate: r });
+  await setThrottleState(tabId, { cpu: r });
+  return { ok: true, cpu: `${r}× slowdown` };
+}
+
+// Network and CPU both back to normal.
+async function throttleOff(tabId) {
+  await setCpu(tabId, 'off');
+  return { ...(await setNetwork(tabId, 'off')), cpu: 'off' };
 }
 
 async function captureArea(tab, spec) {
@@ -961,10 +1000,11 @@ async function runVideo(v) {
         await stage(v, { caption: null, lower: null,
           card: { kind: 'section', title: s.section, kicker: `Section ${sections.indexOf(s.section) + 1} of ${sections.length}` } });
       } else await stage(v, { card: !v.onCamera || v.stage.card?.kind === 'intro' ? v.stage.card : null, caption: null, lower: null });
-      if (s.network !== undefined) {
-        const r = await setNetwork(v.tabId, s.network);
-        if (!r.ok) throw new Error(`step ${i + 1}: ${r.error}`);
-        v.throttled = r.network !== 'off';
+      if (s.network !== undefined || s.cpu !== undefined) {
+        for (const r of [s.network !== undefined && await setNetwork(v.tabId, s.network), s.cpu !== undefined && await setCpu(v.tabId, s.cpu)]) {
+          if (r && !r.ok) throw new Error(`step ${i + 1}: ${r.error}`);
+        }
+        v.throttled = true;
       }
       if (s.url && i > 0) await navigate(v.tabId, s.url);
       await settle(v);
@@ -1042,7 +1082,7 @@ async function runVideo(v) {
     await S.set({ pointerAt: null });
     await restoreWindow(v.restore);
     if (v.zoomBefore) await chrome.tabs.setZoom(v.tabId, v.zoomBefore).catch(() => {});
-    if (v.throttled) await setNetwork(v.tabId, 'off').catch(() => {});
+    if (v.throttled) await throttleOff(v.tabId).catch(() => {});
     video = null;
     await clearSessionHighlights(v.session);
     await S.set({ video: null, step: '', explanation: '' });
@@ -1067,7 +1107,7 @@ async function handle(m, sender) {
   switch (m.type) {
     case 'videoStop': return video ? recordStop(m) : { ok: false };
     // The panel's "Turn off" for the tab in front; the user can always end throttling.
-    case 'throttleOff': { const t = await activeTab(); return t ? setNetwork(t.id, 'off') : { ok: false }; }
+    case 'throttleOff': { const t = await activeTab(); return t ? throttleOff(t.id) : { ok: false }; }
     // Only the panel answers: the user's click, never a bridge command.
     case 'hostDecision': {
       const q = hostAsks.get(String(m.host));

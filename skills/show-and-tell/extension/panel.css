@@ -31,7 +31,10 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .card.rec .muted, .card.rec .status { color: inherit; }
 .conn { display: inline-flex; align-items: center; gap: 6px; color: var(--md-sys-color-on-surface-variant); }
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); }
-.conn.ok .dot { background: #1e8e3e; }
+/* "Connected": an M3 custom (extended) colour, green tone 40 / tone 80 like the generated roles. */
+:root { --sat-color-success: #146c2e; }
+@media (prefers-color-scheme: dark) { :root { --sat-color-success: #6dd58c; } }
+.conn.ok .dot { background: var(--sat-color-success); }
 
 .card {
   position: relative; overflow: hidden;
@@ -95,7 +98,7 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
   display: flex; flex-direction: column; gap: 8px;
   padding: 20px 20px 12px; border-radius: 28px;
   background: var(--md-sys-color-surface-container-high); color: var(--md-sys-color-on-surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / .3), 0 2px 6px 2px rgb(0 0 0 / .15);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .3), 0 1px 3px 1px rgb(0 0 0 / .15); /* elevation 1 */
 }
 .host-ask-head { display: flex; align-items: center; gap: 8px; color: var(--md-sys-color-secondary); }
 .host-ask-head svg { width: 20px; height: 20px; }
@@ -140,7 +143,7 @@ md-outlined-text-field { width: 100%; resize: vertical; }
   position: fixed; left: 16px; right: 16px; bottom: 16px;
   padding: 14px 16px; border-radius: 4px;
   background: var(--md-sys-color-inverse-surface); color: var(--md-sys-color-inverse-on-surface);
-  box-shadow: 0 3px 5px -1px rgb(0 0 0 / .2), 0 6px 10px 0 rgb(0 0 0 / .14);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .3), 0 4px 8px 3px rgb(0 0 0 / .15); /* M3 snackbar: elevation 3 */
   opacity: 0; transform: translateY(8px); pointer-events: none;
   transition: opacity .15s, transform .15s;
 }
