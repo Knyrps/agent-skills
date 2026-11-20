@@ -144,7 +144,7 @@ export function startOwner({ standalone = false } = {}) {
       const r = recipients();
       return { waiting: r.length > 0, listener: owner ? nameOf(owner) || owner : '', ended: ended(),
         sessions: [...sessions.values()].filter(alive).map(s => ({ id: s.id, name: s.name, color: s.color,
-          listening: [...waiters].some(w => w.session === s.id) })) };
+          listening: [...waiters].some(w => w.session === s.id), ...(s.pid && { pid: s.pid }) })) };
     };
     // Tells the panel who receives its input and whether that session is listening right now.
     const announce = () => {
@@ -469,6 +469,17 @@ export function startOwner({ standalone = false } = {}) {
         else if (msg.type === 'result' && msg.rid) { const { type, rid: r, ...rest } = msg; replies.get(r)?.(rest); }
         else if (msg.type === 'panel') state.panelOpen = !!msg.open;
         else if (msg.type === 'userEvent') onUserEvent(msg);
+        // After the port changed hands (the old owner was an agent's MCP process that exited), the extension
+        // tells which sessions it has tabs for. Their processes are checked like any other, so a session
+        // whose process is gone counts as ended; a running one says hello again within 30 s.
+        else if (msg.type === 'knownSessions') {
+          for (const k of Array.isArray(msg.sessions) ? msg.sessions.slice(0, 50) : []) {
+            if (!k?.id || sessions.has(k.id) || !Number.isSafeInteger(k.pid) || k.pid <= 0) continue;
+            sessions.set(String(k.id), { id: String(k.id), label: String(k.name || 'agent'), name: String(k.name || 'agent'),
+              color: String(k.color || 'grey'), auto: false, seen: 0, pid: k.pid });
+          }
+          announced = ''; announce();
+        }
         // The user allowed a host from the panel (on their own, or answering the extension's question).
         else if (msg.type === 'hostGrant') { try { hosts.grant(msg.host, msg.mode); } catch (e) { log(e.message); } pushHosts(true); }
         else if (msg.type === 'ping') conn.send('{"type":"pong"}');

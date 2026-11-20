@@ -70,7 +70,10 @@ async function start() {
       '--silent-debugger-extension-api',
       // Video recording captures the tour tab without a click on the extension icon first.
       `--allowlisted-extension-id=${EXT_ID}`,
-      '--no-first-run', '--no-default-browser-check', '--start-maximized', 'about:blank'],
+      // The tabs (and the agents' tab groups) of the last run come back; the extension hands each group
+      // back to its session or ungroups it. No "Restore pages?" bubble after a hard exit.
+      '--restore-last-session', '--hide-crash-restore-bubble',
+      '--no-first-run', '--no-default-browser-check', '--start-maximized'],
     { detached: true, stdio: 'ignore' }).unref();
     for (let i = 0; i < 40 && !(await version()); i++) await sleep(250);
     if (!(await version())) throw new Error('browser did not open CDP on port ' + PORT);
@@ -142,6 +145,8 @@ async function stop() {
   const cdp = await cdpSession(v.webSocketDebuggerUrl);
   await cdp.send('Browser.close').catch(() => {});
   cdp.close();
+  // Wait until it has really exited, so it saves its session and a start right after is a fresh process.
+  for (let i = 0; i < 60 && (await version()); i++) await sleep(250);
   return { ok: true, stopped: true };
 }
 

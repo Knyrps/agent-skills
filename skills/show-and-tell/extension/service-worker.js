@@ -13,7 +13,7 @@ chrome.alarms.onAlarm.addListener(async () => {
   connect();
   // The bridge sends the session list only when it changes; tabs opened since then are swept here.
   const { sessions = [], endedSessions = [] } = await S.get(['sessions', 'endedSessions']);
-  if (endedSessions.length) sweepTabs(sessions, endedSessions);
+  sweepTabs(sessions, endedSessions);
 });
 chrome.runtime.onStartup.addListener(() => connect());
 chrome.runtime.onInstalled.addListener(() => connect());
@@ -80,7 +80,9 @@ async function askUser(host, why = '', who = '') {
 async function permit(url, why) {
   if (await allowed(url)) return '';
   const host = hostOf(url);
-  if (!host) return `not an http(s) page: ${url}`;
+  // The session's placeholder tab, a new tab page, …: nothing to ask the user about.
+  if (!host || !/^https?:/i.test(url)) return isPlaceholder(url) ? 'no page is open in your tab yet: pass url, or open one with browser_navigate first'
+    : `not an http(s) page: ${url}`;
   const decision = await askUser(host, why);
   if (decision === 'session' || decision === 'always') { await grantHost(host, decision); return ''; }
   return decision === 'no' ? `the user did not allow ${host}` : `the user did not answer the question about ${host} in the side panel`;
@@ -114,6 +116,8 @@ async function connect() {
     ping = setInterval(() => send({ type: 'ping' }), 20000); // traffic keeps the worker alive
     send({ type: 'panel', open: panels.size > 0 });
     resendGrants();
+    sessionTabs().then(map => send({ type: 'knownSessions', sessions: Object.entries(map).filter(([, e]) => e.pid && !e.ended)
+      .map(([id, e]) => ({ id, name: e.name, color: e.color, pid: e.pid })) }));
     flushOutbox();
   };
   sock.onmessage = e => {
@@ -276,11 +280,15 @@ async function rememberGroup(name) {
 
 function sweepTabs(live, endedIds) {
   return serial(async () => {
+    await adoptRestored(live);
     const map = await sessionTabs(), ids = new Set(live.map(s => s.id)), gone = new Set(endedIds);
     let changed = false;
     for (const [sid, e] of Object.entries(map)) {
       const t = await chrome.tabs.get(e.tabId).catch(() => null);
       if (!t) { delete map[sid]; changed = true; continue; }
+      // The pid goes back to a new bridge after a handover, so it can still tell when this session ends.
+      const pid = live.find(s => s.id === sid)?.pid;
+      if (pid && e.pid !== pid) { e.pid = pid; changed = true; }
       if (ids.has(sid) && !gone.has(sid)) {
         if (e.ended) { await groupTab(t, e.name, e.color); delete e.ended; delete e.looked; changed = true; }
         continue;
@@ -307,12 +315,17 @@ chrome.tabs.onActivated.addListener(({ tabId }) => serial(async () => {
   if (e) { e.looked = true; await S.set({ sessionTabs: map }); }
 }));
 
-// Runs with the first session list after a browser start, so live sessions are known.
-async function cleanupLastRun(live) {
+// Groups Chrome restores from the last run (it brings back tabs and groups, not the extension's map): one
+// whose name is a running session's goes back to it, on every sweep, since restored tabs can appear late.
+// In the first minute after the browser starts, groups of ours that no running session claims are
+// ungrouped and their placeholders closed. Tabs the user opened are never in our groups, so never touched.
+const bootedAt = S.get('bootedAt').then(async r => { if (r.bootedAt) return r.bootedAt; const t = Date.now(); await S.set({ bootedAt: t }); return t; });
+async function adoptRestored(live) {
   const { ourGroups = [] } = await chrome.storage.local.get('ourGroups');
-  if (!ourGroups.length) return;
-  const names = new Set(ourGroups), map = await sessionTabs();
+  if (!ourGroups.length) return false;
+  const names = new Set(ourGroups), map = await sessionTabs(), startup = Date.now() - (await bootedAt) < 60000;
   const owned = new Set(Object.values(map).map(x => x.tabId));
+  let changed = false;
   for (const g of await chrome.tabGroups.query({})) {
     const name = String(g.title || '').replace(/ · ended$/, '');
     if (!names.has(name)) continue;
@@ -322,18 +335,18 @@ async function cleanupLastRun(live) {
     if (s) {
       const keep = tabs.find(t => !isPlaceholder(t.url)) || tabs[0];
       map[s.id] = { tabId: keep.id, name: s.name, color: s.color };
+      owned.add(keep.id); changed = true;
       await chrome.tabGroups.update(g.id, { title: s.name, color: s.color }).catch(() => {});
       continue;
     }
+    if (!startup || live.some(x => x.name === name)) continue;
     for (const t of tabs) {
       if (isPlaceholder(t.url)) await chrome.tabs.remove(t.id).catch(() => {}); else await ungroup(t.id);
     }
   }
-  await S.set({ sessionTabs: map });
-  await chrome.storage.local.set({ ourGroups: Object.values(map).map(x => x.name) });
+  if (changed) await S.set({ sessionTabs: map });
+  return changed;
 }
-chrome.runtime.onStartup.addListener(() => S.set({ startupCleanup: true }));
-
 // ------------------------------------------------------------------ bridge -> extension
 
 async function onBridge(m) {
@@ -351,8 +364,6 @@ async function onBridge(m) {
   }
   if (m.cmd === 'setWaiting') {
     await S.set({ waiting: !!m.waiting, listener: String(m.listener || ''), sessions: m.sessions || [], endedSessions: m.ended || [] });
-    const { startupCleanup } = await S.get('startupCleanup');
-    if (startupCleanup) { await S.set({ startupCleanup: false }); await serial(() => cleanupLastRun(m.sessions || [])); }
     return sweepTabs(m.sessions || [], m.ended || []);
   }
   if (m.cmd === 'hosts') return setHostState(m);

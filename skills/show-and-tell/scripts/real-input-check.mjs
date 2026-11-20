@@ -58,7 +58,7 @@ const ENTER = ['Enter', 'Enter', 13], ESC = ['Escape', 'Escape', 27];
 
 // ---------------------------------------------------------------- setup
 let list = await targets();
-let tgt = list.find(t => t.type === 'page' && t.url.startsWith(LAB)) || list.find(t => t.type === 'page' && /^(https?:|about:blank)/.test(t.url));
+let tgt = list.find(t => t.type === 'page' && t.url.startsWith(LAB)) || list.find(t => t.type === 'page' && /^(https?:|about:blank|chrome:\/\/newtab)/.test(t.url));
 let P = await cdp(tgt.webSocketDebuggerUrl), p = input(P);
 await P.send('Page.enable');
 await P.send('Page.bringToFront');

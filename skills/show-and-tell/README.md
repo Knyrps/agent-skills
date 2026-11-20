@@ -127,6 +127,10 @@ the bottom says who caused each event:
 - `[agent · scripted]`: the extension playing the agent's tour or video steps (`data-show-and-tell-agent="scripted"`).
 - `[… · component]`: an event a component fires itself, credited to whoever acted last.
 
+Only calls through show-and-tell are recognised as the agent's. Anything else that drives this browser over
+CDP port 9334 (the real-input check below, raw CDP scripts, a separately configured Playwright) looks like a
+person's input and is labelled `[user]`; agent sessions are told about it as the user's too.
+
 The bug icon in the lab's top bar opens a debug panel: **Log events from** (User + Agent, User, Agent) and,
 under **Advanced…**, **Demo reactions** (the cards' own lines, the default log) plus every raw event type in
 groups, with search, All, None and Reset. Every event is kept in a buffer of 5,000 lines and the settings
