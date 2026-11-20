@@ -304,13 +304,16 @@ async function adoptTab(tab) {
   if (report) tabNews(report, 'newTab', tab.id, Date.now());
 }
 // What the agent hears about it, once the new tab knows its address.
+// by: 'user' when the user opened it from the panel; otherwise the bridge decides by the agent's call times.
+const panelTabs = new Set();
 async function tabNews(session, kind, tabId, ts, url = '') {
+  const by = panelTabs.delete(tabId) ? 'user' : undefined;
   for (let i = 0; i < 10 && !url; i++) {
     const t = await chrome.tabs.get(tabId).catch(() => null);
     url = t?.url || t?.pendingUrl || '';
     if (!url || url === 'about:blank') { url = ''; await new Promise(r => setTimeout(r, 200)); }
   }
-  send({ type: 'userEvent', session, event: { kind, url: url || 'about:blank', tab: tabId, ts } });
+  send({ type: 'userEvent', session, event: { kind, url: url || 'about:blank', tab: tabId, ts, ...(by && { by }) } });
 }
 
 // A video records one tab; a tab or popup opened from it would go unrecorded (and push the recorded tab to
@@ -1578,6 +1581,20 @@ async function handle(m, sender) {
       if (!q || !['session', 'always', 'no'].includes(m.decision)) return { ok: false };
       q.resolve(m.decision);
       return { ok: true };
+    }
+    // The panel's "+": a new tab inside the group of the session whose tab is in front, after its last tab.
+    // It joins the session like any tab opened from it (the agent is told; its working tab stays).
+    case 'newSessionTab': {
+      const front = await activeTab();
+      const sid = front ? await sessionOfTab(front.id) : '';
+      if (!sid || front.groupId < 0) return { error: 'The tab in front belongs to no agent session.' };
+      const inGroup = await chrome.tabs.query({ groupId: front.groupId });
+      // Created inactive so it is marked before Chrome reports it; then brought to the front.
+      const t = await chrome.tabs.create({ windowId: front.windowId, index: Math.max(...inGroup.map(x => x.index)) + 1, active: false });
+      panelTabs.add(t.id);
+      await chrome.tabs.group({ tabIds: t.id, groupId: front.groupId }).catch(() => {});
+      await chrome.tabs.update(t.id, { active: true });
+      return { ok: true, tabId: t.id };
     }
     case 'hostAllow': {
       const host = hostOf(m.url || '');

@@ -33,7 +33,7 @@ Several agent sessions can share the browser. Each works in its own tab, grouped
 (`status` → `you`, e.g. "app 2" when another session runs in the same folder). Everything you do (`browser_*`,
 highlights, tours, `request_demo`, videos) happens in that tab; there is no switching to other tabs
 (`browser_tabs` is not offered). A tab opened from yours (a link with `target="_blank"`, `window.open`, a
-popup window; by your click, the user or the page) joins your tabs, and your next result says so ("a new tab
+popup window; by your click, the user or the page, or the user's **+** in the panel) joins your tabs, and your next result says so ("a new tab
 opened … (tab 123)"). Your calls stay on your working tab until you switch, so a running sequence of calls is
 never moved; decide whether the new tab matters:
 - `tabs()` lists your tabs; `tabs({ action: "select", id })` makes one the working tab; select the earlier id

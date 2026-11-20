@@ -39,6 +39,8 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 /* A ring while the session is not listening, a filled dot while it is. */
 .listen[style*="--session"] .dot { box-shadow: inset 0 0 0 2px var(--session); background: transparent; }
 .listen.on[style*="--session"] .dot { background: var(--session); }
+#new-tab { flex: none; --md-icon-button-icon-color: var(--md-sys-color-on-surface-variant); }
+#new-tab svg { width: 24px; height: 24px; }
 .conn { flex: none; display: inline-flex; align-items: center; gap: 8px; color: var(--md-sys-color-on-surface-variant); }
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--md-sys-color-outline); }
 .conn.ok .dot { background: var(--sat-color-success); }

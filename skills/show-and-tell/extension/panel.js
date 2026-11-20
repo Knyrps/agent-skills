@@ -40,6 +40,9 @@ async function render() {
   const who = me?.name || s.listener || 'the agent';
   const listening = me ? me.listening : s.waiting;
   $('who-name').textContent = me?.name || s.listener || 'show-and-tell';
+  // A new tab inside the group of the session in front (Ctrl+T would open one outside it).
+  $('new-tab').hidden = !me?.live;
+  if (me) $('new-tab').title = $('new-tab').ariaLabel = `New tab in ${me.name}'s group`;
   $('listen-text').textContent = !s.connected ? 'Bridge offline · messages are kept'
     : me && !me.live ? 'Session ended · messages go to the latest agent'
       : listening ? 'Listening · panel messages only' : me || s.listener ? 'Not listening · messages wait for it' : 'No agent listening · messages are kept';
@@ -187,6 +190,10 @@ async function renderThrottle() {
   $('throttle').hidden = !t;
   if (t) $('throttle-label').textContent = [t.network && `Network ${t.network}`, t.cpu && `CPU ${t.cpu}× slower`].filter(Boolean).join(' · ');
 }
+$('new-tab').addEventListener('click', async () => {
+  const r = await chrome.runtime.sendMessage({ type: 'newSessionTab' }).catch(e => ({ error: e.message }));
+  if (!r?.ok) toast(r?.error || 'Could not open a tab in this group.');
+});
 $('throttle-off').addEventListener('click', async () => {
   const r = await chrome.runtime.sendMessage({ type: 'throttleOff' });
   toast(r?.ok ? 'Throttling is off for this tab.' : 'Could not turn throttling off.');

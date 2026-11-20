@@ -115,7 +115,7 @@ export function startOwner({ standalone = false } = {}) {
       const ev = msg.event || {};
       if (!s || !ev.kind) return;
       // A new or closed tab is always news; an agent's call that opened one is credited to it.
-      if (TAB_NEWS.has(ev.kind)) ev.by = agentsOwn(s, ev) ? 'agent' : 'other';
+      if (TAB_NEWS.has(ev.kind)) ev.by = ev.by === 'user' ? 'user' : agentsOwn(s, ev) ? 'agent' : 'other';
       else if (agentsOwn(s, ev)) return;
       const list = userLog.get(s) || [];
       const last = list[list.length - 1];
@@ -525,7 +525,7 @@ export function userEventText(e) {
     key: () => `pressed ${e.key}${el ? ` in ${el}` : ''}`,
     navigate: () => `${e.how === 'reload' ? 'reloaded' : 'opened'} ${e.url}`,
     urlChange: () => `the page moved to ${e.url}`,
-    newTab: () => `a new tab opened${e.by === 'agent' ? ' from your last action' : ' (by the user or the page)'}: ${e.url} (tab ${e.tab}). Your calls still act on your working tab; switch with tabs({ action: 'select', id: ${e.tab} })`,
+    newTab: () => `a new tab opened${e.by === 'agent' ? ' from your last action' : e.by === 'user' ? ' by the user, from the side panel' : ' (by the user or the page)'}: ${e.url} (tab ${e.tab}). Your calls still act on your working tab; switch with tabs({ action: 'select', id: ${e.tab} })`,
     tabClosed: () => `your tab ${e.tab} closed (${e.url})`,
     workingTabClosed: () => `your working tab ${e.tab} was closed (${e.url}). Pick another with tabs before your next browser call`,
   }[e.kind]?.() || `${e.kind} ${el}`;
