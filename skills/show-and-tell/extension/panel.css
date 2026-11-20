@@ -4,7 +4,7 @@
   color-scheme: light dark;
   --md-ref-typeface-brand: system-ui, "Segoe UI", sans-serif;
   --md-ref-typeface-plain: system-ui, "Segoe UI", sans-serif;
-  --spark: url(#spark-grad);
+  --spark: var(--md-sys-color-primary);
   /* "Connected": an M3 custom (extended) colour, green tone 40 / tone 80 like the generated roles. */
   --sat-color-success: #146c2e;
   /* Spacing on the M3 4 px grid: page edge, gap between blocks, gap inside a group. */
@@ -97,10 +97,7 @@ svg { width: 18px; height: 18px; fill: currentColor; }
 .log:empty { display: none; }
 
 .empty { margin: auto 0; display: flex; flex-direction: column; gap: var(--tight); }
-.greeting {
-  background: linear-gradient(90deg, var(--md-sys-color-primary), var(--md-sys-color-tertiary));
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
+.greeting { color: var(--md-sys-color-primary); }
 .suggestions { margin-top: var(--tight); }
 
 .msg { display: flex; gap: 12px; max-width: 100%; animation: msg-in .25s cubic-bezier(.2,0,0,1); }
@@ -131,9 +128,10 @@ svg { width: 18px; height: 18px; fill: currentColor; }
   animation: sheen 1.6s linear infinite;
 }
 @keyframes sheen { from { background-position: 100% 0; } to { background-position: 0 0; } }
-.working .spark svg { animation: spin 2.4s cubic-bezier(.2,0,0,1) infinite; }
-@keyframes spin { to { rotate: 1turn; } }
-@media (prefers-reduced-motion: reduce) { .working .text, .working .spark svg, .msg { animation: none; } }
+/* While working, the speech dot pulses (M3 standard easing), instead of anything spinning. */
+.working .spark svg circle { transform-origin: 18.5px 5.5px; animation: talk 1.2s cubic-bezier(.2,0,0,1) infinite; }
+@keyframes talk { 50% { scale: .55; opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .working .text, .working .spark svg circle, .msg { animation: none; } }
 
 /* Questions from the agent sit in the conversation: an inline card with actions. */
 .host-ask {
