@@ -268,7 +268,7 @@ async function runMcp() {
   ];
 
   const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'throttle', 'load_tour', 'request_demo', 'record_tour']);
-  const server = new Server({ name: 'show-and-tell', version: '1.3.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'show-and-tell', version: JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...TOOLS, ...(await driver.list(log)).map(t =>
     ({ ...t, description: 'Shared show-and-tell browser (the one the user sees): ' + (t.description || '') }))] }));
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {

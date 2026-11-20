@@ -16,6 +16,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const FILES = {
   '/material-lab.js': [path.join(here, 'lab-vendor', 'material-lab.js'), 'text/javascript'],
   '/m3-tokens.css': [path.join(here, '..', 'extension', 'vendor', 'm3-tokens.css'), 'text/css'],
+  '/favicon.svg': [path.join(here, '..', 'extension', 'icons', 'icon.svg'), 'image/svg+xml'],
 };
 // Enough cards to overflow the strip even on very wide screens.
 const cards = Array.from({ length: 20 }, (_, i) => `<div class="item md-typescale-label-large" data-n="${i + 1}">Product ${i + 1}</div>`).join('');
@@ -63,7 +64,7 @@ const DEBUG_PANEL = `<div id="debug-panel" class="debug-panel" role="dialog" ari
   </div>
 </div>`;
 
-const page = (title, body, script = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title>
+const page = (title, body, script = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title><link rel="icon" href="/favicon.svg">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="/m3-tokens.css">
 <style>
