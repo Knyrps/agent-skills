@@ -1,6 +1,6 @@
 # Plan: UI rewrite to Material 3 Expressive (Lit + @m3e/web, TypeScript)
 
-Status: started. Steps 1 to 4 are done. Work through the steps in order and commit each step separately. The
+Status: started. Steps 1 to 5 are done. Work through the steps in order and commit each step separately. The
 existing checks (`node tests/run.mjs`) describe the old UI and need not pass during the rewrite; new
 ones are written after it (step 7). The rules that hold throughout are in `AGENTS.md`.
 
@@ -82,7 +82,8 @@ elements while the page scrolls) stay direct style writes, not re-renders.
    `extension/ui/`; their old scripts are gone.
 4. **Done.** Overlay and video stage with `lit-html`: `ui-src/src/overlay/` builds `extension/ui/overlay.js`,
    loaded before `content.js` and `stage.js`, which keep the behaviour and render its templates.
-5. Demo page.
+5. **Done.** Test page: `ui-src/src/lab/` (Lit + `@m3e/web`, same atomic levels, light DOM so cards keep their
+   ids), built to `scripts/lab-vendor/lab.js`; `scripts/lab.mjs` only serves it. Debug options are a side sheet.
 6. Remove `@material/web` and the old bundles; update README ("Rebuild the vendored UI library") and
    SKILL.md where they mention the UI.
 7. New tests for the new UI, replacing the old checks in `tests/` and `scripts/real-input-check.mjs`.

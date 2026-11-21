@@ -17,4 +17,9 @@ const common = { bundle: true, minify: true, target: 'chrome116', legalComments:
 await build({ ...common, entryPoints: entries, outdir: out, format: 'esm' });
 // The in-page UI for the content scripts (content.js, stage.js): a classic script, they cannot load modules.
 await build({ ...common, entryPoints: [path.join(here, 'src', 'overlay', 'index.ts')], outfile: path.join(out, 'overlay.js'), format: 'iife' });
+// The test page (scripts/lab.mjs serves it): its own bundle, apart from the extension. Not minified: the README's
+// pause examples stop in its code by text and by function name.
+const lab = path.join(here, '..', 'scripts', 'lab-vendor', 'lab.js');
+await build({ ...common, minify: false, entryPoints: [path.join(here, 'src', 'lab', 'pages', 'lab.ts')], outfile: lab, format: 'esm' });
+console.log(`wrote scripts/lab-vendor/lab.js (${fs.statSync(lab).size} B)`);
 console.log('wrote', fs.readdirSync(out).map(f => `ui/${f} (${fs.statSync(path.join(out, f)).size} B)`).join(', '));

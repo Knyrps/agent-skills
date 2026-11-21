@@ -10,6 +10,7 @@ steps and their order. This file has the rules that hold while doing them and af
 | `ui-src/` | UI source (TypeScript). `npm run build` writes `extension/ui/<page>.js`; `npm run check` type-checks |
 | `ui-src/src/atoms/` … `pages/` | Atomic design levels, see below |
 | `extension/ui/` | Built bundles, committed. The extension runs without a build step |
+| `ui-src/src/lab/` | The test page (same levels), built to `scripts/lab-vendor/lab.js`, not minified; `scripts/lab.mjs` serves it |
 | `vendor-src/build.mjs` | Colour tokens (`npm run tokens`) and, until step 6, the old Material Web bundles |
 | `extension/vendor/m3-tokens.css` | Generated colour roles, light and dark. Never edit by hand |
 | `tests/` | `node tests/run.mjs` runs the checks on a throwaway copy with its own ports and profile. They describe the old UI until they are rewritten after the rewrite |
@@ -52,8 +53,12 @@ like the M3E ones and use the same tokens. Per-frame position updates stay direc
   `icons/icon.svg`.
 - **Icons** come from `@m3e/icons` (SVG, one import per icon), never from a font download. The app icon
   is the one own drawing.
-- **The chat input** is the one custom container: a 28px pill on `surface-container-high` with a
+- **The chat input** is a custom container: a 28px pill on `surface-container-high` with a
   borderless field. The buttons inside it are stock `m3e-button` / `m3e-icon-button`.
+- **The test page's debug options** are the other one: a standard side sheet (M3E has none) docked at the
+  right and sticky, on `surface-container-low`. Inside it everything is stock M3E: search field, segmented
+  button, switch, filter chips. Not `m3e-drawer-container`: it scrolls its content itself, and the test
+  page must keep document scrolling. Not a menu: stacked submenus were rejected.
 - **Narrow panel**: below about 340px wide the panel uses smaller buttons and tighter padding, by
   container query.
 - **Font**: `system-ui, "Segoe UI", sans-serif`. No bundled font.
@@ -68,6 +73,13 @@ like the M3E ones and use the same tokens. Per-frame position updates stay direc
 - Snackbars (`M3eSnackbar.open`) open in the top layer, outside any wrapper: tokens and font must be on
   `:root`.
 - Buttons have an invisible 48px touch area that is larger than their box. It is not an overflow bug.
+- `m3e-menu-trigger for="…"` looks its menu up once, when it first renders: the menu must already be in the DOM.
+- A menu item's `trailing-icon` slot is a 20px icon box (`!important`), and a submenu item uses it for its
+  arrow: put counts or text in the label.
+- `m3e-slider` has a minimum width: set `--m3e-slider-min-width: 0` inside narrow cards. Its inactive track
+  is `secondary-container`, the colour of a card that has reacted: the test page uses `outline-variant`.
+- Checked menu items and the like use `tertiary-container`, which is lime in this palette: point their
+  `selected-container` tokens at `secondary-container`.
 
 ## Tests
 
@@ -77,7 +89,9 @@ like the M3E ones and use the same tokens. Per-frame position updates stay direc
   changed.
 - For the new tests: the old ones address panel elements by id (`#pause`, `#pause-split`, `#pause-menu`,
   `#listen-text`, `#conn`, …) and the test page's cards by id and by their status texts, and three files
-  pause the test page at a line number of its served HTML (`renderItems(data.items)`, line 404). Keep
+  paused the test page at a line number of its served HTML (line 404). The code now lives in
+  `scripts/lab-vendor/lab.js`; pause examples use the text `renderItems(data.items)` and the names `loadItems`,
+  `renderItems`, `run` and `data`, which `ui-src/src/lab/organisms/controls.ts` keeps. Keep
   ids where that costs nothing; do not bend the design to keep them.
 - Never use the user's running browser. Do not reload the extension there without asking.
 
