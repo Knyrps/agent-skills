@@ -427,8 +427,9 @@ async function waitForTabFrom(fromId, since, ms) {
 // ------------------------------------------------------------------ cleanup of ended sessions
 // Only sessions the bridge reports as ended are touched: their MCP process has exited, so no chat can use
 // them again. Silence, an offline bridge or an unknown session never count. An ended session's placeholder
-// tab closes at once; a real page turns into a grey "<name> · ended" group. 15 minutes later the tab
-// closes, unless the user opened it after the session ended or it is in front: then it is only ungrouped.
+// tab closes at once; a real page turns into a grey "<name> · ended" group. 15 minutes later the tab is
+// ungrouped and stays open. Closing it then instead is opt-in (config.local.json "closeEndedTabs": true), and even
+// then a tab the user opened after the session ended, or the one in front, is only ungrouped.
 // Groups restored from the last browser run go back to their session if it is still alive; the rest are
 // ungrouped (placeholders closed).
 const ENDED_MS = 15 * 60000;
@@ -475,8 +476,8 @@ function sweepTabs(live, endedIds) {
         continue;
       }
       if (Date.now() - e.ended < ENDED_MS) continue;
-      const looked = new Set(e.looked || []);
-      for (const x of tabs) { if (looked.has(x.id) || x.active) await ungroup(x.id); else await chrome.tabs.remove(x.id).catch(() => {}); }
+      const looked = new Set(e.looked || []), close = (await loadConfig()).closeEndedTabs === true;
+      for (const x of tabs) { if (!close || looked.has(x.id) || x.active) await ungroup(x.id); else await chrome.tabs.remove(x.id).catch(() => {}); }
       delete map[sid]; changed = true;
     }
     if (changed) await S.set({ sessionTabs: map });

@@ -147,5 +147,24 @@ await run('new-tab', async () => {
   await br.send('Target.closeTarget', { targetId }); br.close();
 });
 
+await run('ended-tab-kept', async () => {
+  const b = await agent('agent-kept');
+  const key = 'kept-' + Date.now().toString(36);
+  await b.tool('browser_navigate', { url: LAB + '?' + key });
+  // Another tab in front: an ended tab the user is not looking at is the one that used to be closed.
+  await lab.send('Page.bringToFront'); await sleep(500);
+  const sid = b.sid; await b.close();
+  const entry = () => pn.P(`chrome.storage.session.get('sessionTabs').then(x => JSON.stringify(x.sessionTabs?.[${JSON.stringify(sid)}] || null))`).then(J);
+  let e = null;
+  for (let i = 0; i < 60 && !e?.ended; i++) { await sleep(500); e = await entry(); }
+  check('the ended session\'s tab turns into an ended group', !!e?.ended, JSON.stringify(e));
+  // As if the 15 minutes had passed; the next sweep acts on it.
+  await pn.P(`chrome.storage.session.get('sessionTabs').then(x => { x.sessionTabs[${JSON.stringify(sid)}].ended = Date.now() - 16 * 60000; return chrome.storage.session.set({ sessionTabs: x.sessionTabs }); })`);
+  for (let i = 0; i < 60 && (await entry()); i++) await sleep(500);
+  const tab = (await targets()).find(t => t.url.endsWith('?' + key));
+  const grouped = tab && await pn.P(`chrome.tabs.query({}).then(l => l.find(t => t.url.endsWith('?' + ${JSON.stringify(key)}))?.groupId ?? -2)`);
+  check('15 minutes later it stays open, ungrouped (closing is opt-in)', !!tab && grouped === -1, JSON.stringify({ tab: tab?.url, grouped }));
+});
+
 summary();
 await a.close(); process.exit(0);

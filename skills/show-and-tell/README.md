@@ -21,7 +21,7 @@ share one browser window:
   windows) belong to it: they join its group and the agent is told, but its calls stay on its working tab until it
   switches with the `tabs` tool. Tours and videos can follow a tab a step opens (`waitForTab`, `backToTab`); a video then shows a Chrome-style
   tab chip with the page's title. **Record** follows tabs and popups opened from the recorded tab and marks each change. When a session's MCP process has exited, its tab group turns grey
-  ("… · ended") and closes 15 minutes later (kept, ungrouped, if you looked at it). Sessions that are
+  ("… · ended") and is ungrouped 15 minutes later; the tab stays open ("closeEndedTabs": true in `config.local.json` closes it instead, unless you looked at it). Sessions that are
   only quiet are never touched.
 - **Guided tours** with Back / Next, and **review videos** (MP4 with captions, chapter labels, progress bar,
   intro/section/outro cards and a drawn cursor or finger) are layers on top. While a video records, the
@@ -214,7 +214,7 @@ By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo br
 | New tabs | In an agent's tab, open a link in a new tab (or let the page call `window.open`), then let the agent call any show-and-tell tool; close the new tab and let it call again | The tab joins the agent's group; the result says "a new tab opened … (tab N). Your calls still act on your working tab", and they do until `tabs({ action: "select", id: N })`. Closing the working tab makes the next browser call fail until another is selected. A popup window belongs to the agent too (no group: popup windows can't hold one). A video step that opens a tab ends the video with `videoError` unless the step follows it with `waitForTab`, which moves the video there with a tab chip at the top |
 | Record across tabs | **Record**, open the lab's **Popup** (New tabs card), click in the popup, close it, click in the first tab, **Stop** | The chip reads `Recording · N steps · 2 tabs`; the steps have `tab` numbers and `newTab`/`switchTab`/`closeTab` markers |
 | New tab in a group | With an agent's tab in front, click **+** in the panel's top bar | An empty tab opens inside that agent's group (Ctrl+T would open one outside it). The agent's next result says `a new tab opened by the user, from the side panel`; its calls stay on its working tab. The button is hidden when the tab in front belongs to no session |
-| Ended session | End an agent session (close its chat or the MCP process) | Within about 15 s its tab group turns grey, "<name> · ended"; a placeholder tab closes at once. 15 minutes later the tab closes, or is only ungrouped if you opened it meanwhile or it is in front. A quiet but running session is never touched |
+| Ended session | End an agent session (close its chat or the MCP process) | Within about 15 s its tab group turns grey, "<name> · ended"; a placeholder tab closes at once. 15 minutes later the tab is ungrouped and stays open; with "closeEndedTabs": true it closes instead, or is only ungrouped if you opened it meanwhile or it is in front. A quiet but running session is never touched |
 | Browser restart | Restart the demo browser while a session runs | Chrome restores the group; it goes back to its running session. Groups of sessions that are gone are ungrouped |
 
 ## Verify the browser_* tools drive this browser

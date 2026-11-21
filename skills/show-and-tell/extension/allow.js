@@ -16,6 +16,8 @@ export function loadConfig() {
       ...(Array.isArray(local.allowlist) ? local.allowlist : [])],
     // { name, logo (file in extension/, e.g. "local/logo.svg"), accent (CSS colour), footer }
     branding: { ...(c.branding || {}), ...(local.branding || {}) },
+    // Close an ended session's tabs 15 minutes after it ended, instead of only ungrouping them.
+    closeEndedTabs: local.closeEndedTabs ?? c.closeEndedTabs ?? false,
   }));
   return configP;
 }
