@@ -116,5 +116,28 @@ await run('revoke-host', async () => {
   await a.tool('browser_navigate', { url: LAB + '?flows' });
 });
 
+await run('annotate-visible', async () => {
+  await lab.send('Page.bringToFront'); await lab.ev(`scrollTo(0, 0)`); await sleep(400);
+  await pn.P(`chrome.runtime.sendMessage({ type: 'annotationDrop' })`);
+  const r = J(await lab.ev(`(() => { const b = $d('#drop').getBoundingClientRect(); return JSON.stringify([b.left - 6, b.top - 6, b.right + 6, b.bottom + 6]); })()`));
+  void pn.P(`chrome.runtime.sendMessage({ type: 'annotate' })`).catch(() => {}); await sleep(1000);
+  const m = (type, x, y, o = {}) => lab.send('Input.dispatchMouseEvent', { type, x, y, button: o.b || 'none', buttons: o.bs || 0, clickCount: o.c || 0 });
+  await m('mouseMoved', r[0], r[1]); await m('mousePressed', r[0], r[1], { b: 'left', bs: 1, c: 1 });
+  for (let i = 1; i <= 10; i++) await m('mouseMoved', r[0] + (r[2] - r[0]) * i / 10, r[1] + (r[3] - r[1]) * i / 10, { b: 'left', bs: 1 });
+  await m('mouseReleased', r[2], r[3], { b: 'left', c: 1 }); await sleep(400);
+  await lab.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+  await lab.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }); await sleep(300);
+  // Done, in the overlay's closed root.
+  const { root } = await lab.send('DOM.getDocument', { depth: -1, pierce: true });
+  const find = n => { const a = n.attributes || []; for (let i = 0; i < a.length; i += 2) if (a[i] === 'data-act' && a[i + 1] === 'done') return n; for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) { const f = find(c); if (f) return f; } return null; };
+  const { model } = await lab.send('DOM.getBoxModel', { nodeId: find(root).nodeId }); const q = model.content, dx = (q[0] + q[4]) / 2, dy = (q[1] + q[5]) / 2;
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await m(type, dx, dy, type === 'mouseMoved' ? {} : { b: 'left', bs: type === 'mousePressed' ? 1 : 0, c: 1 });
+  let els = null;
+  for (let i = 0; i < 20 && !els; i++) { await sleep(300); els = J(await pn.P(`chrome.storage.session.get('annotationDraft').then(x => JSON.stringify(x.annotationDraft ? x.annotationDraft.annotations[0].elements.map(e => e.text) : null))`)); }
+  check('a frame around the drop target lists what it shows', Array.isArray(els) && els.some(t => /Drop/.test(t)), JSON.stringify(els));
+  check('it does not list cards scrolled out of view inside the swipe strip next to it', Array.isArray(els) && !els.some(t => /Product/.test(t)), JSON.stringify(els));
+  await pn.P(`chrome.runtime.sendMessage({ type: 'annotationDrop' })`);
+});
+
 summary();
 await a.close(); process.exit(0);

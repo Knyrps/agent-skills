@@ -1214,17 +1214,40 @@
   const ownText = el => [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
   const pageElementAt = (x, y) => document.elementsFromPoint(x, y).find(el => el !== host && el.localName !== 'show-and-tell-stage' && el !== document.documentElement && el !== document.body) || null;
 
+  // What of an element the user can actually see: its box cut by every ancestor that clips (a scrolled carousel,
+  // a scroll box) and by the window, or null when nothing of it shows or something else covers it.
+  function seenRect(el) {
+    const r = el.getBoundingClientRect();
+    let x0 = Math.max(r.left, 0), y0 = Math.max(r.top, 0), x1 = Math.min(r.right, innerWidth), y1 = Math.min(r.bottom, innerHeight);
+    for (let n = el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
+      const s = getComputedStyle(n);
+      if (!/(hidden|clip|auto|scroll)/.test(s.overflowX + s.overflowY)) continue;
+      const c = n.getBoundingClientRect();
+      x0 = Math.max(x0, c.left); y0 = Math.max(y0, c.top); x1 = Math.min(x1, c.right); y1 = Math.min(y1, c.bottom);
+    }
+    if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+    const s = getComputedStyle(el);
+    if (s.visibility === 'hidden' || Number(s.opacity) === 0) return null;
+    const hit = pageElementAt((x0 + x1) / 2, (y0 + y1) / 2);
+    if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) return null;
+    return { left: x0, top: y0, right: x1, bottom: y1, width: x1 - x0, height: y1 - y0, full: r };
+  }
+
   function refsOf(m) {
     if (m.kind === 'element') return [m.el];
     const g = geom(m);
     if (m.kind === 'arrow') { const el = pageElementAt(...g.pts[1]); return el ? [el] : []; }
     const b = g.box, slack = 4;
+    // Only what the user saw inside the mark: an element scrolled out of its carousel, or under another, is not
+    // what they meant even when its box falls inside. Most of it has to show.
     const inside = [...document.body.querySelectorAll('*')].filter(el => {
       if (el === host || el.closest('svg') && el.tagName.toLowerCase() !== 'svg') return false;
+      if (!(el.matches(INTERACTIVE) || ownText(el))) return false;
       const r = el.getBoundingClientRect();
       if (r.width < 4 || r.height < 4) return false;
       if (r.left < b.x - slack || r.top < b.y - slack || r.right > b.x + b.w + slack || r.bottom > b.y + b.h + slack) return false;
-      return el.matches(INTERACTIVE) || ownText(el);
+      const v = seenRect(el);
+      return !!v && v.width * v.height >= 0.5 * r.width * r.height;
     });
     const outer = inside.filter(el => !inside.some(o => o !== el && o.contains(el))).slice(0, 8);
     if (outer.length) return outer;
