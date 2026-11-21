@@ -1,11 +1,18 @@
 // Restored test-page tabs show the waiting page when the browser starts without a bridge.
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { agent, targets, check, summary, sleep, SKILL, ENV, LAB } from './lib.mjs';
+import { agent, targets, cdp, check, summary, sleep, SKILL, ENV, LAB, CDP } from './lib.mjs';
 const b = cmd => spawnSync(process.execPath, [path.join(SKILL, 'scripts', 'browser.mjs'), cmd], { env: ENV, encoding: 'utf8' }).stdout;
 // A session leaves test-page tabs behind, and the bridge learns where the test page is.
 const a = await agent();
 await a.tool('browser_navigate', { url: LAB + '?restored' });
+// Only this test's tab is restored: the kept profile brings back the tabs of earlier tests and runs, and the
+// browser turns restored tabs into waiting pages one after the other, which takes longer than this test waits.
+{
+  const br = await cdp((await (await fetch(CDP + '/json/version')).json()).webSocketDebuggerUrl);
+  for (const t of await targets()) if (t.type === 'page' && !t.url.endsWith('/panel.html') && !t.url.endsWith('?restored')) await br.send('Target.closeTarget', { targetId: t.id }).catch(() => {});
+  br.close();
+}
 await sleep(1000); await a.close(); await sleep(1500);
 b('stop'); await sleep(1500); b('start');
 let pages = [];

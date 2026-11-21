@@ -1,6 +1,6 @@
 // End-to-end checks of agent flows through the panel, with real input and without scrolling for the tester:
 // what a user has to click must be on screen by itself.
-import { agent, panel, page, cdp, targets, check, summary, sleep, LAB, CDP } from './lib.mjs';
+import { agent, panel, page, cdp, targets, check, summary, sleep, testHost, LAB, CDP } from './lib.mjs';
 const a = await agent();
 await a.tool('browser_navigate', { url: LAB + '?flows' });
 const pn = await panel();
@@ -25,7 +25,7 @@ await run('host-question', async () => {
   for (const s of ['#tap', '#dtap', '#lp', '#pinch', '#strip', '#drag', '#btn', '#dbl', '#ctx', '#hover']) await a.tool('highlight', { selector: s, keep: true, scroll: false });
   // The user has scrolled up to read: the question must still come into view.
   await sleep(500); await pn.P(`$d('#chat').scrollTop = 0`); await sleep(300);
-  const host = `ask-${Date.now().toString(36)}.127.0.0.1.nip.io`;
+  const host = testHost('ask');
   const call = a.tool('highlight', { selector: 'body', url: `http://${host}:47714/` });
   let shown = false;
   for (let i = 0; i < 40 && !shown; i++) { await sleep(250); shown = await pn.P(`!!$d('#host-session')`); }
@@ -88,7 +88,7 @@ await run('revoke-host', async () => {
   const fs = await import('node:fs'), path = await import('node:path');
   const { SKILL } = await import('./lib.mjs');
   const local = path.join(SKILL, 'extension', 'config.local.json');
-  const host = `keep-${Date.now().toString(36)}.127.0.0.1.nip.io`;
+  const host = testHost('keep');
   // The user allows it for good, from the question the agent raises.
   const call = a.tool('highlight', { selector: 'body', url: `http://${host}:47714/` });
   for (let i = 0; i < 40 && !(await pn.P(`!!$d('#host-always')`)); i++) await sleep(250);

@@ -48,6 +48,12 @@ function findChromeForTesting() {
 }
 const BROWSER = process.env.DEMO_BROWSER_PATH || findChromeForTesting();
 const BASE = `http://127.0.0.1:${PORT}`;
+// Extra browser flags from DEMO_BROWSER_ARGS: a JSON array, or flags separated by spaces. For setups the defaults
+// do not cover (--no-sandbox in a container) and for the tests, which map their own host names to this machine.
+export function extraArgs(value = process.env.DEMO_BROWSER_ARGS || '') {
+  try { const a = JSON.parse(value); if (Array.isArray(a)) return a.map(String); } catch {}
+  return value.split(/\s+/).filter(Boolean);
+}
 
 const log = (...m) => console.error('[show-and-tell]', ...m);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -77,7 +83,7 @@ async function start() {
       // The agent works while the user looks at other windows: a covered window keeps painting and running its
       // timers, or highlights, Annotate, Record, pausing and real input stall until the window is in front again.
       '--disable-features=CalculateNativeWinOcclusion', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
-      '--no-first-run', '--no-default-browser-check', '--start-maximized'],
+      '--no-first-run', '--no-default-browser-check', '--start-maximized', ...extraArgs()],
     { detached: true, stdio: 'ignore' }).unref();
     for (let i = 0; i < 40 && !(await version()); i++) await sleep(250);
     if (!(await version())) throw new Error('browser did not open CDP on port ' + PORT);

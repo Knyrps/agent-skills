@@ -119,7 +119,7 @@ whatever Chromium is listening on that port.
    it is meant for setups the above does not cover.
 
 Environment overrides: `DEMO_BROWSER_PATH` (any Chromium that honours `--load-extension`, for
-example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_LAB_PORT` (47614, the test page), `DEMO_DATA`
+example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_LAB_PORT` (47614, the test page), `DEMO_BROWSER_ARGS` (extra browser flags, separated by spaces or as a JSON array, e.g. `--no-sandbox` in a container), `DEMO_DATA`
 (queue, screenshots and profile; default `%LOCALAPPDATA%\show-and-tell` on Windows,
 `~/Library/Application Support/show-and-tell` on macOS, `~/.local/share/show-and-tell` on Linux).
 
@@ -143,7 +143,10 @@ When the agent host runs the show-and-tell MCP, that process owns the bridge por
 touched. It runs every `tests/*.test.mjs` and prints PASS/FAIL per check; screenshots (light and dark) land
 in `%TEMP%/show-and-tell-test/shots`. `run.mjs pause-menu once,kept` runs some sections of one test,
 `--keep` reuses the running test browser, `--clean` stops it and removes the copy. Needs
-`npm install` in `bridge/`.
+`npm install` in `bridge/`. The checks need no network and no tools of one operating system: hosts that
+are "not allowed yet" are names under `show-and-tell.test`, which the test browser resolves to this machine by
+itself, and the certificate check serves its own HTTPS with a certificate made on the spot. On Linux without a
+display, run them under `xvfb-run`.
 
 ## Manual test of every control
 
