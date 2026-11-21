@@ -1871,8 +1871,16 @@ chrome.webNavigation.onErrorOccurred.addListener(async d => {
 });
 // The test page is served again: tabs still showing Chrome's error page for it (its title is the bare host) load it.
 async function reloadFailedLabTabs() {
+  const offline = chrome.runtime.getURL('lab-offline.html');
   for (const t of await chrome.tabs.query({})) {
-    try { if (t.url && await isLab(t.url) && t.title === new URL(t.url).host) await chrome.tabs.reload(t.id); } catch { /* gone meanwhile */ }
+    try {
+      if (t.url && await isLab(t.url) && t.title === new URL(t.url).host) await chrome.tabs.reload(t.id);
+      // A waiting page polls by itself, but one in a background tab Chrome has not loaded yet never does.
+      else if ((t.url || t.pendingUrl || '').startsWith(offline)) {
+        const u = new URL(t.url || t.pendingUrl).searchParams.get('u');
+        if (u && await isLab(u)) await chrome.tabs.update(t.id, { url: u });
+      }
+    } catch { /* gone meanwhile */ }
   }
 }
 // Tabs Chrome restores at start-up fail before this worker listens: if the test page does not answer then, the
