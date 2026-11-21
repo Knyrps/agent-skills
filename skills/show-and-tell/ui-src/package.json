@@ -4,7 +4,7 @@
   "description": "Source of the extension's UI (Lit + @m3e/web, TypeScript). `npm run build` writes the bundles into ../extension/ui/. Not needed at runtime.",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node tools/icon-paths.mjs && node build.mjs",
     "check": "tsc --noEmit"
   },
   "devDependencies": {

@@ -1405,7 +1405,7 @@ const panelVideo = (v, state, extra = {}) =>
 // every page load and always gets the whole state.
 async function stage(v, patch) {
   Object.assign(v.stage, patch);
-  await chrome.scripting.executeScript({ target: { tabId: v.tabId }, files: ['stage.js'] }).catch(() => {});
+  await chrome.scripting.executeScript({ target: { tabId: v.tabId }, files: ['ui/overlay.js', 'stage.js'] }).catch(() => {});
   await chrome.tabs.sendMessage(v.tabId, { cmd: 'stage', state: v.stage }).catch(() => {});
 }
 

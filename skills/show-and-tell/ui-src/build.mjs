@@ -12,10 +12,9 @@ const entries = fs.readdirSync(pages).filter(f => f.endsWith('.ts')).map(f => pa
 if (!entries.length) { console.log('no pages in src/pages yet; nothing to build'); process.exit(0); }
 
 fs.rmSync(out, { recursive: true, force: true });
-await build({
-  entryPoints: entries, outdir: out,
-  bundle: true, format: 'esm', minify: true, target: 'chrome116', legalComments: 'eof',
-  // Decorators and class fields the way Lit needs them come from tsconfig.json.
-  tsconfig: path.join(here, 'tsconfig.json'),
-});
+const common = { bundle: true, minify: true, target: 'chrome116', legalComments: 'eof', tsconfig: path.join(here, 'tsconfig.json') };
+// Extension pages: ES modules, one per page. Decorators and class fields the way Lit needs them come from tsconfig.json.
+await build({ ...common, entryPoints: entries, outdir: out, format: 'esm' });
+// The in-page UI for the content scripts (content.js, stage.js): a classic script, they cannot load modules.
+await build({ ...common, entryPoints: [path.join(here, 'src', 'overlay', 'index.ts')], outfile: path.join(out, 'overlay.js'), format: 'iife' });
 console.log('wrote', fs.readdirSync(out).map(f => `ui/${f} (${fs.statSync(path.join(out, f)).size} B)`).join(', '));

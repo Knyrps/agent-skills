@@ -6,100 +6,23 @@
   window.__showAndTell = true;
 
   const S = chrome.storage.session;
-  const DEFAULT_COLOR = '#0b57d0'; // Chrome GM3 primary
+  // A highlight without a colour of its own takes the colour of the agent session this tab belongs to (its
+  // tab group's colour), so what the agent points at matches the app icon in the side panel.
+  const GROUP = { grey: '#5f6368', blue: '#1a73e8', red: '#d93025', yellow: '#b06000', green: '#188038', pink: '#d01884',
+    purple: '#a142f4', cyan: '#007b83', orange: '#c26401' };
+  let DEFAULT_COLOR = GROUP.blue;
+  const sessionColour = () => S.get('sessionTabs').then(({ sessionTabs = {} }) => {
+    const mine = Object.values(sessionTabs).find(t => (t.tabs || [t.tabId]).includes(myTab));
+    DEFAULT_COLOR = GROUP[mine?.color] || GROUP.blue;
+  }).catch(() => {});
   const HOST_STYLE = 'all:initial!important;display:block!important;position:fixed!important;inset:0!important;'
     + 'width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;border:0!important;'
     + 'background:transparent!important;overflow:visible!important;pointer-events:none!important;z-index:2147483647!important;';
   // Material 3 styling modelled on Chrome's in-product-help bubbles: primary focus ring,
   // primary-container callout with level-3 elevation, 32% scrim for the spotlight.
-  const FONT = 'system-ui,"Segoe UI",Roboto,sans-serif';
-  const STYLES = `
-    .box{position:fixed;left:0;top:0;box-sizing:border-box;border:2px solid var(--c);border-radius:12px;
-      box-shadow:0 0 0 2px #fff,0 0 0 0 color-mix(in srgb,var(--c) 40%,transparent);animation:ring 1.6s cubic-bezier(.2,0,0,1) 3}
-    @keyframes ring{from{box-shadow:0 0 0 2px #fff,0 0 0 2px color-mix(in srgb,var(--c) 45%,transparent)}
-      to{box-shadow:0 0 0 2px #fff,0 0 0 16px transparent}}
-    .label{position:fixed;left:0;top:0;box-sizing:border-box;max-width:min(320px,calc(100vw - 8px));padding:12px 16px;
-      border-radius:12px;background:var(--c);color:#fff;font:500 14px/20px ${FONT};letter-spacing:.1px;
-      box-shadow:0 1px 3px rgb(0 0 0/.3),0 4px 8px 3px rgb(0 0 0/.15);white-space:pre-wrap;overflow-wrap:anywhere;
-      animation:pop .2s cubic-bezier(.2,0,0,1)}
-    @keyframes pop{from{scale:.92}}
-    .dim{position:fixed;left:0;top:0;width:100vw;height:100vh}
-    .dim path{fill:rgb(0 0 0/.32)}
-    .pick{position:fixed;left:0;top:0;box-sizing:border-box;border:2px dashed var(--md-sys-color-primary,#0b57d0);
-      background:color-mix(in srgb,var(--md-sys-color-primary,#0b57d0) 8%,transparent);border-radius:8px}
-    .pick-tag{position:fixed;left:0;top:0;padding:4px 8px;border-radius:4px;background:var(--md-sys-color-inverse-surface,#2f3036);
-      color:var(--md-sys-color-inverse-on-surface,#f1f0f7);
-      font:500 12px/16px ${FONT};letter-spacing:.5px;white-space:nowrap;
-      box-shadow:0 1px 2px rgb(0 0 0/.3),0 1px 3px 1px rgb(0 0 0/.15)}
-    .annot{position:fixed;inset:0;pointer-events:auto;cursor:crosshair;touch-action:none;
-      font:400 14px/20px ${FONT};-webkit-font-smoothing:antialiased}
-    .mark{position:fixed;left:0;top:0;width:100vw;height:100vh;overflow:visible;pointer-events:none;
-      filter:drop-shadow(0 1px 1.5px rgb(0 0 0/.28))}
-    .mark .halo{fill:none;stroke:var(--md-sys-color-surface,#fff);stroke-opacity:.92;stroke-width:7;stroke-linecap:round;stroke-linejoin:round}
-    .mark path.halo{fill:var(--md-sys-color-surface,#fff);fill-opacity:0}
-    .mark .line{fill:none;stroke:var(--c);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
-    .mark .area{fill:color-mix(in srgb,var(--c) 7%,transparent)}
-    .mark .el{fill:color-mix(in srgb,var(--c) 14%,transparent);stroke-width:2.5}
-    .mark .head{fill:var(--c);stroke:var(--c);stroke-width:2;stroke-linejoin:round}
-    .mark .badge{pointer-events:auto;cursor:pointer}
-    .mark .badge circle{fill:var(--c);stroke:var(--md-sys-color-surface,#fff);stroke-width:2;transition:r .12s cubic-bezier(.2,0,0,1)}
-    .mark .badge:hover circle{r:13}
-    .mark .badge text{fill:var(--on,#fff);font:600 12px ${FONT};text-anchor:middle;dominant-baseline:central;pointer-events:none}
-    .note,.note-edit{position:fixed;left:0;top:0;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;
-      color:var(--md-sys-color-on-surface,#1a1b21);transform-origin:17px 17px;animation:grow .18s cubic-bezier(.2,0,0,1)}
-    .note.left,.note-edit.left{flex-direction:row-reverse}
-    .note.up,.note-edit.up{align-items:flex-end;transform-origin:17px calc(100% - 17px)}
-    .note.left,.note-edit.left{transform-origin:calc(100% - 17px) 17px}
-    .note.left.up,.note-edit.left.up{transform-origin:calc(100% - 17px) calc(100% - 17px)}
-    @keyframes grow{from{scale:.6;opacity:0}}
-    .note .num,.note-edit .num{flex:none;width:22px;height:22px;border-radius:50%;background:var(--c);color:var(--on,#fff);
-      box-shadow:0 0 0 1px var(--md-sys-color-surface,#fff);font:600 12px/22px ${FONT};text-align:center}
-    .note{max-width:280px;min-height:34px;padding:6px 14px 6px 6px;border-radius:17px;cursor:pointer;
-      background:var(--note-bg);
-      box-shadow:0 1px 2px rgb(0 0 0/.3),0 2px 6px 2px rgb(0 0 0/.15)}
-    .note.left{padding:6px 6px 6px 14px}
-    :host{--note-bg:var(--md-sys-color-surface-container-lowest,#fff)}
-    :host(.dark){--note-bg:var(--md-sys-color-surface-container-high,#282a2f)}
-    .note::before{content:'';position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:0;transition:opacity .15s}
-    .note:hover::before{opacity:.08}
-    .note .text{min-width:0;padding-top:1px;font:400 14px/20px ${FONT};letter-spacing:.25px;white-space:pre-wrap;overflow-wrap:anywhere}
-    .note-edit{width:320px;padding:6px;border-radius:16px;cursor:default;
-      background:var(--md-sys-color-surface-container-high,#e8e7ef);
-      box-shadow:0 1px 3px rgb(0 0 0/.3),0 4px 8px 3px rgb(0 0 0/.15)}
-    .note-edit .field{flex:1;min-width:0}
-    .note-edit input{all:unset;box-sizing:border-box;display:block;width:100%;padding:6px 12px 4px;border-radius:4px 4px 0 0;
-      background:var(--md-sys-color-surface-container-highest,#e2e2e9);border-bottom:2px solid var(--c);
-      font:400 14px/20px ${FONT};letter-spacing:.25px;color:inherit;cursor:text;caret-color:var(--c)}
-    .note-edit input::placeholder{color:var(--md-sys-color-on-surface-variant,#45464f)}
-    .note-edit .help{padding:4px 12px 0;font:400 11px/16px ${FONT};letter-spacing:.4px;color:var(--md-sys-color-on-surface-variant,#45464f)}
-    .note-edit .del{all:unset;position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;
-      width:32px;height:32px;border-radius:50%;color:var(--md-sys-color-on-surface-variant,#45464f);cursor:pointer}
-    .note-edit .del::before{content:'';position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:0;transition:opacity .15s}
-    .note-edit .del:hover::before{opacity:.08}
-    .note-edit .del:focus-visible{outline:3px solid var(--md-sys-color-secondary,#585e71);outline-offset:1px}
-    .note-edit .del svg{width:20px;height:20px;fill:currentColor}
-    .bar{position:fixed;top:16px;left:50%;translate:-50% 0;display:flex;align-items:center;gap:4px;padding:8px;border-radius:999px;
-      background:var(--md-sys-color-surface-container,#eeedf4);color:var(--md-sys-color-on-surface-variant,#45464f);
-      box-shadow:0 1px 3px rgb(0 0 0/.3),0 4px 8px 3px rgb(0 0 0/.15);cursor:default;user-select:none}
-    .bar button{all:unset;position:relative;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:8px;
-      height:40px;min-width:40px;border-radius:999px;color:inherit;cursor:pointer;font:500 14px/20px ${FONT};letter-spacing:.1px}
-    .bar button::before{content:'';position:absolute;inset:0;border-radius:inherit;background:currentColor;opacity:0;transition:opacity .15s}
-    .bar button:hover::before{opacity:.08}
-    .bar button:active::before{opacity:.12}
-    .bar button:focus-visible{outline:3px solid var(--md-sys-color-secondary,#585e71);outline-offset:2px}
-    .bar button:disabled{cursor:default;opacity:.38}
-    .bar button:disabled::before{opacity:0}
-    .bar button.on{background:var(--md-sys-color-secondary-container,#c2e7ff);color:var(--md-sys-color-on-secondary-container,#001d35)}
-    .bar button.filled{padding:0 20px 0 14px;margin-left:4px;background:var(--md-sys-color-primary,#0b57d0);color:var(--md-sys-color-on-primary,#fff)}
-    .bar button.filled:disabled{opacity:1;background:color-mix(in srgb,var(--md-sys-color-on-surface,#1a1b21) 12%,transparent);
-      color:color-mix(in srgb,var(--md-sys-color-on-surface,#1a1b21) 38%,transparent)}
-    .bar svg{width:20px;height:20px;fill:currentColor;flex:none}
-    .bar .hint{padding:0 8px 0 4px;font:400 12px/16px ${FONT};letter-spacing:.4px;white-space:nowrap}
-    .bar .sep{width:1px;height:24px;background:var(--md-sys-color-outline-variant,#c5c6d0);margin:0 4px}
-    .annot [data-tip]:hover::after{z-index:1;content:attr(data-tip);position:absolute;top:calc(100% + 12px);left:50%;translate:-50% 0;
-      padding:4px 8px;border-radius:4px;background:var(--md-sys-color-inverse-surface,#2f3036);color:var(--md-sys-color-inverse-on-surface,#f1f0f7);
-      font:400 12px/16px ${FONT};letter-spacing:.4px;white-space:nowrap;pointer-events:none}
-    @media (max-width:680px){.bar .hint{display:none}.bar{gap:0;padding:6px}}`;
+  // The overlay's templates and styles: built from ui-src/src/overlay/ into ui/overlay.js, loaded before this script.
+  const UI = globalThis.__showAndTellUI;
+  const STYLES = UI.overlay.styles;
 
   let highlights = [], hidden = false, hoverEl = null, raf = 0, annotating = null, suspended = false;
   // The panel's Material colour tokens, scoped to the overlay's shadow root. The overlay sits on the page,
@@ -129,7 +52,7 @@
   let started = false, myTab = null;
   const hello = () => chrome.runtime.sendMessage({ type: 'hello', url: location.href })
     .then(r => {
-      if (r?.tabId != null) { myTab = r.tabId; document.documentElement.setAttribute('data-show-and-tell-tab', String(r.tabId)); }
+      if (r?.tabId != null) { myTab = r.tabId; document.documentElement.setAttribute('data-show-and-tell-tab', String(r.tabId)); sessionColour(); }
       if (r?.allowed && !started) { started = true; init(); }
     }).catch(() => {});
   hello();
@@ -138,6 +61,7 @@
   function init() {
     load();
     chrome.storage.onChanged.addListener((ch, area) => {
+      if (area === 'session' && ch.sessionTabs) sessionColour();
       if (area === 'session' && (ch.highlights || ch.overlaysHidden)) load();
       if (area === 'session' && ch.recording) setRecording(!!ch.recording.newValue);
     });
@@ -878,16 +802,6 @@
   // Mark colours: tone 40 with white text on light pages, tone 80 with dark text on dark pages.
   const PALETTE = { light: ['#0b57d0', '#146c2e', '#b3541e', '#7b1fa2', '#00687a', '#a8336a'],
     dark: ['#a8c7fa', '#6dd58c', '#ffb68a', '#e0b6ff', '#5ed5e6', '#ffb0cd'] };
-  const ICON = {
-    rect: 'M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z',
-    arrow: 'M9 5v2h6.59L4 18.59 5.41 20 17 8.41V15h2V5z',
-    pen: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
-    undo: 'M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z',
-    close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
-    check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7.59 19.59 6.17z',
-    delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zm2.46-7.12 1.41-1.41L12 12.59l2.12-2.12 1.41 1.41L13.41 14l2.12 2.12-1.41 1.41L12 15.41l-2.12 2.12-1.41-1.41L10.59 14l-2.13-2.12zM15.5 4l-1-1h-5l-1 1H5v2h14V4z',
-  };
-  const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[name]}"/></svg>`;
   let annot = null; // { layer, bar, marks, tool, drawing, note, reply }
 
   function startAnnotate(reply) {
@@ -899,18 +813,12 @@
     host.classList.toggle('dark', pageIsDark());
     const layer = document.createElement('div');
     layer.className = 'annot';
-    layer.innerHTML = `<div class="bar" role="toolbar">
-        <button data-tool="rect" class="on" data-tip="Frame">${icon('rect')}</button>
-        <button data-tool="arrow" data-tip="Arrow">${icon('arrow')}</button>
-        <button data-tool="pen" data-tip="Pen">${icon('pen')}</button>
-        <span class="hint">Click to mark an element</span>
-        <span class="sep"></span>
-        <button data-act="undo" data-tip="Undo (Ctrl+Z)" disabled>${icon('undo')}</button>
-        <button data-act="cancel" data-tip="Cancel (Esc)">${icon('close')}</button>
-        <button data-act="done" class="filled" disabled>${icon('check')}Done</button>
-      </div>`;
+    const bar = document.createElement('div');
+    bar.style.display = 'contents';
+    layer.append(bar);
     root.append(layer);
-    annot = { layer, bar: layer.querySelector('.bar'), marks: [], seq: 0, tool: 'rect', drawing: null, note: null, reply };
+    annot = { layer, bar, marks: [], seq: 0, tool: 'rect', drawing: null, note: null, reply };
+    updateBar();
     layer.addEventListener('pointerdown', annotDown);
     layer.addEventListener('pointermove', annotMove);
     layer.addEventListener('pointerup', annotUp);
@@ -1196,9 +1104,7 @@
     card.className = 'note-edit';
     card.style.setProperty('--c', m.color);
     card.style.setProperty('--on', m.on);
-    card.innerHTML = `<span class="num"></span><div class="field"><input aria-label="Note" placeholder="Add a note">
-      <div class="help">Enter saves · Esc discards</div></div>
-      <button class="del" data-tip="Delete mark" aria-label="Delete mark">${icon('delete')}</button>`;
+    UI.render(UI.overlay.noteEditor(), card);
     const input = card.querySelector('input');
     input.value = m.note;
     card.addEventListener('pointerdown', e => e.stopPropagation());
@@ -1231,8 +1137,7 @@
     card.className = 'note';
     card.style.setProperty('--c', m.color);
     card.style.setProperty('--on', m.on);
-    card.innerHTML = '<span class="num"></span><span class="text"></span>';
-    card.querySelector('.text').textContent = m.note;
+    UI.render(UI.overlay.note(m.note), card);
     card.title = 'Edit note';
     card.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); });
     card.addEventListener('click', () => { if (!annot.drawing) openNote(m); });
@@ -1240,11 +1145,8 @@
     m.card = card;
   }
 
-  function updateBar() {
-    const empty = !annot.marks.length;
-    annot.bar.querySelector('[data-act="undo"]').disabled = empty;
-    annot.bar.querySelector('[data-act="done"]').disabled = empty;
-  }
+  // The toolbar is a template: the selected tool and whether there is anything to undo or send.
+  function updateBar() { UI.render(UI.overlay.toolbar({ tool: annot.tool, empty: !annot.marks.length }), annot.bar); }
 
   function undo() {
     closeNote(true);
@@ -1258,7 +1160,7 @@
     if (b.dataset.tool) {
       closeNote(true);
       annot.tool = b.dataset.tool;
-      for (const x of annot.bar.querySelectorAll('[data-tool]')) x.classList.toggle('on', x === b);
+      updateBar();
     } else if (b.dataset.act === 'undo') undo();
     else if (b.dataset.act === 'cancel') finishAnnotate(null);
     else if (b.dataset.act === 'done') annotDone();

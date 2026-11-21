@@ -8,74 +8,9 @@
   if (window.top !== window) return;
   if (globalThis.__showAndTellStage) return;
 
-  const FONT = 'system-ui,"Segoe UI",Roboto,sans-serif';
-  const EL2 = '0 1px 2px rgb(0 0 0/.3),0 2px 6px 2px rgb(0 0 0/.15)';
-  const EL3 = '0 1px 3px rgb(0 0 0/.3),0 4px 8px 3px rgb(0 0 0/.15)';
-  const STYLES = `
-    .shield{position:fixed;inset:0;pointer-events:auto;cursor:none;background:transparent}
-    .cap{position:fixed;left:50%;bottom:30px;translate:-50% 0;box-sizing:border-box;width:max-content;max-width:min(780px,calc(100vw - 32px));padding:12px 20px;
-      border-radius:12px;background:color-mix(in srgb,var(--md-sys-color-inverse-surface) 94%,transparent);
-      color:var(--md-sys-color-inverse-on-surface);font:400 18px/26px ${FONT};letter-spacing:.15px;text-align:center;
-      box-shadow:${EL3};transition:opacity .25s cubic-bezier(.2,0,0,1),translate .25s cubic-bezier(.2,0,0,1)}
-    .cap .ch{font:500 12px/16px ${FONT};letter-spacing:.5px;margin-bottom:4px;
-      color:color-mix(in srgb,var(--md-sys-color-primary) 40%,var(--md-sys-color-inverse-on-surface))}
-    .cap .ch:empty,.cap .tx:empty{display:none}
-    .cap:has(.tx:empty) .ch{margin:0}
-    .tx{transition:opacity .2s cubic-bezier(.2,0,0,1)}
-    @media (max-width:600px){.cap{font-size:16px;line-height:24px;letter-spacing:.5px;padding:10px 16px}}
-    .cap.dodge{opacity:.12}
-    .hide{opacity:0!important}
-    .cap.hide{translate:-50% 10px}
-    .bar{position:fixed;left:0;right:0;bottom:0;height:4px;background:var(--md-sys-color-secondary-container)}
-    .bar .fill{position:absolute;left:0;top:0;bottom:0;background:var(--md-sys-color-primary);transition:width .6s cubic-bezier(.2,0,0,1)}
-    .bar .tick{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--md-sys-color-surface)}
-    .card{position:fixed;inset:0;display:grid;place-items:center;background:var(--md-sys-color-surface-container-low);
-      color:var(--md-sys-color-on-surface);transition:opacity .4s cubic-bezier(.2,0,0,1)}
-    .card .in{box-sizing:border-box;display:flex;flex-direction:column;align-items:flex-start;gap:12px;width:min(760px,80vw);
-      padding:40px 48px;border-radius:28px;background:var(--md-sys-color-surface-container-lowest);box-shadow:${EL2};
-      animation:rise .5s cubic-bezier(.2,0,0,1)}
-    @keyframes rise{from{translate:0 16px;opacity:0}}
-    .logo{max-height:44px;max-width:220px;margin-bottom:8px}
-    .kicker{font:500 14px/20px ${FONT};letter-spacing:.1px;color:var(--md-sys-color-primary)}
-    .title{font:400 36px/44px ${FONT};margin:0}
-    .sub{font:500 16px/24px ${FONT};letter-spacing:.15px;color:var(--md-sys-color-on-surface-variant)}
-    .list{display:grid;grid-template-columns:auto 1fr;gap:6px 20px;margin-top:8px;font:400 16px/24px ${FONT};letter-spacing:.5px}
-    .list .tm{font-variant-numeric:tabular-nums;color:var(--md-sys-color-on-surface-variant)}
-    .foot{margin-top:12px;padding-top:16px;border-top:1px solid var(--md-sys-color-outline-variant);align-self:stretch;
-      font:400 14px/20px ${FONT};letter-spacing:.25px;color:var(--md-sys-color-on-surface-variant)}
-    /* The video moved to another tab: a Chrome-style tab with the page's icon and title slides in at the top. */
-    .tabbar{position:fixed;top:0;left:50%;translate:-50% 0;display:flex;align-items:flex-end;gap:16px;padding:8px 24px 0;
-      border-radius:0 0 16px 16px;background:var(--md-sys-color-surface-container-highest);box-shadow:${EL2};
-      transition:opacity .35s cubic-bezier(.2,0,0,1),translate .35s cubic-bezier(.2,0,0,1)}
-    .tabbar.hide{translate:-50% -110%}
-    .tabbar .kind{align-self:center;white-space:nowrap;padding-bottom:8px;font:500 12px/16px ${FONT};letter-spacing:.5px;color:var(--md-sys-color-primary)}
-    .tab{position:relative;display:flex;align-items:center;gap:8px;height:36px;width:max-content;max-width:min(260px,32vw);padding:0 12px;
-      border-radius:10px 10px 0 0;background:var(--md-sys-color-surface);color:var(--md-sys-color-on-surface);font:500 14px/20px ${FONT};letter-spacing:.1px}
-    .tab::before,.tab::after{content:'';position:absolute;bottom:0;width:10px;height:10px}
-    .tab::before{left:-10px;background:radial-gradient(circle at 0 0,transparent 9.5px,var(--md-sys-color-surface) 10px)}
-    .tab::after{right:-10px;background:radial-gradient(circle at 100% 0,transparent 9.5px,var(--md-sys-color-surface) 10px)}
-    .tab .ic{flex:none;width:16px;height:16px;border-radius:2px}
-    .tab .ic.globe{fill:var(--md-sys-color-on-surface-variant)}
-    .tab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .tab .x{flex:none;width:16px;height:16px;margin-left:4px;fill:var(--md-sys-color-on-surface-variant)}
-    /* Inactive tabs sit on the strip itself, like in Chrome: no surface, muted text, a divider between. */
-    .tab.off{background:transparent;color:var(--md-sys-color-on-surface-variant);font-weight:400}
-    .tab.off::before,.tab.off::after{display:none}
-    .tab.off + .tab.off::before{display:block;content:'';left:0;top:10px;bottom:10px;width:1px;height:auto;background:var(--md-sys-color-outline-variant)}
-    /* A tab the video opens grows into the strip, like Chrome adds a tab (the reverse of closing). */
-    .tab.new{overflow:hidden;animation:tabopen .4s .45s cubic-bezier(.2,0,0,1) both}
-    @keyframes tabopen{from{max-width:0;padding-left:0;padding-right:0;margin-left:-8px;opacity:0}to{max-width:min(260px,32vw);opacity:1}}
-    /* A tab the video leaves and closes: its X is pressed (M3 state layer), then the tab collapses out of the strip. */
-    .tab .x{border-radius:50%}
-    .tab.closing .x{animation:xpress .95s .5s linear both}
-    @keyframes xpress{0%,100%{background:transparent;box-shadow:none}
-      30%{background:color-mix(in srgb,var(--md-sys-color-on-surface) 8%,transparent);box-shadow:0 0 0 5px color-mix(in srgb,var(--md-sys-color-on-surface) 8%,transparent)}
-      45%,85%{background:color-mix(in srgb,var(--md-sys-color-on-surface) 20%,transparent);box-shadow:0 0 0 5px color-mix(in srgb,var(--md-sys-color-on-surface) 20%,transparent)}}
-    .tab.closing{overflow:hidden;animation:tabclose .35s 1.45s cubic-bezier(.3,0,.8,.15) forwards}
-    @keyframes tabclose{to{max-width:0;padding-left:0;padding-right:0;margin-left:-8px;opacity:0}}
-    .tabs{display:flex;align-items:flex-end;gap:8px}
-    /* The other tabs, not listed: one inactive tab with an ellipsis, always between the two. */
-    .tab.more{padding:0 16px;font-size:20px;font-weight:700;color:var(--md-sys-color-on-surface-variant)}`;
+  // The stage's templates and styles: built from ui-src/src/overlay/ into ui/overlay.js, injected before this script.
+  const UI = globalThis.__showAndTellUI;
+  const STYLES = UI.stage.styles;
 
   let host = null, root = null, els = {}, state = {};
   const tokens = fetch(chrome.runtime.getURL('vendor/m3-tokens.css')).then(r => r.text())
@@ -149,20 +84,6 @@
   };
   const BLOCKED = ['keydown', 'keyup', 'keypress', 'wheel', 'touchstart', 'touchmove', 'mousedown', 'pointerdown', 'click', 'contextmenu'];
 
-  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-  function cardHtml(c, b) {
-    const logo = b.logoData ? `<img class="logo" alt="" src="${esc(b.logoData)}">` : '';
-    if (c.kind === 'section') return `<div class="kicker">${esc(c.kicker || 'Section')}</div><h1 class="title">${esc(c.title)}</h1>`;
-    if (c.kind === 'outro') {
-      const list = (c.chapters || []).map(ch => `<span class="tm">${esc(ch.time)}</span><span>${esc(ch.title)}</span>`).join('');
-      return `${logo}<div class="kicker">${esc(c.kicker || 'Thank you for watching')}</div><h1 class="title">${esc(c.title)}</h1>`
-        + (list ? `<div class="list">${list}</div>` : '') + (b.footer ? `<div class="foot">${esc(b.footer)}</div>` : '');
-    }
-    return `${logo}<div class="kicker">${esc(c.kicker || b.name || 'Review')}</div><h1 class="title">${esc(c.title)}</h1>`
-      + (c.subtitle ? `<div class="sub">${esc(c.subtitle)}</div>` : '');
-  }
-
   function render() {
     mount();
     const s = state, b = s.branding || {};
@@ -192,27 +113,21 @@
     tabChip(s);
     els.card.classList.toggle('hide', !s.card);
     if (s.card) {
-      const html = cardHtml(s.card, b);
-      if (els.in.dataset.html !== html) { els.in.innerHTML = html; els.in.dataset.html = html; els.in.style.animation = 'none'; void els.in.offsetWidth; els.in.style.animation = ''; }
+      // The card rises in again whenever its content changes.
+      const key = JSON.stringify([s.card, b.name, b.footer, !!b.logoData]);
+      if (els.in.dataset.key !== key) { UI.render(UI.stage.card(s.card, b), els.in); els.in.dataset.key = key; els.in.style.animation = 'none'; void els.in.offsetWidth; els.in.style.animation = ''; }
     }
   }
 
   // { kind, title, favicon, at }: shown for 3.5 s from t, the same in every tab the video passes through.
-  const GLOBE = '<svg class="ic globe" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 6h-2.9a15.7 15.7 0 0 0-1.4-3.6A8 8 0 0 1 18.9 8zM12 4c.8 1.2 1.5 2.5 1.9 4h-3.8c.4-1.5 1.1-2.8 1.9-4zM4.3 14a8.2 8.2 0 0 1 0-4h3.4a16.5 16.5 0 0 0 0 4H4.3zm.8 2h2.9c.3 1.3.8 2.5 1.4 3.6A8 8 0 0 1 5.1 16zM8 8H5.1a8 8 0 0 1 4.3-3.6C8.8 5.5 8.3 6.7 8 8zm4 12c-.8-1.2-1.5-2.5-1.9-4h3.8c-.4 1.5-1.1 2.8-1.9 4zm2.3-6H9.7a14.7 14.7 0 0 1 0-4h4.6a14.7 14.7 0 0 1 0 4zm.3 5.6c.6-1.1 1.1-2.3 1.4-3.6h2.9a8 8 0 0 1-4.3 3.6zm1.7-5.6a16.5 16.5 0 0 0 0-4h3.4a8.2 8.2 0 0 1 0 4h-3.4z"/></svg>';
-  const X = '<svg class="x" viewBox="0 0 24 24"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg>';
   let chipTimer = 0;
   function tabChip(s) {
     const t = s.tabChip, left = t ? 3500 - (Date.now() - (t.at || 0)) : 0, on = !!t && !s.card && left > 0;
     if (on) {
       // Both tabs side by side, as in a tab strip: the one the video came from and the one it is in now;
       // "…" stands for tabs between or around them.
-      const list = t.tabs?.length ? t.tabs : [{ title: t.title, url: t.url, favicon: t.favicon, active: true }];
-      const html = `<span class="kind">${esc(t.kind || 'New tab')}</span><span class="tabs">` + list.map(x => x.more ? '<span class="tab off more" aria-hidden="true"><span class="t">⋯</span></span>' : `<span class="tab ${x.active ? 'on' : 'off'}${x.new ? ' new' : ''}${x.closing ? ' closing' : ''}">`
-        + (x.favicon ? `<img class="ic" alt="" src="${esc(x.favicon)}">` : GLOBE) + `<span class="t">${esc(x.title || x.url || '')}</span>${X}</span>`).join('') + '</span>';
-      if (els.tabbar.dataset.html !== html) {
-        els.tabbar.innerHTML = html; els.tabbar.dataset.html = html;
-        for (const img of els.tabbar.querySelectorAll('img.ic')) img.onerror = () => { img.outerHTML = GLOBE; };
-      }
+      const key = JSON.stringify(t);
+      if (els.tabbar.dataset.key !== key) { UI.render(UI.stage.tabStrip(t), els.tabbar); els.tabbar.dataset.key = key; }
       clearTimeout(chipTimer); chipTimer = setTimeout(() => tabChip(state), left);
     }
     els.tabbar.classList.toggle('hide', !on);
