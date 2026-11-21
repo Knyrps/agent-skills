@@ -19,19 +19,13 @@ import type { SatComposer } from '../organisms/composer.js';
 import type { SatConversation } from '../organisms/conversation.js';
 import type { DotState } from '../atoms/status-dot.js';
 import type { AllowMode, AttachmentKind, ChatMessage, HostDecision, PauseChoice, PauseState, Suggestion, VideoView } from '../types.js';
+import { GROUP } from '../session-colours.js';
 import { hostAllowed, loadConfig } from '../../../extension/allow.js';
 
 const S = chrome.storage.session;
 const KEYS = ['step', 'steps', 'waiting', 'listener', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning', 'tourTab', 'tourHome',
   'explanation', 'video', 'sessionTabs', 'sessions', 'chats', 'demoRequest', 'hostQuestions', 'thinking', 'throttles', 'pauses',
   'recording', 'recordingDraft', 'annotationDraft', 'hostState'];
-
-// Chrome's tab group colours: the session in front lends its colour to the app icon and the status dot.
-const GROUP: Record<string, [light: string, dark: string]> = {
-  grey: ['#5f6368', '#dadce0'], blue: ['#1a73e8', '#8ab4f8'], red: ['#d93025', '#f28b82'], yellow: ['#b06000', '#fdd663'],
-  green: ['#188038', '#81c995'], pink: ['#d01884', '#ff8bcb'], purple: ['#a142f4', '#c58af9'], cyan: ['#007b83', '#78d9ec'],
-  orange: ['#c26401', '#fcad70'],
-};
 
 interface Session { id: string; name: string; color: string; listening: boolean; live: boolean }
 type Reply = { ok?: boolean; error?: string; cancelled?: boolean; host?: string } | null | undefined;

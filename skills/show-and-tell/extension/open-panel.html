@@ -1,12 +1,18 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><link rel="icon" href="icons/icon.svg"><title>show-and-tell</title>
-<link rel="stylesheet" href="vendor/m3-tokens.css">
-<!-- The whole page is the button (a click anywhere opens the panel); it looks like an M3 filled tonal button. -->
-<style>html,body{margin:0;height:100%;background:var(--md-sys-color-surface)}
-button{all:unset;position:fixed;inset:0;display:grid;place-items:center;cursor:pointer}
-button span{padding:10px 24px;border-radius:20px;background:var(--md-sys-color-secondary-container);
-color:var(--md-sys-color-on-secondary-container);font:500 14px/20px system-ui,"Segoe UI",Roboto,sans-serif;letter-spacing:.1px}
-button:hover span{background:color-mix(in srgb,var(--md-sys-color-on-secondary-container) 8%,var(--md-sys-color-secondary-container))}</style></head>
-<body><button id="open"><span>Open the show-and-tell panel</span></button><script src="open-panel.js"></script></body>
+<head>
+  <meta charset="utf-8"><link rel="icon" href="icons/icon.svg">
+  <title>show-and-tell</title>
+  <link rel="stylesheet" href="vendor/m3-tokens.css">
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--md-sys-color-surface); color-scheme: light dark; }
+    m3e-theme, sat-open-panel-page { display: block; height: 100%; }
+  </style>
+  <script type="module" src="ui/open-panel.js"></script>
+</head>
+<body>
+  <!-- Built from ui-src/src/pages/open-panel.ts -->
+  <m3e-theme motion="expressive" strong-focus><sat-open-panel-page class="m3-tokens"></sat-open-panel-page></m3e-theme>
+</body>
 </html>

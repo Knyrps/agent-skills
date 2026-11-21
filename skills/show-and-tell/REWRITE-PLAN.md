@@ -1,6 +1,6 @@
 # Plan: UI rewrite to Material 3 Expressive (Lit + @m3e/web, TypeScript)
 
-Status: started. Steps 1 and 2 are done. Work through the steps in order and commit each step separately. The
+Status: started. Steps 1 to 3 are done. Work through the steps in order and commit each step separately. The
 existing checks (`node tests/run.mjs`) describe the old UI and need not pass during the rewrite; new
 ones are written after it (step 7). The rules that hold throughout are in `AGENTS.md`.
 
@@ -78,7 +78,8 @@ elements while the page scrolls) stay direct style writes, not re-renders.
 2. **Done.** Side panel: `ui-src/src/pages/panel.ts` and the levels under it, built to
    `extension/ui/panel.js`; `panel.html` only loads it. The old `panel.js`, `panel.css` and `markdown.js`
    are gone. Element ids are kept where they cost nothing; they now live inside shadow roots.
-3. Small pages.
+3. **Done.** Small pages: `tab.html`, `open-panel.html` and `lab-offline.html` each load their bundle from
+   `extension/ui/`; their old scripts are gone.
 4. Overlay and video stage with `lit-html`.
 5. Demo page.
 6. Remove `@material/web` and the old bundles; update README ("Rebuild the vendored UI library") and
