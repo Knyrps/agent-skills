@@ -85,8 +85,11 @@ await run('annotate', async () => {
 });
 
 await run('session-colour', async () => {
-  const m = J(await pn.P(`(async () => { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); const g = t.groupId >= 0 ? await chrome.tabGroups.get(t.groupId) : null;
+  // A tab taken over from an ended session (grey group) is regrouped for this one: give it a moment.
+  const probe = async () => J(await pn.P(`(async () => { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); const g = t.groupId >= 0 ? await chrome.tabGroups.get(t.groupId) : null;
     const icon = $d('sat-app-icon'); return JSON.stringify({ group: g?.color || null, session: getComputedStyle(icon).getPropertyValue('--session').trim(), primary: getComputedStyle(icon).getPropertyValue('--md-sys-color-primary').trim() }); })()`));
+  let m = await probe();
+  for (let i = 0; i < 20 && (!m.session || m.group === 'grey'); i++) { await sleep(500); m = await probe(); }
   const GROUP = { grey: '#5f6368', blue: '#1a73e8', red: '#d93025', yellow: '#b06000', green: '#188038', pink: '#d01884', purple: '#a142f4', cyan: '#007b83', orange: '#c26401' };
   check('the app icon in the panel header takes the colour of the session\'s tab group', m.group && m.session.toLowerCase() === GROUP[m.group], JSON.stringify(m));
   await shot(pn, 'panel');
