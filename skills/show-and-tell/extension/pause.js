@@ -109,29 +109,47 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
   }
 
   // All places where the text occurs in the loaded scripts, in resource coordinates (an inline script
-  // starts somewhere inside its document).
+  // starts somewhere inside its document). Minified bundles are one long line, so each place is shown by the
+  // code around it, not by its line. Not found as written, the text is tried again with any spacing
+  // (a minifier drops the spaces of `a = b(c)`).
+  const near = (src, i, len) => {
+    const from = Math.max(0, i - 50), to = Math.min(src.length, i + len + 50);
+    return (from ? '…' : '') + src.slice(from, to).replace(/\s+/g, ' ') + (to < src.length ? '…' : '');
+  };
   async function findText(tabId, t, text, url) {
-    const found = new Map();
-    let scripts = 0;
-    for (const s of [...t.scripts.values()]) {
-      if (!s.url || /^chrome-extension:/.test(s.url) || (url && !s.url.includes(url))) continue;
-      const src = await sourceOf(tabId, t, s);
-      if (src == null) continue;
-      scripts++;
-      for (let i = src.indexOf(text); i !== -1 && found.size < 20; i = src.indexOf(text, i + 1)) {
-        const before = src.slice(0, i), row = before.split('\n').length - 1, col = i - (before.lastIndexOf('\n') + 1);
-        const line = s.startLine + row, column = row === 0 ? s.startColumn + col : col;
-        const code = cut(src.slice(i - col, (src.indexOf('\n', i) + 1 || src.length + 1) - 1).trim(), 160);
-        found.set(`${s.url} ${line} ${column}`, { url: s.url, line: line + 1, column: column + 1, code });
+    const exact = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // The same tokens with any spacing between them: words stay whole, punctuation and spaces may come and go.
+    const loose = text.trim().split(/(\s+|[.,;:=+\-*/<>!&|?()[\]{}"'`])/).filter(x => x && !/^\s+$/.test(x))
+      .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+    for (const [pattern, spacing] of [[exact, false], [loose, true]]) {
+      const found = new Map();
+      let scripts = 0, more = false;
+      for (const s of [...t.scripts.values()]) {
+        if (!s.url || /^chrome-extension:/.test(s.url) || (url && !s.url.includes(url))) continue;
+        const src = await sourceOf(tabId, t, s);
+        if (src == null) continue;
+        scripts++;
+        const re = new RegExp(pattern, 'g');
+        for (let m; (m = re.exec(src));) {
+          if (found.size >= 20) { more = true; break; }
+          const i = m.index, before = src.slice(0, i), row = before.split('\n').length - 1, col = i - (before.lastIndexOf('\n') + 1);
+          const line = s.startLine + row, column = row === 0 ? s.startColumn + col : col;
+          found.set(`${s.url} ${line} ${column}`, { url: s.url, line: line + 1, column: column + 1, code: near(src, i, m[0].length) });
+          if (!m[0].length) re.lastIndex++;
+        }
       }
+      if (found.size || spacing) return { matches: [...found.values()], scripts, more, spacing: spacing && found.size > 0 };
     }
-    return { matches: [...found.values()], scripts };
   }
 
   const codeAt = (t, loc) => {
     const s = loc && t.scripts.get(loc.scriptId);
     if (s?.source == null) return '';
-    return cut((s.source.split('\n')[loc.lineNumber - s.startLine] || '').trim(), 160);
+    const row = s.source.split('\n')[loc.lineNumber - s.startLine] || '';
+    if (row.length <= 160) return row.trim();
+    // A minified line: what is around the column, not the start of the bundle.
+    const col = loc.lineNumber === s.startLine ? loc.columnNumber - s.startColumn : loc.columnNumber;
+    return near(row, Math.max(0, col), 0);
   };
 
   async function make(tabId, t, spec) {
@@ -178,11 +196,16 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
         await enableDebugger(tabId, t);
         let target;
         if (spec.text) {
-          const { matches, scripts } = await findText(tabId, t, String(spec.text), spec.url && String(spec.url));
-          if (!matches.length) return { error: `the text was not found in the ${scripts} loaded script${scripts === 1 ? '' : 's'}${spec.url ? ` matching ${spec.url}` : ''}` };
-          const picked = spec.line ? matches.filter(m => m.line === +spec.line) : matches;
-          if (picked.length !== 1) return { error: `the text occurs in ${matches.length}${matches.length >= 20 ? '+' : ''} places: use a longer text, or pass url and line of the one you mean`, matches };
-          target = { url: picked[0].url, line: picked[0].line, column: picked[0].column };
+          const { matches, scripts, more, spacing } = await findText(tabId, t, String(spec.text), spec.url && String(spec.url));
+          if (!matches.length) return { error: `the text was not found in the ${scripts} loaded script${scripts === 1 ? '' : 's'}${spec.url ? ` matching ${spec.url}` : ''}, `
+            + 'not even with other spacing. Production scripts are usually minified: local names are shortened and comments removed. '
+            + 'Search for something minifying keeps: a string ("/api/items", an error message), a property or method name (".renderItems("), '
+            + 'a DOM call with its argument; or pause on the request or the DOM change instead' };
+          // Several places: line and column pick one (a minified bundle has them all on one line), url narrows the scripts.
+          const picked = matches.filter(m => (!spec.line || m.line === +spec.line) && (!spec.column || m.column === +spec.column));
+          if (picked.length !== 1) return { error: `the text occurs in ${matches.length}${more ? '+' : ''} places${picked.length ? '' : ' (none at that line and column)'}: `
+            + 'use a longer text, or pass the url, line and column of the one you mean from the list (code shows what is around each)', matches };
+          target = { url: picked[0].url, line: picked[0].line, column: picked[0].column, spacing };
         } else {
           if (!spec.url || !spec.line) return { error: 'a line pause needs text (code to search for), or url and line' };
           target = { urlRegex: String(spec.url).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), line: +spec.line, column: spec.column ? +spec.column : undefined };
@@ -199,7 +222,7 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
         const at = loc ? `${fileOf(s?.url)}:${loc.lineNumber + 1}` : `${fileOf(target.url || String(spec.url))}:${target.line}`;
         return {
           point: { kind: 'line', key, params, breakpointId: r.breakpointId, once, label: 'breakpoint at ' + at + (spec.condition ? ` if ${cut(spec.condition, 40)}` : '') },
-          info: loc ? { at: `${at}:${loc.columnNumber + 1}`, code: codeAt(t, loc) } : { note: 'no loaded script has that line yet; the pause applies once such a script loads' },
+          info: loc ? { at: `${at}:${loc.columnNumber + 1}`, code: codeAt(t, loc), ...(target.spacing && { note: 'found with other spacing than given' }) } : { note: 'no loaded script has that line yet; the pause applies once such a script loads' },
         };
       }
       default: return { error: 'on must be one of request, dom, line, event, now' };

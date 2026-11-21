@@ -166,5 +166,18 @@ await run('ended-tab-kept', async () => {
   check('15 minutes later it stays open, ungrouped (closing is opt-in)', !!tab && grouped === -1, JSON.stringify({ tab: tab?.url, grouped }));
 });
 
+await run('pause-minified', async () => {
+  await a.tool('browser_navigate', { url: LAB + '?minified' }); await sleep(800);
+  // A one-line "bundle" with the same call twice and no spaces.
+  await lab.ev(`new Promise(r => { const s = document.createElement('script'); s.src = 'data:text/javascript,' + encodeURIComponent('window.satMin=function(a){var b=a+1;window.satHit=b;return b},window.satMin2=function(a){var b=a+1;window.satHit=b;return b};'); s.onload = r; document.head.append(s); })`);
+  const J2 = s => { try { return JSON.parse(s); } catch { return {}; } };
+  const r = J2(await a.tool('pause', { on: 'line', text: 'var b = a + 1' }));
+  check('text written with spaces is found in code without them, at both places', r.matches?.length === 2 && r.matches.every(m => /var b=a\+1/.test(m.code)), JSON.stringify(r).slice(0, 300));
+  const m = r.matches?.[1];
+  const q = m ? J2(await a.tool('pause', { on: 'line', text: 'var b = a + 1', url: m.url, line: m.line, column: m.column })) : {};
+  check('url, line and column pick one of them on the same line', q.ok && /satMin2=function\(a\)\{var b=a\+1/.test(q.code), JSON.stringify([q.ok, q.at?.slice(-12), q.code]));
+  await a.tool('pause', { remove: 'all' });
+});
+
 summary();
 await a.close(); process.exit(0);
