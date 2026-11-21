@@ -255,11 +255,16 @@ export class SatPanelPage extends LitElement {
           @sat-back=${() => this.act('back')} @sat-next=${() => this.act('next')}></sat-tour-card>` : nothing}
         ${video ? html`<sat-video-card slot="pinned" .video=${video} label=${label} explanation=${d.explanation || ''}
           @sat-video-stop=${() => send({ type: 'videoStop' })} @sat-video-discard=${() => send({ type: 'videoStop', discard: true })}></sat-video-card>` : nothing}
-        ${throttle ? html`<sat-throttle-card slot="pinned" id="throttle"
+        ${throttle?.network || throttle?.cpu ? html`<sat-throttle-card slot="pinned" id="throttle"
           label=${[throttle.network && `Network ${throttle.network}`, throttle.cpu && `CPU ${throttle.cpu}× slower`].filter(Boolean).join(' · ')}
           @sat-throttle-off=${async () => {
             const r = await send({ type: 'throttleOff' });
             toast(r?.ok ? 'Throttling is off for this tab.' : 'Could not turn throttling off.');
+          }}></sat-throttle-card>` : nothing}
+        ${throttle?.device ? html`<sat-throttle-card slot="pinned" id="device" kind="device" label=${throttle.device}
+          @sat-throttle-off=${async () => {
+            const r = await send({ type: 'deviceOff' });
+            toast(r?.ok ? 'This tab has its own size again.' : 'Could not turn the device view off.');
           }}></sat-throttle-card>` : nothing}
         ${pause ? this.pauseCard(pause) : nothing}
         ${blocked ? html`<sat-notice slot="pinned" id="notice" ?web=${web} ?narrow=${this.narrow} ?always-disabled=${!connected}

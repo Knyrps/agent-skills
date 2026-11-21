@@ -22,5 +22,6 @@ import '@m3e/icons/outlined/play_arrow';
 import '@m3e/icons/outlined/radio_button_checked';
 import '@m3e/icons/outlined/schedule';
 import '@m3e/icons/outlined/shield_lock';
+import '@m3e/icons/outlined/devices';
 import '@m3e/icons/outlined/stop';
 import '@m3e/icons/outlined/warning';

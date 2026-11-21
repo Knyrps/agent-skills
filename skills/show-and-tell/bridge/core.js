@@ -526,7 +526,7 @@ export function startOwner({ standalone = false } = {}) {
           broadcast({ cmd: 'setStep', label, session: body.session || '' });
           return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
         }
-        if (!['highlight', 'clearHighlights', 'hideOverlays', 'throttle', 'pause', 'resume', 'inspectPaused', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop', 'tabs'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
+        if (!['highlight', 'clearHighlights', 'hideOverlays', 'throttle', 'device', 'pause', 'resume', 'inspectPaused', 'state', 'loadTour', 'gotoStep', 'endTour', 'requestDemo', 'recordTour', 'recordStop', 'tabs'].includes(body.cmd)) return json(res, 400, { error: 'unknown cmd' });
         const ms = ['recordTour', 'highlight', 'loadTour', 'requestDemo', 'tabs', 'pause'].includes(body.cmd) ? 150000 : ['resume', 'inspectPaused'].includes(body.cmd) ? 20000 : 8000;
         try { return json(res, 200, await requestExt(body, ms)); }
         catch (e) { return json(res, 200, { ok: false, error: e.message }); }

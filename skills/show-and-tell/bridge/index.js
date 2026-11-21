@@ -32,7 +32,7 @@ async function ensureBrowser({ force = false } = {}) {
 const [cmd, ...rest] = process.argv.slice(2);
 const opt = name => { const i = rest.indexOf('--' + name); return i >= 0 ? rest[i + 1] : undefined; };
 const VALUED = new Set(['--label', '--text', '--style', '--color', '--id', '--timeout', '--start', '--name', '--size', '--pace', '--out', '--zoom', '--gesture', '--direction', '--to', '--url',
-  '--session', '--label', '--download', '--upload', '--latency', '--cpu', '--change', '--line', '--column', '--condition', '--step', '--what', '--frame', '--reload']);
+  '--session', '--label', '--width', '--height', '--scale', '--download', '--upload', '--latency', '--cpu', '--change', '--line', '--column', '--condition', '--step', '--what', '--frame', '--reload']);
 const NETWORK_PRESETS = ['fast-4g', 'slow-4g', '3g', 'offline'];
 const GESTURES = ['tap', 'double-tap', 'long-press', 'swipe', 'pinch', 'click', 'double-click', 'right-click', 'hover', 'drag', 'scroll'];
 const positional = rest.filter((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
@@ -72,6 +72,9 @@ async function runCli() {
     case 'throttle': return call('POST', '/cmd', { cmd: 'throttle', network: opt('download')
       ? { downloadKbps: +opt('download'), uploadKbps: opt('upload') && +opt('upload'), latencyMs: +(opt('latency') || 0) }
       : positional[0] || (opt('cpu') ? undefined : 'off'), cpu: opt('cpu') && +opt('cpu') });
+    // device <phone|small-phone|tablet|off> | device --width n [--height n] [--scale n] [--touch] [--mobile]   (add --session s)
+    case 'device': return call('POST', '/cmd', { cmd: 'device', session: opt('session'), preset: positional[0], width: opt('width') && +opt('width'), height: opt('height') && +opt('height'),
+      scale: opt('scale') && +opt('scale'), touch: rest.includes('--touch') || undefined, mobile: rest.includes('--mobile') || undefined });
     // pause [--session s] request <url> [--hold [--after-input]] | dom <selector> [--change c] | line <text> | line --url u --line n | event <name> | now
     //       | list | remove <id|all>   (add --keep to pause more than once)
     case 'pause': {
@@ -272,6 +275,18 @@ async function runMcp() {
       uploadKbps: { type: 'number', description: 'Custom upload speed in kbit/s (default: same as download)' },
       latencyMs: { type: 'number', description: 'Custom added latency in ms' },
     } } },
+    { name: 'emulate_device', description: 'Show your tab as on a phone, a tablet or at any width, like the device toolbar in Chrome DevTools: the page is laid out '
+      + 'at that size (media queries, viewport meta tag), with touch support and a mobile user agent for the presets. Only your tab changes, not the user\'s window '
+      + 'or the side panel, and it stays on across navigations until preset "off", so call it again with another width instead of opening tabs. The result '
+      + 'says what the page now measures. Use it to check or show responsive layouts; the panel shows it and lets the user turn it off.',
+    inputSchema: { type: 'object', properties: {
+      preset: { type: 'string', enum: ['phone', 'small-phone', 'tablet', 'off'], description: 'phone 390×844, small-phone 360×640, tablet 820×1180 (all with touch and a mobile user agent); "off" ends it' },
+      width: { type: 'number', description: 'Viewport width in CSS pixels (200-4000), alone or overriding the preset\'s; alone it is a plain narrower or wider desktop tab' },
+      height: { type: 'number', description: 'Viewport height in CSS pixels; omit or 0 to keep the tab\'s own height' },
+      scale: { type: 'number', description: 'Device pixel ratio, e.g. 2 or 3; omit to keep the screen\'s own' },
+      touch: { type: 'boolean', description: 'The page sees a touch screen (default: only with a preset)' },
+      mobile: { type: 'boolean', description: 'Mobile browser behaviour: viewport meta tag, mobile user agent (default: only with a preset)' },
+    } } },
     { name: 'pause', description: 'Stop your tab at a chosen moment, like breakpoints in Chrome DevTools, so you or the user can look at a state '
       + 'that normally passes too quickly (loading, empty, half-rendered, an open menu). `on` says when: "request" before a fetch/XHR whose URL contains '
       + '`url` is sent (with hold: true the page runs on and only that request waits, so browser_* tools still work and the loading state stays on screen; '
@@ -327,7 +342,7 @@ async function runMcp() {
     inputSchema: { type: 'object', properties: { timeoutSec: { type: 'number', description: 'Default 600' } } } },
   ];
 
-  const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'throttle', 'pause', 'load_tour', 'request_demo', 'record_tour']);
+  const AUTOSTART = new Set(['set_step', 'highlight', 'clear_highlights', 'hide_overlays', 'throttle', 'emulate_device', 'pause', 'load_tour', 'request_demo', 'record_tour']);
   const server = new Server({ name: 'show-and-tell', version: JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...TOOLS, ...(await driver.list(log)).map(t =>
     ({ ...t, description: 'Shared show-and-tell browser (the one the user sees): ' + (t.description || '') }))] }));
@@ -373,6 +388,10 @@ async function runMcp() {
           const network = a.downloadKbps ? { downloadKbps: a.downloadKbps, uploadKbps: a.uploadKbps, latencyMs: a.latencyMs } : a.preset;
           if (network === undefined && a.cpu === undefined) return reply({ ok: false, error: 'give preset, downloadKbps or cpu ("off" resets both)' });
           return done(await cmd({ cmd: 'throttle', network, cpu: a.cpu }));
+        }
+        case 'emulate_device': {
+          if (a.preset === undefined && a.width === undefined) return reply({ ok: false, error: 'give a preset (phone, small-phone, tablet, off) or a width' });
+          return done(await cmd({ cmd: 'device', preset: a.preset, width: a.width, height: a.height, scale: a.scale, touch: a.touch, mobile: a.mobile }));
         }
         case 'pause': return done(await cmd({ cmd: 'pause', on: a.on, url: a.url, hold: a.hold, afterInput: a.afterInput, selector: a.selector, change: a.change, text: a.text,
           line: a.line, column: a.column, condition: a.condition, event: a.event, once: a.once, remove: a.remove }));

@@ -88,7 +88,7 @@ like the M3E ones and use the same tokens. Per-frame position updates stay direc
 - `node tests/run.mjs [name] [--keep|--clean]` runs `tests/*.test.mjs` on a throwaway copy with its own ports and
   profile; it needs `npm install` in `bridge/`. `ui` covers what the rewrite added (test page cards and debug
   sheet, slider, Annotate toolbar, session colour); `pause`, `pause-menu`, `pause-orphan` and `readme-rows`
-  cover pausing and the pause card.
+  cover pausing and the pause card; `device` covers the device view.
 - `node scripts/real-input-check.mjs` drives the test page and the panel with real input (CDP `Input.*`).
 - The panel and the test page are web components: tests find elements with `$d` / `$$d` (from `tests/lib.mjs`),
   which look through shadow roots. The Annotate overlay's root is closed: find its buttons with

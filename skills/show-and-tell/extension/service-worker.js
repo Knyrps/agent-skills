@@ -544,6 +544,11 @@ async function onBridge(m) {
     await S.set({ waiting: !!m.waiting, listener: String(m.listener || ''), sessions: m.sessions || [], endedSessions: m.ended || [] });
     // An ended session can no longer resume its page: everything it paused or held runs again.
     for (const id of m.ended || []) pauser.clearSession(id);
+    // Nor can it turn its device emulation off: its tabs go back to the window's own size.
+    if (m.ended?.length) {
+      const st = await sessionTabs(), th = await throttles();
+      for (const id of m.ended) for (const tabId of st[id] ? tabsOf(st[id]) : []) if (th[tabId]?.device) await setDevice(tabId, 'off').catch(() => {});
+    }
     return sweepTabs(m.sessions || [], m.ended || []);
   }
   if (m.cmd === 'hosts') return setHostState(m);
@@ -637,6 +642,13 @@ async function command(m) {
       if (m.network !== undefined) Object.assign(out, await setNetwork(tab.id, m.network));
       if (out.ok && m.cpu !== undefined) Object.assign(out, await setCpu(tab.id, m.cpu));
       return out;
+    }
+    // The session's tab as a phone, a tablet or at a given width; "off" ends it.
+    case 'device': {
+      const tab = await tabFor(m);
+      if (!tab) return { ok: false, error: 'no tab' };
+      const off = m.preset === 'off' && m.width == null;
+      return { ...(await setDevice(tab.id, off ? 'off' : { preset: m.preset, width: m.width, height: m.height, scale: m.scale, mobile: m.mobile, touch: m.touch })), tabId: tab.id };
     }
     // Breakpoints and held requests in the session's own tab, see pause.js.
     case 'pause': {
@@ -1015,7 +1027,7 @@ const NETWORK = {
   offline: { label: 'Offline', offline: true, download: 0, upload: 0, latency: 0 },
 };
 const attachedTabs = new Set();
-const throttles = () => S.get('throttles').then(r => r.throttles || {}); // tabId -> { network?, cpu? }
+const throttles = () => S.get('throttles').then(r => r.throttles || {}); // tabId -> { network?, cpu?, device? }
 const setThrottleState = (tabId, patch) => serial(async () => {
   const t = await throttles();
   const next = { ...(t[tabId] || {}), ...patch };
@@ -1098,6 +1110,65 @@ async function setCpu(tabId, rate) {
 async function throttleOff(tabId) {
   await setCpu(tabId, 'off');
   return { ...(await setNetwork(tabId, 'off')), cpu: 'off' };
+}
+
+// ------------------------------------------------------------------ device emulation
+// A tab laid out as on a phone, a tablet or at any width, as with DevTools' device toolbar. Only this tab
+// changes: not the window, the side panel or other sessions' tabs. It is kept with the tab's throttling state,
+// so the debugger stays attached while it is on and the panel shows it.
+const DEVICES = {
+  phone: { name: 'Phone', width: 390, height: 844, scale: 3, mobile: true, touch: true },
+  'small-phone': { name: 'Small phone', width: 360, height: 640, scale: 3, mobile: true, touch: true },
+  tablet: { name: 'Tablet', width: 820, height: 1180, scale: 2, mobile: true, touch: true, tablet: true },
+};
+// Chrome on Android's user agent with this browser's version, for pages that decide by it.
+const mobileUserAgent = tablet => `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${/Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] || '120.0.0.0'} ${tablet ? '' : 'Mobile '}Safari/537.36`;
+
+// spec: "off", or { preset?, width?, height?, scale?, mobile?, touch? }; own values override the preset's.
+// height 0 keeps the tab's own height, scale 0 the screen's own pixel density.
+async function setDevice(tabId, spec) {
+  const target = { tabId };
+  if (spec == null || spec === 'off' || spec === false) {
+    if (attachedTabs.has(tabId)) {
+      await chrome.debugger.sendCommand(target, 'Emulation.clearDeviceMetricsOverride').catch(() => {});
+      await chrome.debugger.sendCommand(target, 'Emulation.setTouchEmulationEnabled', { enabled: false }).catch(() => {});
+      await chrome.debugger.sendCommand(target, 'Emulation.setUserAgentOverride', { userAgent: '' }).catch(() => {});
+    }
+    await setThrottleState(tabId, { device: null });
+    await detachIfIdle(tabId);
+    return { ok: true, device: 'off' };
+  }
+  const preset = spec.preset ? DEVICES[String(spec.preset).toLowerCase()] : {};
+  if (!preset) return { ok: false, error: `unknown device preset "${spec.preset}"; use ${Object.keys(DEVICES).join(', ')}, off, or give a width` };
+  const own = Object.fromEntries(Object.entries({ width: spec.width, height: spec.height, scale: spec.scale, mobile: spec.mobile, touch: spec.touch }).filter(([, v]) => v != null));
+  const d = { height: 0, scale: 0, mobile: false, touch: false, ...preset, ...own };
+  const width = Math.round(+d.width), scale = +d.scale || 0;
+  let height = Math.round(+d.height || 0);
+  if (!(width >= 200 && width <= 4000)) return { ok: false, error: 'give a preset (phone, small-phone, tablet) or a width from 200 to 4000 CSS pixels' };
+  if (height && !(height >= 200 && height <= 4000)) return { ok: false, error: 'height must be from 200 to 4000 CSS pixels, or 0 to keep the tab\'s own height' };
+  if (scale && !(scale >= 0.5 && scale <= 4)) return { ok: false, error: 'scale is the device pixel ratio, from 0.5 to 4 (0 keeps the screen\'s own)' };
+  // The page is drawn at its real size in the tab's place in the window; what does not fit there is cut off for
+  // the user (the agent's tools still see all of it). Shrinking it to fit, as DevTools does, is not an option:
+  // input sent over the debugger protocol, which is how the agent clicks, then lands in the wrong place.
+  // So a preset taller than the tab takes the tab's height: a slightly shorter phone, with its bottom edge
+  // (sticky bars) in view. A height the caller asked for is kept.
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const room = tab?.width && tab?.height ? { width: tab.width, height: tab.height } : null;
+  if (room && height > room.height && own.height == null) height = 0;
+  const cut = !!room && (width > room.width || height > room.height);
+  await attachDebugger(tabId);
+  await chrome.debugger.sendCommand(target, 'Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: !!d.mobile });
+  await chrome.debugger.sendCommand(target, 'Emulation.setTouchEmulationEnabled', d.touch ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
+  await chrome.debugger.sendCommand(target, 'Emulation.setUserAgentOverride', d.mobile ? { userAgent: mobileUserAgent(d.tablet), platform: 'Linux armv81', userAgentMetadata: undefined } : { userAgent: '' }).catch(() => {});
+  const label = [own.width == null && own.height == null && preset.name, `${width}${height ? ` × ${height}` : ' wide'}`, scale && `${scale}×`, d.touch && 'touch', d.mobile && 'mobile', cut && 'larger than the tab, partly out of view'].filter(Boolean).join(' · ');
+  await setThrottleState(tabId, { device: label });
+  // What the page now measures, so the caller sees that it took effect. A paused page cannot answer.
+  const seen = pauser.paused(tabId) ? null : await Promise.race([new Promise(r => setTimeout(() => r(null), 800)),
+    chrome.debugger.sendCommand(target, 'Runtime.evaluate', { returnByValue: true, expression: 'JSON.stringify({ width: innerWidth, height: innerHeight, pixelRatio: devicePixelRatio })' }).catch(() => null)]);
+  let viewport = null; try { viewport = JSON.parse(seen.result.value); } catch { /* not measured */ }
+  return { ok: true, device: label, ...(viewport && { viewport }),
+    ...(cut ? { cutOff: `The tab's place in the window is ${room.width} × ${room.height}: the user sees only the top left part of the page (they can widen the window or close the side panel). Your tools see and reach all of it.` } : {}),
+    ...(d.mobile || d.touch ? { note: 'The layout follows at once. A page that decides on the server or when it starts whether it is on a phone (user agent, touch support) needs a reload to notice.' } : {}) };
 }
 
 async function captureArea(tab, spec) {
@@ -1622,6 +1693,7 @@ async function handle(m, sender) {
     }
     // The panel's "Turn off" for the tab in front; the user can always end throttling.
     case 'throttleOff': { const t = await activeTab(); return t ? throttleOff(t.id) : { ok: false }; }
+    case 'deviceOff': { const t = await activeTab(); return t ? setDevice(t.id, 'off') : { ok: false }; }
     // The pause card's buttons, also for the tab in front: the user can always let the page run again.
     case 'pauseResume': { const t = await activeTab(); return t ? pauser.resume(t.id, { what: m.what, remove: m.remove, reload: m.reload, by: 'user' }) : { ok: false }; }
     case 'pauseClear': { const t = await activeTab(); return t ? pauser.clear(t.id, 'user') : { ok: false }; }

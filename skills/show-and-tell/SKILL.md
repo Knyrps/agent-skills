@@ -16,11 +16,11 @@ Guided tours and videos are optional layers on top. The panel is browser UI and 
 - **Browser**: Chrome for Testing on its own profile, CDP `127.0.0.1:9334`, extension preloaded.
   `start_browser` launches it (idempotent) and opens the panel; it outlives the session.
 - **show-and-tell MCP**: `start_browser`, `status`, `highlight`, `clear_highlights`, `hide_overlays`, `get_queue`,
-  `wait_for_action`, `say`, `tabs`, `request_demo`, `throttle`, `pause`, `resume`, `inspect_paused`, `set_step`,
+  `wait_for_action`, `say`, `tabs`, `request_demo`, `throttle`, `emulate_device`, `pause`, `resume`, `inspect_paused`, `set_step`,
   `load_tour`, `goto_step`, `end_tour`, `record_tour`,
   `stop_recording`. Each also exists as a CLI: `node "<skill>/bridge" <start|status|highlight <css> [--label t]
   [--gesture g] [--direction d] [--to css] [--url u] [--style s] [--keep]|clear|hide|show|queue [--recent]|wait|cancel|
-  say --session <id> <text|->|request <prompt>|throttle <preset|off> [--cpu n]|step <label>|tour <file>|goto <n>|end|
+  say --session <id> <text|->|request <prompt>|throttle <preset|off> [--cpu n]|device <phone|small-phone|tablet|off> [--width n] [--height n]|step <label>|tour <file>|goto <n>|end|
   record <file> [--name n] [--size s]|record-stop|record-cancel|
   pause <request <url> [--hold [--after-input]]|dom <css> [--change c]|line <code> [--condition e]|event <name>|now|list|remove <id|all>>
   [--keep] [--session <id>]|resume [--step over|into|out] [--what page|requests] [--remove]
@@ -59,6 +59,19 @@ on its own; `preset: "off"` without `cpu` resets both. Use it to show or check l
 offline handling and slow devices. It stays on until off (the panel shows it, and the user can turn it off),
 so turn it off when you are done. In tours and videos a step's `network` and `cpu` fields do the same from
 that step on; they end with the tour or video.
+
+## Phone, tablet and other widths
+
+`emulate_device({ preset })` shows your tab as on a `phone` (390 wide), `small-phone` (360) or `tablet` (820),
+with touch support and a mobile user agent, like the device toolbar in DevTools; `{ width, height?, scale? }`
+alone is a plain tab of that size. Only your tab changes, never the user's window or the panel
+(`browser_resize` is not offered for that reason). It stays on across navigations until `preset: "off"`, so
+for several sizes call it again on the same tab: no new tabs, no reload, and do not build an iframe for it.
+- The result's `viewport` is what the page now measures. The layout follows at once; a page that decides on
+  the server or at start-up whether it is on a phone needs a reload (`browser_navigate` to the same URL).
+- `cutOff` in the result means the size is larger than the tab's place in the window: you see and reach all
+  of it, the user only the top left part. Say so when you show them something outside it.
+- The panel shows "Shown as a device" with a Turn off button; turn it off yourself when you are done.
 
 ## Pausing the page
 
