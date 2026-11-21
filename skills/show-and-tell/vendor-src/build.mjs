@@ -1,5 +1,5 @@
-// Builds extension/vendor/material-web.js (one ESM bundle) and extension/vendor/m3-tokens.css
-// (Material 3 colour roles, light + dark). `node build.mjs tokens` writes only the tokens.
+// Writes extension/vendor/m3-tokens.css: the Material 3 colour roles, light and dark, for the extension's
+// pages, the overlay and the test page. The UI itself is built by ui-src/ (Lit + @m3e/web).
 import { build } from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,21 +15,6 @@ const { argbFromHex, hexFromArgb, Hct, SchemeTonalSpot, SchemeMonochrome, Materi
 const here = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(here, '..', 'extension', 'vendor');
 fs.mkdirSync(out, { recursive: true });
-
-const tokensOnly = process.argv[2] === 'tokens';
-if (!tokensOnly) {
-  await build({
-    entryPoints: [path.join(here, 'entry.js')],
-    bundle: true, format: 'esm', minify: true, target: 'chrome116', legalComments: 'eof',
-    outfile: path.join(out, 'material-web.js'),
-  });
-  // The test page's components (select, checkbox, slider, dialog, menu); not part of the extension.
-  await build({
-    entryPoints: [path.join(here, 'lab-entry.js')],
-    bundle: true, format: 'esm', minify: true, target: 'chrome116', legalComments: 'eof',
-    outfile: path.join(here, '..', 'scripts', 'lab-vendor', 'material-lab.js'),
-  });
-}
 
 // "Warm paper and ink": surfaces and containers are tonal spot from a warm seed; the primary is black
 // (white in dark), taken from the monochrome scheme. The only strong colour in the UI is the session's.
@@ -67,4 +52,4 @@ ${vars(true).replace(/^/gm, '  ')}
 }
 `;
 fs.writeFileSync(path.join(out, 'm3-tokens.css'), css);
-console.log(tokensOnly ? 'wrote m3-tokens.css only;' : 'wrote', fs.readdirSync(out).map(f => `${f} (${fs.statSync(path.join(out, f)).size} B)`).join(', '));
+console.log(`wrote extension/vendor/m3-tokens.css (${fs.statSync(path.join(out, 'm3-tokens.css')).size} B)`);

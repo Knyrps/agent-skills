@@ -1,15 +1,13 @@
 {
   "name": "show-and-tell-vendor",
   "private": true,
-  "description": "Rebuilds extension/vendor/ (Material Web bundle + Material 3 color tokens). Not needed at runtime.",
+  "description": "Rebuilds extension/vendor/m3-tokens.css (Material 3 colour roles). Not needed at runtime.",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
-    "tokens": "node build.mjs tokens"
+    "tokens": "node build.mjs"
   },
   "devDependencies": {
     "@material/material-color-utilities": "^0.4.0",
-    "@material/web": "^2.5.0",
     "esbuild": "^0.28.2"
   }
 }

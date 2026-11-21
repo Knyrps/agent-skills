@@ -11,7 +11,7 @@ steps and their order. This file has the rules that hold while doing them and af
 | `ui-src/src/atoms/` … `pages/` | Atomic design levels, see below |
 | `extension/ui/` | Built bundles, committed. The extension runs without a build step |
 | `ui-src/src/lab/` | The test page (same levels), built to `scripts/lab-vendor/lab.js`, not minified; `scripts/lab.mjs` serves it |
-| `vendor-src/build.mjs` | Colour tokens (`npm run tokens`) and, until step 6, the old Material Web bundles |
+| `vendor-src/build.mjs` | Colour tokens (`npm run tokens`) |
 | `extension/vendor/m3-tokens.css` | Generated colour roles, light and dark. Never edit by hand |
 | `tests/` | `node tests/run.mjs` runs the checks on a throwaway copy with its own ports and profile. They describe the old UI until they are rewritten after the rewrite |
 

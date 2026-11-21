@@ -620,7 +620,7 @@
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return;
     }
-    // A component select (md-outlined-select and the like): its options are light-DOM children with a
+    // A component select (m3e-select, md-outlined-select and the like): its options are light-DOM children with a
     // value attribute; clicking one selects it, as the user would.
     const field = innerControl(el);
     if (el.localName.includes('-') && !field) {

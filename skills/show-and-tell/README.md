@@ -50,7 +50,7 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
 | --- | --- |
 | `SKILL.md` | Instructions for the agent |
 | `scripts/browser.mjs` | `start` / `stop` / `status` / `panel` for the demo browser |
-| `extension/` | MV3 extension: side panel (Material Web), service worker (bridge socket, outbox, capture), content script (highlights, annotation, recorder) |
+| `extension/` | MV3 extension: side panel (Lit + `@m3e/web`, built into `extension/ui/`), service worker (bridge socket, outbox, capture), content script (highlights, annotation, recorder) |
 | `extension/config.json` | Bridge URL and shared host patterns; `config.local.json` (git-ignored) holds hosts you allowed and video branding |
 | `bridge/hosts.js` | Which hosts are allowed: loopback and the hosts file's loopback names, config patterns, your grants |
 | `extension/gestures.js`, `stage.js` | Gesture glyphs and the drawn pointer; the video stage (captions, cards, input shield) |
@@ -58,7 +58,8 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
 | `references/video.md` | How the agent writes review videos |
 | `bridge/` | MCP server, bridge server and CLI (`index.js`); `driver.js` runs Playwright MCP on the shared browser. Dependencies: `@modelcontextprotocol/sdk`, `@playwright/mcp` |
 | `config/` | MCP config snippets per agent host |
-| `vendor-src/` | Rebuilds `extension/vendor/` (Material Web bundle, M3 colour tokens) and `scripts/lab-vendor/`. Not needed at runtime |
+| `ui-src/` | UI source in TypeScript: side panel, small pages, overlay and video stage templates, test page. Builds `extension/ui/` and `scripts/lab-vendor/lab.js`. Not needed at runtime |
+| `vendor-src/` | Rebuilds `extension/vendor/m3-tokens.css` (Material 3 colour roles). Not needed at runtime |
 | `scripts/lab.mjs`, `scripts/real-input-check.mjs` | Test page and the end-to-end check with real input (see below) |
 
 Works on Windows, macOS and Linux with Node.js 20 or newer.
@@ -142,7 +143,7 @@ whenever it runs, and the browser opens it on start as a pinned tab. New tabs (C
 the extension sends Chrome's new tab page there (redirecting, not overriding it, so Chrome doesn't ask "Change back to Google?"). It is not a separate process: while no bridge runs
 (no agent session with show-and-tell, no `bridge serve`), its tab shows a notice and switches to the page
 once a bridge is up. Agent sessions never take the lab tab over as their own. The page is built like a
-Material 3 app with Material Web components (their controls live in shadow DOM, as in real apps). Every
+Material 3 Expressive app with `@m3e/web` components (their controls live in shadow DOM, as in real apps). Every
 element reacts to real mouse, touch and keyboard input and to the skill's scripted actions, and a log at
 the bottom says who caused each event:
 
@@ -156,9 +157,9 @@ Only calls through show-and-tell are recognised as the agent's. Anything else th
 CDP port 9334 (the real-input check below, raw CDP scripts, a separately configured Playwright) looks like a
 person's input and is labelled `[user]`; agent sessions are told about it as the user's too.
 
-The bug icon in the lab's top bar opens a debug panel: **Log events from** (User + Agent, User, Agent) and,
-under **Advanced…**, **Demo reactions** (the cards' own lines, the default log) plus every raw event type in
-groups, with search, All, None and Reset. Every event is kept in a buffer of 5,000 lines and the settings
+The bug icon in the lab's top bar opens **Debug options**, a side sheet at the right: **Log events from**
+(User + agent, User, Agent), **Card reactions** (the cards' own lines, the default log) and, under **Raw
+events**, every DOM event type as a chip in its group, with search, All, None and Reset. Every event is kept in a buffer of 5,000 lines and the settings
 only filter what is shown, so changing them also shows or hides earlier events.
 
 `node <skill>/scripts/real-input-check.mjs` then drives the lab and the side panel with real input (CDP
@@ -217,10 +218,17 @@ By hand, open the lab (or any page on `http://localhost:<port>/`) in the demo br
 
 A separate window with an empty `about:blank` means the agent used the plain `playwright` server.
 
-## Rebuild the vendored UI library
+## Rebuild the UI
+
+The built files are committed, so the extension and the test page run without a build step. After changing
+`ui-src/`:
 
 ```sh
-cd <skill>/vendor-src
+cd <skill>/ui-src
 npm install
-npm run build   # writes extension/vendor/material-web.js and m3-tokens.css
+npm run check   # type-check
+npm run build   # writes extension/ui/*.js and scripts/lab-vendor/lab.js
 ```
+
+The colour roles come from `vendor-src/` (`npm install`, then `npm run tokens` writes
+`extension/vendor/m3-tokens.css`). `AGENTS.md` has the rules for working on the UI.
