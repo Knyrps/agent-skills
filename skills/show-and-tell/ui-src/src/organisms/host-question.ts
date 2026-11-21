@@ -25,6 +25,15 @@ export class SatHostQuestion extends LitElement {
 
   private decide(d: HostDecision) { fire<HostDecision>(this, 'sat-host-decision', d); }
 
+  // A question needs an answer: bring it fully into view when it appears, when the next one takes its place and when
+  // its card settles on its height (the buttons inside render after it), even if the user had scrolled up.
+  private shown = new ResizeObserver(() => this.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
+  override connectedCallback() { super.connectedCallback(); this.shown.observe(this); }
+  override disconnectedCallback() { super.disconnectedCallback(); this.shown.disconnect(); }
+  protected override updated(changed: Map<string, unknown>) {
+    if (changed.has('host')) void this.updateComplete.then(() => this.scrollIntoView({ block: 'nearest', behavior: 'instant' }));
+  }
+
   override render() {
     const size = this.narrow ? 'extra-small' : 'small';
     return html`<m3e-card variant="outlined" role="alertdialog" aria-labelledby="host-ask-title">
