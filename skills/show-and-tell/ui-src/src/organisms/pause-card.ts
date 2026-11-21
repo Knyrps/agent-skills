@@ -46,11 +46,11 @@ export class SatPauseCard extends LitElement {
         </m3e-icon-button>
       </m3e-split-button>
       <m3e-menu id="pause-menu" position-x="before">
-        ${this.kept ? html`<m3e-menu-item id="pause-remove" @click=${() => this.choose('remove')}>Resume and remove breakpoint</m3e-menu-item>
+        ${this.kept ? html`<m3e-menu-item id="pause-remove" data-do="remove" @click=${() => this.choose('remove')}>Resume and remove breakpoint</m3e-menu-item>
           <m3e-divider></m3e-divider>` : nothing}
-        <m3e-menu-item @click=${() => this.choose('again')}>Reload to breakpoint</m3e-menu-item>
-        <m3e-menu-item @click=${() => this.choose('skip')}>Reload and ignore breakpoint once</m3e-menu-item>
-        <m3e-menu-item @click=${() => this.choose('drop')}>Reload and remove breakpoint</m3e-menu-item>
+        <m3e-menu-item data-do="again" @click=${() => this.choose('again')}>Reload to breakpoint</m3e-menu-item>
+        <m3e-menu-item data-do="skip" @click=${() => this.choose('skip')}>Reload and ignore breakpoint once</m3e-menu-item>
+        <m3e-menu-item data-do="drop" @click=${() => this.choose('drop')}>Reload and remove breakpoint</m3e-menu-item>
       </m3e-menu>`;
   }
 

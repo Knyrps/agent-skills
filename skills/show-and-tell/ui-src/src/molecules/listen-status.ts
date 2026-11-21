@@ -12,7 +12,7 @@ export class SatListenStatus extends LitElement {
   `;
   @property() state: DotState = 'idle';
   @property() text = '';
-  override render() { return html`<sat-status-dot state=${this.state}></sat-status-dot><span>${this.text}</span>`; }
+  override render() { return html`<sat-status-dot state=${this.state}></sat-status-dot><span id="listen-text">${this.text}</span>`; }
 }
 
 declare global { interface HTMLElementTagNameMap { 'sat-listen-status': SatListenStatus; } }

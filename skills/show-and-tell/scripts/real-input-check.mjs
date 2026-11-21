@@ -32,13 +32,22 @@ async function cdp(url) {
 }
 const targets = async () => (await fetch(CDP + '/json/list')).json();
 
+// Prepended to every expression: the side panel and the lab are built from web components, so $d / $$d look
+// through open shadow roots too, $vis picks the first match that is on screen (an M3E select's options are
+// copied into a popup), deepText reads text across shadow roots, and deepActive is the focused element.
+const DEEP = `const $d = (s, r = document) => { const f = r.querySelector(s); if (f) return f; for (const e of r.querySelectorAll('*')) if (e.shadowRoot) { const x = $d(s, e.shadowRoot); if (x) return x; } return null; };
+const $$d = (s, r = document, out = []) => { out.push(...r.querySelectorAll(s)); for (const e of r.querySelectorAll('*')) if (e.shadowRoot) $$d(s, e.shadowRoot, out); return out; };
+const $vis = s => $$d(s).find(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden') || $d(s);
+const deepText = n => [...(n.shadowRoot ? [n.shadowRoot] : []), ...n.childNodes].map(c => c.nodeType === 3 ? c.data : deepText(c)).join(' ');
+const deepActive = () => { let a = document.activeElement; while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement; return a; };`;
+
 function input(s) {
-  const ev = async e => { const r = await s.send('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300)); return r.result.value; };
-  const at = async (sel, fx = .5, fy = .5) => { await ev(`document.querySelector(${JSON.stringify(sel)}).scrollIntoView({ block: 'center', behavior: 'instant' })`); await sleep(80);
-    return ev(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width * ${fx}, r.top + r.height * ${fy}]; })()`); };
+  const ev = async e => { const r = await s.send('Runtime.evaluate', { expression: `(() => { ${DEEP}\nreturn (${e}); })()`, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300)); return r.result.value; };
+  const at = async (sel, fx = .5, fy = .5) => { await ev(`$vis(${JSON.stringify(sel)}).scrollIntoView({ block: 'center', behavior: 'instant' })`); await sleep(80);
+    return ev(`(() => { const r = $vis(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width * ${fx}, r.top + r.height * ${fy}]; })()`); };
   // A move with a button held reports that button, as Chrome's own input does (needed to start a drag).
   // Where an element is now, without scrolling (menus and dialogs in the top layer).
-  const pos = sel => ev(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  const pos = sel => ev(`(() => { const r = $vis(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
   const mouse = (type, x, y, o = {}) => s.send('Input.dispatchMouseEvent', { type, x, y, button: o.button || (o.buttons ? 'left' : 'none'), buttons: o.buttons ?? 0, clickCount: o.count || 0, modifiers: o.mod || 0, deltaX: o.dx || 0, deltaY: o.dy || 0 });
   const click = async (x, y, { button = 'left', count = 1 } = {}) => {
     await mouse('mouseMoved', x, y);
@@ -81,7 +90,7 @@ check('button click ×2', /2 clicks/.test(await state('#btn-box')));
 [x, y] = await p.at('#dbl'); await p.click(x, y, { count: 2 });
 check('double click', /Double clicked/.test(await state('#dbl')));
 [x, y] = await p.at('#ctx'); await p.click(x, y, { button: 'right' }); await sleep(500);
-const menuOpen = await p.ev(`document.getElementById('menu').open`);
+const menuOpen = await p.ev(`document.getElementById('menu').isOpen`);
 [x, y] = await p.pos('#menu [data-v="Delete"]'); await p.click(x, y); await sleep(300);
 check('right click opens the menu, choosing an item', menuOpen && /Chose Delete/.test(await state('#ctx')));
 [x, y] = await p.at('#hover'); await p.mouse('mouseMoved', x - 30, y); await p.mouse('mouseMoved', x, y); await sleep(100);
@@ -104,11 +113,11 @@ check('typing into a field', /Hello, Ada/.test(await state('#name-box')) && (awa
 [x, y] = await p.at('#query'); await p.click(x, y); await p.type('castors'); await p.key(...ENTER);
 check('Enter submits a form', /Searched for "castors"/.test(await state('#form-box')));
 [x, y] = await p.at('#size'); await p.click(x, y); await sleep(500);
-[x, y] = await p.pos('#size md-select-option[value="M"]'); await p.click(x, y); await sleep(400);
+[x, y] = await p.pos('m3e-option[value="M"]'); await p.click(x, y); await sleep(400);
 check('select: open and pick an option', /Size M/.test(await state('#size-box')), await state('#size-box'));
 [x, y] = await p.at('#agree'); await p.click(x, y);
 check('checkbox', /Checked/.test(await state('#agree-box')));
-[x, y] = await p.at('#vol', .8, .5); await p.click(x, y);
+[x, y] = await p.at('#vol-box m3e-slider', .8, .5); await p.click(x, y);
 check('slider click', /Volume (7\d|8\d)/.test(await state('#vol-box')), await state('#vol-box'));
 [x, y] = await p.at('#open-dlg'); await p.click(x, y); await sleep(800);
 [x, y] = await p.pos('#dlg-ok'); await p.click(x, y); await sleep(600);
@@ -183,7 +192,7 @@ P = firstP; p = input(P); await P.send('Page.bringToFront'); await sleep(500);
 console.log('\n# Side panel');
 await load(LAB);
 await S.send('Page.reload'); await sleep(1500);
-const label = () => q.ev(`document.getElementById('annotate-label').textContent`);
+const label = () => q.ev(`$d('#annotate-label').textContent`);
 const doneButton = async () => {
   const { root } = await P.send('DOM.getDocument', { depth: -1, pierce: true });
   const find = n => { if (n.attributes) for (let i = 0; i < n.attributes.length; i += 2) if (n.attributes[i] === 'data-act' && n.attributes[i + 1] === 'done') return n;
@@ -195,8 +204,8 @@ const doneButton = async () => {
 // Empty conversation: the suggestion chip puts the cursor in the message field.
 await q.ev(`chrome.storage.session.set({ chats: {} })`); await sleep(400);
 [x, y] = await q.at('#sug-ask'); await q.click(x, y);
-check('suggestion chip "Ask a question" focuses the composer', await q.ev(`document.activeElement?.id === 'q'`));
-check('Send is off while the composer is empty', await q.ev(`document.getElementById('send').disabled`));
+check('suggestion chip "Ask a question" focuses the composer', await q.ev(`deepActive()?.id === 'q'`));
+check('Send is off while the composer is empty', await q.ev(`$d('#send').disabled`));
 // Annotate, then Esc pressed while the side panel has focus.
 [x, y] = await q.at('#annotate'); await q.click(x, y); await sleep(700);
 const started = !!(await doneButton());
@@ -209,23 +218,23 @@ check('Esc in the side panel cancels annotating', !(await doneButton()) && (awai
 await p.key(...ENTER); await sleep(200); // closes the note field if one opened
 const done = await doneButton(); if (done) await p.click(...done);
 await sleep(1500);
-check('marking an element and Done attaches the annotation', /Annotation · 1/.test(await q.ev(`document.getElementById('annot-chip-text').label`)));
+check('marking an element and Done attaches the annotation', /Annotation · 1/.test(await q.ev(`$d('#annot-chip-text')?.textContent || ''`)));
 [x, y] = await q.at('#q'); await q.click(x, y); await q.type('Is this the right target?');
-check('typing enables Send', !(await q.ev(`document.getElementById('send').disabled`)));
+check('typing enables Send', !(await q.ev(`$d('#send').disabled`)));
 await q.key(...ENTER); await sleep(1200);
 let acts = await queue();
 const annot = acts.find(a => a.type === 'annotation');
 check('Enter sends message and annotation', annot?.text === 'Is this the right target?' && annot.annotations?.length === 1);
-check('the message shows in the conversation', /Is this the right target\?/.test(await q.ev(`document.getElementById('log').innerText`)));
+check('the message shows in the conversation', /Is this the right target\?/.test(await q.ev(`deepText($d('sat-conversation'))`)));
 // Record real clicks and typing, stop, send without text.
 [x, y] = await q.at('#rec'); await q.click(x, y); await sleep(400);
 [x, y] = await p.at('#btn'); await p.click(x, y);
 [x, y] = await p.at('#name'); await p.click(x, y); await p.type('Grace'); await p.key('Tab', 'Tab', 9);
 await sleep(500);
-const recLabel = await q.ev(`document.getElementById('rec-label').textContent`);
+const recLabel = await q.ev(`$d('#rec-label').textContent`);
 check('Record counts the steps while recording', /Stop · [2-9] steps/.test(recLabel), recLabel);
 [x, y] = await q.at('#rec'); await q.click(x, y); await sleep(500);
-check('Stop attaches the recording', /Recording · \d+ steps/.test(await q.ev(`document.getElementById('rec-chip-text').label`)));
+check('Stop attaches the recording', /Recording · \d+ steps/.test(await q.ev(`$d('#rec-chip-text')?.textContent || ''`)));
 [x, y] = await q.at('#send'); await q.click(x, y); await sleep(1200);
 acts = await queue();
 const rec = acts.find(a => a.type === 'recording');
@@ -233,12 +242,12 @@ const kinds = rec ? rec.recording.steps.map(s => s.type) : [];
 check('Send delivers the recording with click and change steps', kinds.includes('click') && kinds.includes('change'), kinds.join(','));
 // Throttling: Turn off.
 await cli('throttle', '3g', '--cpu', '4'); await sleep(500);
-const throttled = await q.ev(`!document.getElementById('throttle').hidden`);
+const throttled = await q.ev(`!!$d('#throttle')`);
 [x, y] = await q.at('#throttle-off'); await q.click(x, y); await sleep(600);
-check('throttle line and Turn off', throttled && await q.ev(`document.getElementById('throttle').hidden`));
+check('throttle line and Turn off', throttled && await q.ev(`!$d('#throttle')`));
 // Host question: No.
 const pending = cli('highlight', 'h1', '--url', 'https://example.com/');
-for (let i = 0; i < 30 && !(await q.ev(`!document.getElementById('host-ask').hidden`)); i++) await sleep(200);
+for (let i = 0; i < 30 && !(await q.ev(`!!$d('#host-ask')`)); i++) await sleep(200);
 [x, y] = await q.at('#host-no'); await q.click(x, y);
 check('host question: No refuses the agent', /did not allow example\.com/.test(await pending));
 // A page that is not allowed: allow it from the notice. Grants last until the browser restarts, so each
@@ -248,11 +257,11 @@ const fresh = `http://lab-${Date.now().toString(36)}.127.0.0.1.nip.io:${new URL(
 let notice = false, site = '';
 for (site of [fresh, 'https://example.org/', 'https://example.net/', 'https://www.example.org/', 'https://www.example.net/']) {
   await load(site); await sleep(500);
-  if ((notice = await q.ev(`!document.getElementById('notice').hidden`))) break;
+  if ((notice = await q.ev(`!!$d('#notice')`))) break;
 }
 if (notice) {
   [x, y] = await q.at('#allow-session'); await q.click(x, y); await sleep(600);
-  check('notice on a page that is not allowed, and "Allow this session"', await q.ev(`document.getElementById('notice').hidden`), site);
+  check('notice on a page that is not allowed, and "Allow this session"', await q.ev(`!$d('#notice')`), site);
 } else check('notice on a page that is not allowed (restart the browser to reset grants)', false);
 await load(LAB);
 // Tour: Next and Back.
@@ -261,7 +270,7 @@ fs.writeFileSync(tourFile, JSON.stringify({ steps: [
   { title: 'Click', url: LAB, explanation: 'One.', highlights: [{ selector: '#btn', label: 'Here' }] },
   { title: 'Double click', explanation: 'Two.', highlights: [{ selector: '#dbl', label: 'There' }] }] }));
 await cli('tour', tourFile); await sleep(2500);
-const stepText = () => q.ev(`document.getElementById('step').textContent`);
+const stepText = () => q.ev(`$d('#step').textContent`);
 const s1 = await stepText();
 [x, y] = await q.at('#next'); await q.click(x, y); await sleep(1500);
 const s2 = await stepText();

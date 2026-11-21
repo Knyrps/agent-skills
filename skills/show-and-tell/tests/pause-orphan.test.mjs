@@ -17,7 +17,7 @@ check('still paused after 20 s offline', !!Object.values(await stored())[0]?.pau
 let free = false;
 for (let i = 0; i < 70 && !free; i++) { await sleep(1000); free = !Object.keys(await stored()).length; }
 check('released after about a minute offline', free && (await lab.ev('1 + 1')) === 2, `${Math.round((Date.now() - t) / 1000)} s`);
-const card = await pn.P(`document.getElementById('pause').hidden`);
+const card = await pn.P(`!$d('#pause')`);
 check('card gone', card === true);
 summary();
 process.exit(0);

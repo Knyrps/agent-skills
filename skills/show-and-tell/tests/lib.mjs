@@ -30,12 +30,18 @@ export async function agent(cwdName = 'agent-a') {
   return { c, tool, sid, wait, close: () => c.close() };
 }
 
+// Prepended to every expression a test runs in a page: $d / $$d find elements through open shadow roots too,
+// since the panel and the test page are built from web components (ids live inside their shadow roots).
+export const DEEP = `const $d = (s, r = document) => { const f = r.querySelector(s); if (f) return f; for (const e of r.querySelectorAll('*')) if (e.shadowRoot) { const x = $d(s, e.shadowRoot); if (x) return x; } return null; };
+const $$d = (s, r = document, out = []) => { out.push(...r.querySelectorAll(s)); for (const e of r.querySelectorAll('*')) if (e.shadowRoot) $$d(s, e.shadowRoot, out); return out; };
+const shown = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';`;
+
 export async function cdp(wsUrl) {
   const ws = new WebSocket(wsUrl); await new Promise(r => ws.onopen = r);
   let id = 0; const pend = new Map(), events = [];
   ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id) { pend.get(m.id)?.(m.result ?? { error: m.error }); pend.delete(m.id); } else events.push(m); };
   const send = (method, params = {}) => new Promise(r => { const n = ++id; pend.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
-  const ev = async e => { const r = await Promise.race([send('Runtime.evaluate', { expression: e, returnByValue: true, awaitPromise: true }), sleep(4000).then(() => { throw new Error('NO ANSWER (page paused?)'); })]); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
+  const ev = async e => { const r = await Promise.race([send('Runtime.evaluate', { expression: `(() => { ${DEEP}\nreturn (${e}); })()`, returnByValue: true, awaitPromise: true }), sleep(4000).then(() => { throw new Error('NO ANSWER (page paused?)'); })]); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
   return { send, ev, events, close: () => ws.close() };
 }
 export const targets = async () => (await fetch(CDP + '/json/list')).json();
@@ -44,7 +50,7 @@ export async function page(match) {
   for (let i = 0; i < 40 && !t; i++) { t = (await targets()).find(t => t.type === 'page' && match(t.url)); if (!t) await sleep(200); }
   if (!t) throw new Error('no such page');
   const s = await cdp(t.webSocketDebuggerUrl);
-  const pos = sel => s.ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  const pos = sel => s.ev(`(() => { const e = $d(${JSON.stringify(sel)}); if (!e) throw new Error('no ' + ${JSON.stringify(sel)}); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
   // Real mouse input; not awaited to the end, because a page that pauses in the handler never answers.
   const click = async sel => { const [x, y] = await pos(sel); await sleep(150);
     await s.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });

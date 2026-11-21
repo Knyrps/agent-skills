@@ -72,7 +72,8 @@ export class LabControls extends LabElement {
   private popup(e: Event) { window.open('/next?via=popup', 'lab-popup', 'popup,width=720,height=520'); this.report('popup window', e); }
 
   // Load data: a request with a loading state, for pausing a page between the click and the result. The README's
-  // pause examples stop at these lines and in these functions by name: keep `renderItems(data.items)`, `run` and `data`.
+  // pause examples stop at the call below by its text and in these functions by name, and read `run` and `data`.
+  // Keep those names, and do not quote the call in a comment: the bundle keeps comments, and the text must occur once.
   private renderItems(items: Item[]) {
     const list = this.querySelector('#items')!;
     list.replaceChildren(...items.map(item => Object.assign(document.createElement('li'), { textContent: item.name + ' · ' + item.price })));

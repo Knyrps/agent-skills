@@ -6,7 +6,9 @@ import { agent, panel, page, show, check, summary, sleep, LAB, SKILL, ENV, SHOTS
 const a = await agent();
 await a.tool('browser_navigate', { url: LAB + '?p3' });
 const pn = await panel();
-const card = async () => JSON.parse(await pn.P(`(() => { const e = document.getElementById('pause'); return JSON.stringify({ hidden: e.hidden, state: e.dataset.state, title: document.getElementById('pause-title').textContent, detail: document.getElementById('pause-detail').textContent, action: document.getElementById('pause-action').textContent.trim(), annotate: document.getElementById('annotate').disabled, rec: document.getElementById('rec').disabled }); })()`));
+// The pause card (absent when nothing is paused or set) and whether the composer's Annotate and Record are off.
+const card = async () => JSON.parse(await pn.P(`(() => { const e = $d('#pause'); return JSON.stringify({ hidden: !e, state: e?.state, title: $d('#pause-title')?.textContent, detail: $d('#pause-detail')?.textContent,
+  action: ($d('#pause-action') || $d('#pause-resume'))?.textContent.trim(), annotate: !!$d('#annotate')?.disabled, rec: !!$d('#rec')?.disabled }); })()`));
 const stored = async () => JSON.parse(await pn.P(`chrome.storage.session.get('pauses').then(x => JSON.stringify(x.pauses || {}))`));
 // Tabs this extension's debugger is attached to (getTargets would count Playwright and this test too).
 const attached = async () => JSON.parse(await pn.P(`chrome.tabs.query({}).then(async l => { const out = []; for (const t of l) { try { await chrome.debugger.sendCommand({ tabId: t.id }, 'Page.getNavigationHistory'); out.push(t.url); } catch {} } return JSON.stringify(out); })`));
@@ -19,7 +21,7 @@ const clean = async () => { await a.tool('pause', { remove: 'all' }); await a.to
 const run = async (name, fn) => { if (only && !only.split(',').includes(name)) return; await clean(); console.log(`\n== ${name}`); try { await fn(); } catch (e) { check(name + ' ran through', false, e.stack); } };
 const shot = async name => { for (const scheme of ['light', 'dark']) {
   await pn.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] }); await sleep(300);
-  const r = JSON.parse(await pn.P(`(() => { const r = document.querySelector('.pinned').getBoundingClientRect(); return JSON.stringify({ x: 0, y: Math.max(0, r.top - 8), width: innerWidth, height: r.height + 16 }); })()`));
+  const r = JSON.parse(await pn.P(`(() => { const r = $d('.pinned').getBoundingClientRect(); return JSON.stringify({ x: 0, y: Math.max(0, r.top - 8), width: innerWidth, height: r.height + 16 }); })()`));
   fs.writeFileSync(path.join(SHOTS, `card-${name}-${scheme}.png`), Buffer.from((await pn.send('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: 2 } })).data, 'base64'));
 } await pn.send('Emulation.setEmulatedMedia', { features: [] }); };
 
@@ -33,7 +35,7 @@ await run('inspect', async () => {
   check('outer scope lists data only, capped', Object.keys(mod).length <= 21 && !Object.values(mod).some(v => /=>|^function/.test(v)) && /functions/.test(mod['…'] || ''), `${Object.keys(mod).length} keys; ${mod['…']}`);
   check('frame out of range is refused', /no call frame/.test(J(await a.tool('inspect_paused', { frame: 7 })).error || ''));
   check('an assignment is refused', /read-only/.test(J(await a.tool('inspect_paused', { expression: 'run = 5' })).error || ''));
-  check('a call with side effects is refused', /read-only/.test(J(await a.tool('inspect_paused', { expression: 'set("#load-box", "x")' })).error || ''));
+  check('a call with side effects is refused', /read-only/.test(J(await a.tool('inspect_paused', { expression: 'document.title = "x"' })).error || ''));
   check('a pure call is allowed', J(await a.tool('inspect_paused', { expression: 'data.items.map(i => i.name).join()' })).value === '"Caster,Wheel,Bracket,Axle"');
   check('an unknown name gives the error', /not defined/.test(J(await a.tool('inspect_paused', { expression: 'nope' })).error || ''));
   const c = await card();
@@ -59,7 +61,7 @@ await run('hold-keep', async () => {
   await shot('held');
   const snap = await a.tool('browser_snapshot');
   check('browser tools work while a request is held', /Loading…/.test(snap) && !/paused/i.test(snap.slice(0, 200)));
-  await pn.P(`document.getElementById('pause-action').click()`); await sleep(800);
+  await pn.P(`$d('#pause-action').click()`); await sleep(800);
   check('Release in the panel lets it through', /4 items/.test(await box()), await box());
   const w2 = await a.wait(3);
   check('the agent hears that the user released it', w2.some(x => x.type === 'resumed' && x.by === 'user' && x.requests === 1), JSON.stringify(w2));
@@ -112,7 +114,7 @@ await run('throttle', async () => {
   await a.tool('pause', { on: 'event', event: 'submit' });
   check('one debugger connection', (await attached()).length === 1, JSON.stringify(await attached()));
   await a.tool('pause', { remove: 'all' }); await sleep(300);
-  const th = await pn.P(`document.getElementById('throttle').hidden`);
+  const th = await pn.P(`!$d('#throttle')`);
   check('removing the pause points keeps the throttle', (await attached()).length === 1 && th === false, JSON.stringify([await attached(), th, await pn.P(`chrome.storage.session.get('throttles').then(x => JSON.stringify(x))`), await a.tool('throttle', {})]));
   await a.tool('throttle', { preset: 'off' }); await sleep(300);
   check('throttle off lets go of the tab', (await attached()).length === 0, JSON.stringify(await attached()));
@@ -125,9 +127,11 @@ await run('dom', async () => {
   check('unknown selector is refused', /no element matches/.test(J(await a.tool('pause', { on: 'dom', selector: '#nope' })).error || ''));
   check('unknown kind is refused', /on must be one of/.test(J(await a.tool('pause', { on: 'banana' })).error || ''));
   check('text that occurs nowhere', /not found in the \d+ loaded script/.test(J(await a.tool('pause', { on: 'line', text: 'zzzNOPEzzz' })).error || ''));
-  const byLine = J(await a.tool('pause', { on: 'line', url: '?p3', line: 404 }));
+  // The test page's code is lab.js; find the line of renderItems(data.items) in what the page loads.
+  const line = (await (await fetch(LAB + 'lab.js')).text()).split('\n').findIndex(l => l.includes('renderItems(data.items)')) + 1;
+  const byLine = J(await a.tool('pause', { on: 'line', url: 'lab.js', line }));
   check('line by url and number', byLine.ok && /renderItems\(data\.items\)/.test(byLine.code || ''), JSON.stringify(byLine));
-  const again = J(await a.tool('pause', { on: 'line', url: '?p3', line: 404 }));
+  const again = J(await a.tool('pause', { on: 'line', url: 'lab.js', line }));
   check('the same point twice is one point', again.id === byLine.id, JSON.stringify(again));
   const cond = J(await a.tool('pause', { on: 'line', text: 'const data = await res.json()', condition: 'run > 100' }));
   check('conditional point set', cond.ok && /if run > 100/.test(cond.pauses), JSON.stringify(cond));
@@ -170,9 +174,9 @@ await run('host', async () => {
   lab.send('Page.navigate', { url: 'https://example.com/' }); await sleep(2500);
   const asking = a.tool('pause', { on: 'now' });
   let asked = false;
-  for (let i = 0; i < 30 && !asked; i++) { await sleep(300); asked = await pn.P(`!document.getElementById('host-ask').hidden`); }
-  check('pausing on a host that is not allowed asks the user', asked, asked ? await pn.P(`document.getElementById('host-ask-text').textContent`) : '');
-  await pn.P(`document.getElementById('host-no').click()`);
+  for (let i = 0; i < 30 && !asked; i++) { await sleep(300); asked = await pn.P(`!!$d('#host-ask')`); }
+  check('pausing on a host that is not allowed asks the user', asked, asked ? await pn.P(`$d('#host-ask-title').textContent + ' ' + $d('#host-ask-text').textContent`) : '');
+  await pn.P(`$d('#host-no').click()`);
   const r = J(await asking);
   check('and is refused on "No"', r.ok === false && /did not allow/.test(r.error || ''), JSON.stringify(r));
   check('nothing attached', (await attached()).length === 0 && !Object.keys(await stored()).length);

@@ -9,7 +9,7 @@ const lab = await page(u => u.endsWith('?p6'));
 await lab.send('Page.bringToFront'); await sleep(600);
 const J = s => { try { return JSON.parse(s); } catch { return { raw: s }; } };
 const cli = (...args) => { try { return J(execFileSync(process.execPath, [path.join(SKILL, 'bridge', 'index.js'), ...args], { env: ENV, encoding: 'utf8', timeout: 30000 })); } catch (e) { return { failed: (e.stdout || '') + (e.stderr || '') }; } };
-const card = async () => JSON.parse(await pn.P(`(() => { const e = document.getElementById('pause'); return JSON.stringify({ hidden: e.hidden, state: e.dataset.state, title: document.getElementById('pause-title').textContent, detail: document.getElementById('pause-detail').textContent }); })()`));
+const card = async () => JSON.parse(await pn.P(`(() => { const e = $d('#pause'); return JSON.stringify({ hidden: !e, state: e?.state, title: $d('#pause-title')?.textContent, detail: $d('#pause-detail')?.textContent }); })()`));
 const box = () => lab.ev(`document.querySelector('#load-box .state').innerText`).catch(e => e.message);
 
 const h = cli('pause', 'request', '/api/items', '--hold');

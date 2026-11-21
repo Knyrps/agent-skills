@@ -59,7 +59,7 @@ var Vv=Object.defineProperty;var Uv=Object.getOwnPropertyDescriptor;var M=(r,e,t
     :host([state="listening"]) { background: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 22%, transparent); }
     :host([state="waiting"]) { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
     :host([state="offline"]) { background: var(--md-sys-color-error); }
-  `,M([v({reflect:!0})],Kn.prototype,"state",2),Kn=M([ce("sat-status-dot")],Kn);var en=class extends L{constructor(){super(...arguments);this.state="idle";this.text=""}render(){return y`<sat-status-dot state=${this.state}></sat-status-dot><span>${this.text}</span>`}};en.styles=E`
+  `,M([v({reflect:!0})],Kn.prototype,"state",2),Kn=M([ce("sat-status-dot")],Kn);var en=class extends L{constructor(){super(...arguments);this.state="idle";this.text=""}render(){return y`<sat-status-dot state=${this.state}></sat-status-dot><span id="listen-text">${this.text}</span>`}};en.styles=E`
     :host { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
     span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   `,M([v()],en.prototype,"state",2),M([v()],en.prototype,"text",2),en=M([ce("sat-listen-status")],en);var $e=E`
@@ -317,11 +317,11 @@ var Vv=Object.defineProperty;var Uv=Object.getOwnPropertyDescriptor;var M=(r,e,t
         </m3e-icon-button>
       </m3e-split-button>
       <m3e-menu id="pause-menu" position-x="before">
-        ${this.kept?y`<m3e-menu-item id="pause-remove" @click=${()=>this.choose("remove")}>Resume and remove breakpoint</m3e-menu-item>
+        ${this.kept?y`<m3e-menu-item id="pause-remove" data-do="remove" @click=${()=>this.choose("remove")}>Resume and remove breakpoint</m3e-menu-item>
           <m3e-divider></m3e-divider>`:T}
-        <m3e-menu-item @click=${()=>this.choose("again")}>Reload to breakpoint</m3e-menu-item>
-        <m3e-menu-item @click=${()=>this.choose("skip")}>Reload and ignore breakpoint once</m3e-menu-item>
-        <m3e-menu-item @click=${()=>this.choose("drop")}>Reload and remove breakpoint</m3e-menu-item>
+        <m3e-menu-item data-do="again" @click=${()=>this.choose("again")}>Reload to breakpoint</m3e-menu-item>
+        <m3e-menu-item data-do="skip" @click=${()=>this.choose("skip")}>Reload and ignore breakpoint once</m3e-menu-item>
+        <m3e-menu-item data-do="drop" @click=${()=>this.choose("drop")}>Reload and remove breakpoint</m3e-menu-item>
       </m3e-menu>`:y`<m3e-button id="pause-resume" variant="filled" size="small" @click=${()=>this.choose("resume")}>${t}</m3e-button>`}render(){let t=this.state==="paused"?"pause":this.state==="held"?"hourglass_top":"pause_circle";return y`<m3e-callout variant=${this.state==="armed"?"secondary":"primary"} role="status">
       <m3e-icon slot="icon" name=${t}></m3e-icon>
       <span slot="label" id="pause-title">${this.heading}</span>

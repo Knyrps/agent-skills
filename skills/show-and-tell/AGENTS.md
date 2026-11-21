@@ -83,16 +83,16 @@ like the M3E ones and use the same tokens. Per-frame position updates stay direc
 
 ## Tests
 
-- The existing tests describe the old UI. They do not have to pass while the rewrite is under way; new
-  ones are written after it is finished. Before the rewrite all 139 checks passed.
-- `node tests/run.mjs` needs `npm install` in `bridge/`. It is still worth running to see what a step
-  changed.
-- For the new tests: the old ones address panel elements by id (`#pause`, `#pause-split`, `#pause-menu`,
-  `#listen-text`, `#conn`, …) and the test page's cards by id and by their status texts, and three files
-  paused the test page at a line number of its served HTML (line 404). The code now lives in
-  `scripts/lab-vendor/lab.js`; pause examples use the text `renderItems(data.items)` and the names `loadItems`,
-  `renderItems`, `run` and `data`, which `ui-src/src/lab/organisms/controls.ts` keeps. Keep
-  ids where that costs nothing; do not bend the design to keep them.
+- `node tests/run.mjs [name] [--keep|--clean]` runs `tests/*.test.mjs` on a throwaway copy with its own ports and
+  profile; it needs `npm install` in `bridge/`. `ui` covers what the rewrite added (test page cards and debug
+  sheet, slider, Annotate toolbar, session colour); `pause`, `pause-menu`, `pause-orphan` and `readme-rows`
+  cover pausing and the pause card.
+- `node scripts/real-input-check.mjs` drives the test page and the panel with real input (CDP `Input.*`).
+- The panel and the test page are web components: tests find elements with `$d` / `$$d` (from `tests/lib.mjs`),
+  which look through shadow roots. The Annotate overlay's root is closed: find its buttons with
+  `DOM.getDocument({ pierce: true })` and their `data-tool` / `data-act` attributes.
+- Test hooks are plain ids and `data-*` attributes (`#pause-more`, `[data-do="again"]`, `#listen-text`, …). Keep
+  them where they cost nothing; do not bend the design to keep them.
 - Never use the user's running browser. Do not reload the extension there without asking.
 
 ## Commits

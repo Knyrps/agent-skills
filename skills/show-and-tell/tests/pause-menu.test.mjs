@@ -6,10 +6,13 @@ import { agent, panel, page, show, check, summary, sleep, LAB, SKILL, ENV, SHOTS
 const a = await agent();
 await a.tool('browser_navigate', { url: LAB + '?p7' });
 const pn = await panel();
-const card = async () => JSON.parse(await pn.P(`(() => { const e = document.getElementById('pause'), v = id => { const x = document.getElementById(id); return !x.hidden && x.getClientRects().length > 0; };
-  return JSON.stringify({ hidden: e.hidden, state: e.dataset.state, title: document.getElementById('pause-title').textContent, detail: document.getElementById('pause-detail').textContent,
-    text: v('pause-action'), split: v('pause-split'), more: v('pause-more'), single: document.getElementById('pause-split').classList.contains('single'),
-    remove: !document.getElementById('pause-remove').hidden, open: document.getElementById('pause-menu').open, expanded: document.getElementById('pause-more').ariaExpanded }); })()`));
+// The pause card (sat-pause-card): absent when nothing is paused or set. A paused page at a breakpoint shows a
+// split button (Resume + menu); without a breakpoint a single Resume button.
+const card = async () => JSON.parse(await pn.P(`(() => { const e = $d('#pause'), v = id => shown($d('#' + id));
+  if (!e) return JSON.stringify({ hidden: true });
+  return JSON.stringify({ hidden: false, state: e.state, title: $d('#pause-title')?.textContent, detail: $d('#pause-detail')?.textContent,
+    text: v('pause-action'), split: v('pause-split'), more: v('pause-more'), single: !v('pause-split') && v('pause-resume'),
+    remove: !!$d('#pause-remove'), open: !!$d('#pause-menu')?.isOpen, expanded: $d('#pause-more')?.ariaExpanded ?? null }); })()`));
 const stored = async () => Object.values(JSON.parse(await pn.P(`chrome.storage.session.get('pauses').then(x => JSON.stringify(x.pauses || {}))`)))[0] || null;
 let lab = await page(u => u.endsWith('?p7'));
 await lab.send('Page.bringToFront'); await sleep(600);
@@ -23,7 +26,7 @@ const run = async (name, fn) => { if (only && !only.split(',').includes(name)) r
 // clip: "top" = the app bar, "pinned" = the cards, "all" = the whole panel.
 const shot = async (name, clip = 'pinned') => { for (const scheme of ['light', 'dark']) {
   await pn.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] }); await sleep(350);
-  const r = JSON.parse(await pn.P(`(() => { const r = document.querySelector('.${clip === 'top' ? 'top' : 'pinned'}').getBoundingClientRect();
+  const r = JSON.parse(await pn.P(`(() => { const r = $d('${clip === 'top' ? 'sat-app-bar' : '.pinned'}').getBoundingClientRect();
     return JSON.stringify(${clip === 'all'} ? { x: 0, y: 0, width: innerWidth, height: Math.min(innerHeight, 420) } : { x: 0, y: Math.max(0, r.top - 4), width: innerWidth, height: r.height + 8 }); })()`));
   fs.writeFileSync(path.join(SHOTS, `pause-menu-${name}-${scheme}.png`), Buffer.from((await pn.send('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: 2 } })).data, 'base64'));
 } await pn.send('Emulation.setEmulatedMedia', { features: [] }); };
@@ -35,14 +38,14 @@ const paused = async () => { await mark(); await lab.click('#load'); await sleep
 
 await run('header', async () => {
   console.log('      panel width ' + await pn.P('innerWidth'));
-  const measure = () => pn.P(`(() => { const h = document.querySelector('.top').getBoundingClientRect(), l = document.getElementById('listen-text'), c = document.getElementById('conn');
+  const measure = () => pn.P(`(() => { const h = $d('sat-app-bar').getBoundingClientRect(), l = $d('#listen-text'), c = $d('#conn');
     return JSON.stringify({ height: Math.round(h.height), lines: Math.round(l.getBoundingClientRect().height / parseFloat(getComputedStyle(l).lineHeight)), cut: l.scrollWidth > l.clientWidth, text: l.textContent,
-      title: document.getElementById('listen').title, conn: c.title, connText: document.getElementById('conn-text').hidden ? null : c.textContent, connWidth: Math.round(c.getBoundingClientRect().width), overflow: document.documentElement.scrollWidth > innerWidth }); })()`).then(JSON.parse);
+      title: $d('#listen').title, conn: c.title, connWidth: Math.round(c.getBoundingClientRect().width), right: Math.round(c.getBoundingClientRect().right), overflow: document.documentElement.scrollWidth > innerWidth }); })()`).then(JSON.parse);
   // The side panel is never narrower than 360 px; 320 for margin.
   for (const w of [0, 360, 320]) {
     await width(w);
     const m = await measure();
-    check(`header at ${w || 'its own width'}: one line, nothing overflows`, m.lines === 1 && !m.overflow && m.title === m.text, JSON.stringify(m));
+    check(`header at ${w || 'its own width'}: one line, nothing overflows`, m.lines === 1 && !m.overflow && m.title === m.text && m.right <= (w || 4000), JSON.stringify(m));
     await shot('header-' + (w || 'default'), 'top');
   }
   await width(0);
@@ -59,9 +62,9 @@ await run('once', async () => {
   await openMenu();
   c = await card();
   check('menu opens from the trailing button', c.open && c.expanded === 'true', JSON.stringify(c));
-  const items = JSON.parse(await pn.P(`JSON.stringify([...document.querySelectorAll('#pause-menu md-menu-item')].filter(i => !i.hidden).map(i => i.textContent.trim()))`));
+  const items = JSON.parse(await pn.P(`JSON.stringify($$d('#pause-menu m3e-menu-item').map(i => i.textContent.trim()))`));
   check('menu: the three reload items', items.join('|') === 'Reload to breakpoint|Reload and ignore breakpoint once|Reload and remove breakpoint', items.join('|'));
-  const fit = JSON.parse(await pn.P(`(() => { const r = document.getElementById('pause-menu').shadowRoot.querySelector('.menu').getBoundingClientRect(); return JSON.stringify({ left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), w: innerWidth }); })()`));
+  const fit = JSON.parse(await pn.P(`(() => { const r = $d('#pause-menu').getBoundingClientRect(); return JSON.stringify({ left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), w: innerWidth }); })()`));
   check('menu lies inside the panel', fit.left >= 0 && fit.right <= fit.w, JSON.stringify(fit));
   await shot('menu', 'all');
   await width(320); await sleep(300); await shot('menu-320', 'all'); await width(0);
@@ -128,7 +131,7 @@ await run('kept', async () => {
 await run('plain', async () => {
   await a.tool('pause', { on: 'now' }); await sleep(500);
   const c = await card();
-  check('paused without a point: a single Resume button', c.state === 'paused' && c.split && c.single && !c.more, JSON.stringify(c));
+  check('paused without a point: a single Resume button', c.state === 'paused' && !c.split && c.single && !c.more, JSON.stringify(c));
   await shot('single');
   check('agent: reload again needs a point', /no pause point/.test(J(await a.tool('resume', { reload: 'again' })).error || ''));
   await pn.click('#pause-resume'); await sleep(900);
@@ -136,7 +139,7 @@ await run('plain', async () => {
 });
 
 await run('step', async () => {
-  const set = J(await a.tool('pause', { on: 'line', text: 'const run = ++loads' }));
+  const set = J(await a.tool('pause', { on: 'line', text: 'const run = ++this.loads' }));
   await paused();
   const st = J(await a.tool('resume', { step: 'over' }));
   const s = await stored();
@@ -163,7 +166,7 @@ await run('kinds', async () => {
 
 await run('agent', async () => {
   // A line that runs while the page loads, so a reload pauses by itself.
-  const set = J(await a.tool('pause', { on: 'line', text: "$('#load').addEventListener('click', loadItems)" }));
+  const set = J(await a.tool('pause', { on: 'line', text: '@click=${this.loadItems}' }));
   check('point set at load-time code', set.ok, JSON.stringify(set));
   let r = J(await a.tool('browser_navigate', { url: LAB + '?p7' }).catch(e => e.message));
   let s = await stored();
