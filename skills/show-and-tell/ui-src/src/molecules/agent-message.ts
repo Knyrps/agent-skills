@@ -15,7 +15,10 @@ export class SatAgentMessage extends LitElement {
   static override styles = [type, markdownStyles, css`
     :host { display: flex; gap: 12px; align-items: flex-start; }
     sat-app-icon { --sat-app-icon-size: 28px; }
-    m3e-circular-progress-indicator { flex: none; --m3e-circular-wavy-progress-indicator-diameter: 28px; --m3e-circular-flat-progress-indicator-diameter: 28px; }
+    m3e-circular-progress-indicator { flex: none; --m3e-circular-wavy-progress-indicator-diameter: 28px; --m3e-circular-flat-progress-indicator-diameter: 28px;
+      /* The loader stands where the agent's icon stands, so it takes the session's colour like the icon. */
+      --m3e-progress-indicator-color: var(--session, var(--md-sys-color-primary));
+      --m3e-progress-indicator-track-color: color-mix(in srgb, var(--session, var(--md-sys-color-primary)) 24%, transparent); }
     .quiet { display: grid; place-items: center; flex: none; width: 28px; height: 28px; color: var(--md-sys-color-on-surface-variant); --m3e-icon-size: 22px; }
     .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; min-height: 26px; justify-content: center; }
     .text { overflow-wrap: anywhere; white-space: pre-wrap; }
