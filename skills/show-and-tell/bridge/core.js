@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { acceptUpgrade, rejectUpgrade } from './ws.js';
 import { defragment } from './mp4.js';
 import { createHosts } from './hosts.js';
@@ -30,7 +31,8 @@ const QUEUE_FILE = path.join(DATA, 'queue.json');
 // Every OpenCode session starts its own bridge; one owns the port. The newest code wins: an older
 // owner hands the port over when a newer bridge asks (POST /yield), so an edit takes effect without
 // hunting down stale processes.
-const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+// fileURLToPath decodes the URL: a path with a space or an 8.3 short name (PROGRA~1) arrives percent-encoded.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const VERSION = Math.max(...['core.js', 'index.js', 'ws.js', 'hosts.js', 'driver.js', '../scripts/browser.mjs', '../scripts/lab.mjs']
   .map(f => { try { return fs.statSync(path.join(HERE, f)).mtimeMs; } catch { return 0; } }));
 const SHOTS = path.join(DATA, 'shots');
@@ -548,6 +550,8 @@ export function startOwner({ standalone = false } = {}) {
         }
         // The user allowed a host from the panel (on their own, or answering the extension's question).
         else if (msg.type === 'hostGrant') { try { hosts.grant(msg.host, msg.mode); } catch (e) { log(e.message); } pushHosts(true); }
+        // The user took a grant back in the panel.
+        else if (msg.type === 'hostRevoke') { hosts.revoke(msg.host); pushHosts(true); }
         else if (msg.type === 'ping') conn.send('{"type":"pong"}');
       });
       // A browser that is gone has nothing paused; one that reconnects says what is.
