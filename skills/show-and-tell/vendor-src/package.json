@@ -4,7 +4,8 @@
   "description": "Rebuilds extension/vendor/ (Material Web bundle + Material 3 color tokens). Not needed at runtime.",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "tokens": "node build.mjs tokens"
   },
   "devDependencies": {
     "@material/material-color-utilities": "^0.4.0",
