@@ -90,8 +90,11 @@ await run('session-colour', async () => {
     const icon = $d('sat-app-icon'); return JSON.stringify({ group: g?.color || null, session: getComputedStyle(icon).getPropertyValue('--session').trim(), primary: getComputedStyle(icon).getPropertyValue('--md-sys-color-primary').trim() }); })()`));
   let m = await probe();
   for (let i = 0; i < 20 && (!m.session || m.group === 'grey'); i++) { await sleep(500); m = await probe(); }
-  const GROUP = { grey: '#5f6368', blue: '#1a73e8', red: '#d93025', yellow: '#b06000', green: '#188038', pink: '#d01884', purple: '#a142f4', cyan: '#007b83', orange: '#c26401' };
-  check('the app icon in the panel header takes the colour of the session\'s tab group', m.group && m.session.toLowerCase() === GROUP[m.group], JSON.stringify(m));
+  // Light or dark variant, whichever scheme the panel is in (the test machine's own setting).
+  const GROUP = { grey: ['#5f6368', '#dadce0'], blue: ['#1a73e8', '#8ab4f8'], red: ['#d93025', '#f28b82'], yellow: ['#b06000', '#fdd663'], green: ['#188038', '#81c995'],
+    pink: ['#d01884', '#ff8bcb'], purple: ['#a142f4', '#c58af9'], cyan: ['#007b83', '#78d9ec'], orange: ['#c26401', '#fcad70'] };
+  const dark = await pn.P(`matchMedia('(prefers-color-scheme: dark)').matches`);
+  check('the app icon in the panel header takes the colour of the session\'s tab group', m.group && m.session.toLowerCase() === GROUP[m.group]?.[dark ? 1 : 0], JSON.stringify({ ...m, dark }));
   await shot(pn, 'panel');
 });
 
