@@ -108,12 +108,18 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
     return tools;
   }
 
+  // Finding the session's tab is bookkeeping and answers at once; one that does not (a tab stuck on an error or a
+  // dialog) fails with a clear message instead of keeping the agent's call waiting until its client gives up.
+  const quick = (c, name, args) => c.callTool({ name, arguments: args }, undefined, { timeout: 15000 }).catch(e => {
+    if (/timed out|timeout/i.test(String(e.message || e))) throw new Error(`the browser did not answer while looking for your tab (${name}); a tab may be stuck on an error page or a dialog. Call start_browser, or close the stuck tab, and try again`);
+    throw e;
+  });
   async function listTabs(c) {
-    const r = await c.callTool({ name: 'browser_tabs', arguments: { action: 'list' } });
+    const r = await quick(c, 'browser_tabs', { action: 'list' });
     if (r.isError && STALE.test(text(r))) throw new Error(text(r));
     return parseTabs(text(r));
   }
-  const select = (c, index) => c.callTool({ name: 'browser_tabs', arguments: { action: 'select', index } });
+  const select = (c, index) => quick(c, 'browser_tabs', { action: 'select', index });
 
   // Playwright's select brings a tab to the front, so it happens only when this child is not on the
   // session's tab yet (first call, after a reconnect, after the user closed the tab). Several tabs with
@@ -137,7 +143,7 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
       }
       for (const t of same) {
         await select(c, t.index);
-        const r = await c.callTool({ name: 'browser_evaluate', arguments: { function: '() => document.documentElement.getAttribute("data-show-and-tell-tab")' } });
+        const r = await quick(c, 'browser_evaluate', { function: '() => document.documentElement.getAttribute("data-show-and-tell-tab")' });
         if (text(r).includes(`"${mine.tabId}"`)) { confirmed = mine.tabId; return { url: mine.url, armed }; }
       }
       // The tab is still loading or Playwright has not seen it yet.
@@ -153,7 +159,7 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
     const current = tabs.find(t => t.current && app(t.url));
     if (current) return current.url;
     const target = tabs.find(t => app(t.url));
-    if (target) await c.callTool({ name: 'browser_tabs', arguments: { action: 'select', index: target.index } });
+    if (target) await quick(c, 'browser_tabs', { action: 'select', index: target.index });
     return target?.url || 'about:blank';
   }
 
