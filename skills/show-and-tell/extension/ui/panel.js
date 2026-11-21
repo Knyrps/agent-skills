@@ -259,7 +259,8 @@ var Vv=Object.defineProperty;var Uv=Object.getOwnPropertyDescriptor;var M=(r,e,t
       <slot></slot>`}};br.styles=[$e,E`
     :host { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 8px 16px 16px;
       scroll-behavior: smooth; }
-    :host([scrolled]) { mask-image: linear-gradient(to bottom, transparent 0, #000 20px); }
+    /* Scrolled: what is cut off at the top fades out over 48px, so a half-hidden bubble under a pinned card does not read as a stray bar. */
+    :host([scrolled]) { mask-image: linear-gradient(to bottom, transparent 0, transparent 8px, #000 48px); }
     .empty { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; padding: 0 4px 8px; }
     .empty sat-app-icon { --sat-app-icon-size: 48px; }
     .scope { justify-content: center; gap: 4px; --m3e-icon-size: 14px; }
