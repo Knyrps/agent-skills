@@ -131,6 +131,24 @@ export function startOwner({ standalone = false } = {}) {
     const pauses = new Map(); // tabId -> { session, tabId, points, paused, held, told }
     const pauseWaits = new Set(); // { session, res }
     const pausedOf = s => [...pauses.values()].find(p => p.session === s && p.paused);
+    // What a held request means depends on when it was caught: after a click it is the state that click
+    // causes; with no input before it, it is the page's own request (its first load), which looks different.
+    // The extension says what the page knew (`when`); whose input it was comes from this session's calls.
+    function heldMoment(session, when) {
+      const base = 'The page runs on, so browser_* tools work. Let the requests go with resume.';
+      if (!when) return { hint: `${base} Look at the page (browser_take_screenshot) before you tell the user what it shows.` };
+      const age = when.pageAgeMs < 10000 ? `${(when.pageAgeMs / 1000).toFixed(1)} s` : `${Math.round(when.pageAgeMs / 1000)} s`;
+      const state = when.pageState === 'complete' ? 'the page had finished loading' : 'the page was still loading';
+      if (!when.followsInput) {
+        return { when, hint: `Caught ${age} after the page started, ${state}, and no click or key press came before it: this is `
+          + 'the page\'s own request (most likely its first load), not the reaction to an action. If you wanted the state after an action, '
+          + 'let it go with resume (a hold set with once: false stays) and act then, or set the hold with afterInput: true. '
+          + `Do not tell the user they see that state now. ${base}` };
+      }
+      const c = calls.get(session), mine = !!c && (c.running > 0 || c.windows.some(([, b]) => Date.now() - b < 1500));
+      return { when: { ...when, inputBy: mine ? 'agent' : 'user' }, hint: `Caught ${age} after the page started, right after ${mine ? 'your own input' : 'the user\'s input'} `
+        + `in the page: it shows the waiting state that input causes. ${base}` };
+    }
     function tellPaused(p) {
       if (p.told || !p.paused || !p.session) return;
       const waits = [...pauseWaits].filter(w => w.session === p.session);
@@ -156,8 +174,7 @@ export function startOwner({ standalone = false } = {}) {
         else tellPaused(next);
       }
       if (!prev?.held && next.held && m.by !== 'sync') {
-        push({ type: 'requestHeld', own: true, to: session, tab: m.tabId, ...next.held,
-          hint: 'The page runs on and shows its waiting state, so browser_* tools work. Let the requests go with resume.' });
+        push({ type: 'requestHeld', own: true, to: session, tab: m.tabId, ...next.held, ...heldMoment(session, next.held.when) });
       }
       const ran = !!prev?.paused && !next.paused, released = !!prev?.held && !next.held;
       // News nobody read yet is no longer true once the page runs again.

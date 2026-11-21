@@ -50,7 +50,10 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
     session: t.session,
     points: t.points.map(({ id, kind, label, once, skip }) => ({ id, kind, label, once, ...(skip ? { skip } : {}) })),
     paused: t.paused,
-    held: t.held.size ? { count: t.held.size, urls: [...new Set([...t.held.values()].map(h => h.url))].slice(0, 3) } : null,
+    // when: the moment the first waiting request was caught (see momentOf), so the agent can tell a request of
+    // the loading page from the one its action caused.
+    held: t.held.size ? { count: t.held.size, urls: [...new Set([...t.held.values()].map(h => h.url))].slice(0, 3),
+      ...(t.held.values().next().value.when ? { when: t.held.values().next().value.when } : {}) } : null,
   } : null;
 
   // Writes what the panel shows and tells the bridge. by: who or what caused the change.
@@ -157,11 +160,13 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
     const same = (kind, key) => t.points.find(p => p.kind === kind && p.key === key);
     switch (spec.on) {
       case 'request': {
-        const url = String(spec.url ?? '').trim(), key = (spec.hold ? 'hold ' : '') + url;
+        const afterInput = !!spec.afterInput;
+        if (afterInput && !spec.hold) return { error: 'afterInput works with hold: true only' };
+        const url = String(spec.url ?? '').trim(), key = (spec.hold ? 'hold ' : '') + url + (afterInput ? ' after input' : '');
         if (same('request', key)) return { point: same('request', key) };
         if (spec.hold) {
           if (!url) return { error: 'holding requests needs url: a part of the request URL, e.g. "/api/products"' };
-          const point = { kind: 'request', key, hold: true, url, once, label: `holds requests to ${url}` };
+          const point = { kind: 'request', key, hold: true, url, once, afterInput, label: `holds requests to ${url}${afterInput ? ' that follow a click or key press' : ''}` };
           t.points.push(point);
           try { await syncFetch(tabId, t); } catch (e) { t.points.pop(); throw e; }
           return { point, added: true };
@@ -398,11 +403,27 @@ export function createPauser({ S, serial, attach, idle, allowed, tell }) {
     else ran(tabId, t);
   }
 
+  // The moment a request was caught: how long the page has existed, how far it has loaded, and whether a click,
+  // tap or key press came just before (Chrome's own record of it, about 5 s long; scrolling and hovering do not
+  // count). A request with no input before it is the page's own, e.g. its first data request while it loads.
+  // null when the page cannot answer (stopped at a breakpoint, or gone).
+  async function momentOf(tabId, t) {
+    if (t.paused) return null;
+    const r = await Promise.race([sleep(400).then(() => null), quiet(tabId, 'Runtime.evaluate', { returnByValue: true,
+      expression: 'JSON.stringify([Math.round(performance.now()), document.readyState, !!navigator.userActivation?.isActive])' })]);
+    try { const [pageAgeMs, pageState, followsInput] = JSON.parse(r.result.value); return { pageAgeMs, pageState, followsInput }; } catch { return null; }
+  }
+
   async function onHeld(tabId, t, p) {
+    const go = () => void quiet(tabId, 'Fetch.continueRequest', { requestId: p.requestId });
     const tab = await chrome.tabs.get(tabId).catch(() => null);
-    const point = t.points.find(x => x.hold && p.request.url.includes(x.url));
-    if (!tab || !point || !(await allowed(tab.url || ''))) return void quiet(tabId, 'Fetch.continueRequest', { requestId: p.requestId });
-    t.held.set(p.requestId, { url: p.request.url, method: p.request.method, type: p.resourceType, point });
+    const matching = t.points.filter(x => x.hold && p.request.url.includes(x.url));
+    if (!tab || !matching.length || !(await allowed(tab.url || ''))) return go();
+    const when = await momentOf(tabId, t);
+    // afterInput: the page's own requests pass; only one that follows input waits. Unknown counts as input.
+    const point = matching.find(x => !x.afterInput || when?.followsInput !== false);
+    if (!point || !t.points.includes(point)) return go();
+    t.held.set(p.requestId, { url: p.request.url, method: p.request.method, type: p.resourceType, point, ...(when ? { when } : {}) });
     await publish(tabId, 'request');
   }
 

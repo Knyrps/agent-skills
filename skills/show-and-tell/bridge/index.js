@@ -72,13 +72,13 @@ async function runCli() {
     case 'throttle': return call('POST', '/cmd', { cmd: 'throttle', network: opt('download')
       ? { downloadKbps: +opt('download'), uploadKbps: opt('upload') && +opt('upload'), latencyMs: +(opt('latency') || 0) }
       : positional[0] || (opt('cpu') ? undefined : 'off'), cpu: opt('cpu') && +opt('cpu') });
-    // pause [--session s] request <url> [--hold] | dom <selector> [--change c] | line <text> | line --url u --line n | event <name> | now
+    // pause [--session s] request <url> [--hold [--after-input]] | dom <selector> [--change c] | line <text> | line --url u --line n | event <name> | now
     //       | list | remove <id|all>   (add --keep to pause more than once)
     case 'pause': {
       const [on, arg] = positional, base = { cmd: 'pause', session: opt('session'), once: !rest.includes('--keep') };
       if (!on || on === 'list') return call('POST', '/cmd', { ...base, list: true });
       if (on === 'remove') return call('POST', '/cmd', { ...base, remove: arg || 'all' });
-      return call('POST', '/cmd', { ...base, on, url: opt('url') ?? (on === 'request' ? arg || '' : undefined), hold: rest.includes('--hold'),
+      return call('POST', '/cmd', { ...base, on, url: opt('url') ?? (on === 'request' ? arg || '' : undefined), hold: rest.includes('--hold'), afterInput: rest.includes('--after-input') || undefined,
         selector: on === 'dom' ? arg : undefined, change: opt('change'), text: on === 'line' ? arg : undefined, line: opt('line') && +opt('line'),
         column: opt('column') && +opt('column'), condition: opt('condition'), event: on === 'event' ? arg : undefined });
     }
@@ -274,7 +274,8 @@ async function runMcp() {
     } } },
     { name: 'pause', description: 'Stop your tab at a chosen moment, like breakpoints in Chrome DevTools, so you or the user can look at a state '
       + 'that normally passes too quickly (loading, empty, half-rendered, an open menu). `on` says when: "request" before a fetch/XHR whose URL contains '
-      + '`url` is sent (with hold: true the page runs on and only that request waits, so browser_* tools still work and the loading state stays on screen); '
+      + '`url` is sent (with hold: true the page runs on and only that request waits, so browser_* tools still work and the loading state stays on screen; '
+      + 'a hold catches the first matching request, also the page\'s own while it loads: set it once the page has loaded, or pass afterInput: true, when you mean the request an action sends); '
       + '"dom" when the element `selector` changes; "line" at a line of page code (`text`: code to search the loaded scripts for, or `url` + `line`); '
       + '"event" at the first listener of an event such as click or submit; "now" immediately. A point is removed after it paused once unless once: false. '
       + 'When the page pauses you are told where (file, line, function, call stack): by the browser_* call that caused it, or by a `paused` action. '
@@ -284,6 +285,8 @@ async function runMcp() {
       on: { type: 'string', enum: ['request', 'dom', 'line', 'event', 'now'] },
       url: { type: 'string', description: 'request: part of the request URL ("" = any request). line: part of the script URL' },
       hold: { type: 'boolean', description: 'request: keep the page running and only hold matching requests until resume' },
+      afterInput: { type: 'boolean', description: 'request with hold: hold only requests that follow a click, tap or key press in the page (yours or the user\'s, within about 5 s); '
+        + 'the page\'s own requests, such as its first load, pass. Use it to show the state after an action, e.g. switching a variant' },
       selector: { type: 'string', description: 'dom: CSS selector of the element to watch' },
       change: { type: 'string', enum: ['any', 'content', 'attributes', 'removed'], description: 'dom: what counts (default any = content or attributes)' },
       text: { type: 'string', description: 'line: code to find in the loaded scripts, e.g. "renderResults(data"; the pause is set where it occurs. Spacing need not match. On minified sites search for what survives minifying: strings, property and method names' },
@@ -371,7 +374,7 @@ async function runMcp() {
           if (network === undefined && a.cpu === undefined) return reply({ ok: false, error: 'give preset, downloadKbps or cpu ("off" resets both)' });
           return done(await cmd({ cmd: 'throttle', network, cpu: a.cpu }));
         }
-        case 'pause': return done(await cmd({ cmd: 'pause', on: a.on, url: a.url, hold: a.hold, selector: a.selector, change: a.change, text: a.text,
+        case 'pause': return done(await cmd({ cmd: 'pause', on: a.on, url: a.url, hold: a.hold, afterInput: a.afterInput, selector: a.selector, change: a.change, text: a.text,
           line: a.line, column: a.column, condition: a.condition, event: a.event, once: a.once, remove: a.remove }));
         case 'resume': return done(await cmd({ cmd: 'resume', step: a.step, what: a.what, remove: a.remove, reload: a.reload }));
         case 'inspect_paused': return reply(await cmd({ cmd: 'inspectPaused', expression: a.expression, frame: a.frame }));

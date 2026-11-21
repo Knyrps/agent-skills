@@ -77,6 +77,35 @@ await run('hold-keep', async () => {
   check('remove of an unknown id says what exists', /no pause point/.test(J(await a.tool('pause', { remove: 'p999' })).error || '') || true);
 });
 
+// When a hold caught its request: after input in the page, or as the page's own request while it loads.
+await run('hold-moment', async () => {
+  await a.tool('pause', { on: 'request', url: '/api/items', hold: true });
+  await lab.click('#load');
+  const h = (await a.wait(4)).find(x => x.type === 'requestHeld');
+  check('a hold caught after a click says that input came before it', h?.when?.followsInput === true && h.when.pageState === 'complete' && /right after/.test(h.hint), JSON.stringify(h));
+  await a.tool('resume'); await sleep(600);
+  // A request the page sends by itself while it loads: its stylesheet.
+  await a.tool('pause', { on: 'request', url: '/m3-tokens.css', hold: true });
+  await sleep(300); lab.send('Page.reload');
+  const own = (await a.wait(6)).find(x => x.type === 'requestHeld');
+  check('a hold caught while the page loads says it is the page\'s own request, not an action\'s', own?.when?.followsInput === false && own.when.pageState !== 'complete' && own.when.pageAgeMs < 5000
+    && /page's own request/.test(own.hint) && /afterInput/.test(own.hint), JSON.stringify(own));
+  await a.tool('resume'); await sleep(1200); while ((await a.wait(1)).length);
+  // afterInput: the same hold lets the page's own request pass and waits for one that follows input.
+  check('afterInput without hold is refused', /hold: true/.test(J(await a.tool('pause', { on: 'request', url: '/api/items', afterInput: true })).error || ''));
+  const r = J(await a.tool('pause', { on: 'request', url: '/m3-tokens.css', hold: true, afterInput: true, once: false }));
+  check('a hold with afterInput is set and says so', r.ok && /follow a click or key press/.test(r.pauses), JSON.stringify(r));
+  lab.send('Page.reload'); await sleep(2500);
+  const s = Object.values(await stored())[0];
+  check('with afterInput the loading page\'s own request passes: the page loads, nothing waits', s && !s.held && s.points.length === 1 && await lab.ev(`!!$d('#load')`), JSON.stringify(s));
+  check('and the agent is not told about it', !(await a.wait(1)).some(x => x.type === 'requestHeld'));
+  await a.tool('pause', { on: 'request', url: '/api/items', hold: true, afterInput: true });
+  await lab.click('#load');
+  const after = (await a.wait(4)).find(x => x.type === 'requestHeld');
+  check('the request a click sends is held', after?.count === 1 && after.when?.followsInput === true && /Loading/.test(await box()), JSON.stringify(after));
+  await a.tool('resume'); await sleep(600);
+});
+
 await run('hold-navigate', async () => {
   await a.tool('pause', { on: 'request', url: '/api/items', hold: true });
   await lab.click('#load'); await a.wait(4);
