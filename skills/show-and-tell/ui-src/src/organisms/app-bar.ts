@@ -12,7 +12,7 @@ import { fire, type } from '../styles.js';
 /**
  * Who the conversation is with: the app icon in the session's colour, the session's name, whether it
  * listens, a button for a new tab in its group, and the bridge with the messages still waiting to go out.
- * Fires `sat-new-tab`.
+ * Fires `sat-new-tab` and `sat-show-hosts`.
  */
 @customElement('sat-app-bar')
 export class SatAppBar extends LitElement {
@@ -31,6 +31,8 @@ export class SatAppBar extends LitElement {
   @property({ type: Number }) pending = 0;
   /** A live session is in front: offer a new tab in its group. */
   @property({ type: Boolean, attribute: 'can-new-tab' }) canNewTab = false;
+  /** How many sites the user allowed; with any, a button opens the list to take one back. */
+  @property({ type: Number }) allowed = 0;
 
   override render() {
     const bridge = (this.connected ? 'Bridge connected' : 'Bridge offline')
@@ -42,6 +44,8 @@ export class SatAppBar extends LitElement {
       <span slot="trailing" class="trail">
         ${this.canNewTab ? html`<m3e-icon-button id="new-tab" aria-label="New tab in ${this.name}'s group" title="New tab in ${this.name}'s group"
           @click=${() => fire(this, 'sat-new-tab')}><m3e-icon name="add"></m3e-icon></m3e-icon-button>` : nothing}
+        ${this.allowed ? html`<m3e-icon-button id="hosts" aria-label="Allowed sites" title="Allowed sites"
+          @click=${() => fire(this, 'sat-show-hosts')}><m3e-icon name="shield_lock"></m3e-icon></m3e-icon-button>` : nothing}
         <span class="conn" id="conn" role="img" aria-label=${bridge} title=${bridge}>
           <m3e-icon-button disabled-interactive aria-label=${bridge}><m3e-icon name=${this.connected ? 'cloud_done' : 'cloud_off'}></m3e-icon></m3e-icon-button>
           ${this.pending ? html`<m3e-badge size="medium">${this.pending}</m3e-badge>` : nothing}

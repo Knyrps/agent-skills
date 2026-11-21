@@ -6,6 +6,9 @@ let configP = null;
 
 const read = file => fetch(chrome.runtime.getURL(file)).then(r => (r.ok ? r.json() : {})).catch(() => ({}));
 
+// config.local.json changes on disk when the user allows or takes back a host: read it again after that.
+export const reloadConfig = () => { configP = null; };
+
 export function loadConfig() {
   configP ||= Promise.all([read('config.json'), read('config.local.json')]).then(([c, local]) => ({
     bridgeUrl: local.bridgeUrl || c.bridgeUrl || 'ws://127.0.0.1:47613/ext',

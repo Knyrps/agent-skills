@@ -1,7 +1,7 @@
 // Owns the WebSocket to the bridge, the action outbox and the highlight list.
 // State lives in chrome.storage.session so it survives service-worker restarts and navigations;
 // the side panel and the content scripts render from it.
-import { loadConfig, hostAllowed, pageKey } from './allow.js';
+import { loadConfig, reloadConfig, hostAllowed, pageKey } from './allow.js';
 import { stepTiming, estimateMs, pickSize, bitrate } from './video-plan.js';
 import { createPauser } from './pause.js';
 
@@ -25,7 +25,7 @@ const serial = fn => { const p = lock.then(fn); lock = p.catch(() => {}); return
 // Config patterns, plus what the bridge pushes: the hosts file's loopback names, current config files and
 // this session's grants. Other hosts need the user's answer in the panel; the agent can only ask.
 // "This session" grants also live here (until the browser restarts) and go back to a restarted bridge.
-let hostState = { allow: [], loopback: [], granted: [] }, localGrants = [];
+let hostState = { allow: [], saved: [], loopback: [], granted: [] }, localGrants = [];
 const hostsReady = S.get(['hostState', 'localGrants']).then(r => {
   if (r.hostState) hostState = r.hostState;
   localGrants = r.localGrants || [];
@@ -39,7 +39,8 @@ const resendGrants = async () => { await hostsReady; for (const host of localGra
 const hostOf = url => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } };
 
 async function setHostState(next) {
-  hostState = { allow: next.allow || [], loopback: next.loopback || [], granted: next.granted || [] };
+  reloadConfig();
+  hostState = { allow: next.allow || [], saved: next.saved || [], loopback: next.loopback || [], granted: next.granted || [] };
   await S.set({ hostState: { ...hostState, granted: [...new Set([...hostState.granted, ...localGrants])] } });
 }
 
@@ -1643,6 +1644,21 @@ async function handle(m, sender) {
       await chrome.tabs.group({ tabIds: t.id, groupId: front.groupId }).catch(() => {});
       await chrome.tabs.update(t.id, { active: true });
       return { ok: true, tabId: t.id };
+    }
+    // Takes back a host the user allowed (this session or "Always"). Its pages stop working for the agent at once.
+    case 'hostRevoke': {
+      const host = String(m.host || '').toLowerCase();
+      if (!host) return { ok: false };
+      await hostsReady;
+      localGrants = localGrants.filter(h => h !== host);
+      await S.set({ localGrants });
+      await setHostState({ ...hostState, granted: hostState.granted.filter(h => h !== host), saved: hostState.saved.filter(h => h !== host),
+        allow: hostState.allow.filter(h => h !== host || !hostState.saved.includes(h)) });
+      send({ type: 'hostRevoke', host });
+      // What the agent showed there goes too; the bridge refuses its next call on that host.
+      const { highlights = [] } = await S.get('highlights');
+      await S.set({ highlights: highlights.filter(h => hostOf(h.pageKey || '') !== host) });
+      return { ok: true, host };
     }
     case 'hostAllow': {
       const host = hostOf(m.url || '');

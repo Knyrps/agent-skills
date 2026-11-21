@@ -83,5 +83,37 @@ await run('ended-highlights', async () => {
   check('when that session ends, its highlights go with it', gone);
 });
 
+await run('revoke-host', async () => {
+  const fs = await import('node:fs'), path = await import('node:path');
+  const { SKILL } = await import('./lib.mjs');
+  const local = path.join(SKILL, 'extension', 'config.local.json');
+  const host = `keep-${Date.now().toString(36)}.127.0.0.1.nip.io`;
+  // The user allows it for good, from the question the agent raises.
+  const call = a.tool('highlight', { selector: 'body', url: `http://${host}:47714/` });
+  for (let i = 0; i < 40 && !(await pn.P(`!!$d('#host-always')`)); i++) await sleep(250);
+  await sleep(800);
+  await clickInPlace(pn, '#host-always');
+  await Promise.race([call, sleep(20000)]);
+  let listed = false;
+  for (let i = 0; i < 20 && !listed; i++) { await sleep(300); listed = await pn.P(`!!$d('#hosts')`); }
+  check('with a site allowed, the header offers the list of allowed sites', listed);
+  check('"Always" is saved to config.local.json', (JSON.parse(fs.readFileSync(local, 'utf8')).allowlist || []).includes(host));
+  await clickInPlace(pn, '#hosts'); await sleep(700);
+  const row = J(await pn.P(`JSON.stringify([...$$d('#hosts-list [data-host]')].map(e => [e.dataset.host, e.textContent.replace(/\\s+/g, ' ').trim()]))`));
+  check('the dialog lists the site as allowed always', row.some(([h, t]) => h === host && /Always/.test(t)), JSON.stringify(row));
+  await pn.P(`$$d('#hosts-list [data-host]').find(e => e.dataset.host === ${JSON.stringify(host)}).setAttribute('data-revoke', '1')`);
+  await clickInPlace(pn, '[data-revoke] m3e-icon-button'); await sleep(1500);
+  check('taking it back removes it from config.local.json', !(JSON.parse(fs.readFileSync(local, 'utf8')).allowlist || []).includes(host));
+  // The agent has to ask again.
+  const again = a.tool('highlight', { selector: 'body', url: `http://${host}:47714/` });
+  let asked = false;
+  for (let i = 0; i < 40 && !asked; i++) { await sleep(250); asked = await pn.P(`!!$d('#host-no')`); }
+  check('the agent has to ask for the site again', asked);
+  if (asked) await clickInPlace(pn, '#host-no');
+  await Promise.race([again, sleep(10000)]);
+  await pn.P(`(() => { const d = $d('m3e-dialog#hosts-dialog'); d?.hide?.(); })()`);
+  await a.tool('browser_navigate', { url: LAB + '?flows' });
+});
+
 summary();
 await a.close(); process.exit(0);

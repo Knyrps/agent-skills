@@ -9,6 +9,8 @@ import '../organisms/app-bar.js';
 import '../organisms/composer.js';
 import '../organisms/conversation.js';
 import '../organisms/host-question.js';
+import '../organisms/hosts-dialog.js';
+import type { AllowedHost, SatHostsDialog } from '../organisms/hosts-dialog.js';
 import '../organisms/notice.js';
 import '../organisms/pause-card.js';
 import '../organisms/throttle-card.js';
@@ -20,7 +22,7 @@ import type { SatConversation } from '../organisms/conversation.js';
 import type { DotState } from '../atoms/status-dot.js';
 import type { AllowMode, AttachmentKind, ChatMessage, HostDecision, PauseChoice, PauseState, Suggestion, VideoView } from '../types.js';
 import { GROUP } from '../session-colours.js';
-import { hostAllowed, loadConfig } from '../../../extension/allow.js';
+import { hostAllowed, loadConfig, reloadConfig } from '../../../extension/allow.js';
 
 const S = chrome.storage.session;
 const KEYS = ['step', 'steps', 'waiting', 'listener', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning', 'tourTab', 'tourHome',
@@ -66,6 +68,7 @@ export class SatPanelPage extends LitElement {
 
   @query('sat-composer') private composer!: SatComposer;
   @query('sat-conversation') private conversation!: SatConversation;
+  @query('sat-hosts-dialog') private hostsDialog!: SatHostsDialog;
 
   // Snackbars open in the top layer at a fixed distance from the bottom (M3E's --m3e-snackbar-margin). Keep them
   // just above the composer, so they never cover its buttons.
@@ -82,6 +85,7 @@ export class SatPanelPage extends LitElement {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'session') return;
       void this.load();
+      if (changes.hostState) reloadConfig(); // config.local.json may have changed with it
       if (changes.hostState || changes.connected) void this.refreshTab();
     });
     chrome.tabs.onActivated.addListener(() => void this.refreshTab());
@@ -232,8 +236,13 @@ export class SatPanelPage extends LitElement {
     const q = questions[0];
 
     const recording = d.recording, on = !!recording;
+    // The user's own grants: "Always" ones from config.local.json, the rest only for this session.
+    const hs = d.hostState || {};
+    const allowedHosts: AllowedHost[] = [...new Set([...(hs.saved || []), ...(hs.granted || [])])].sort()
+      .map(host => ({ host, always: (hs.saved || []).includes(host) }));
     return html`<sat-panel-layout style=${tint}>
         <sat-app-bar slot="bar" name=${me?.name || d.listener || 'show-and-tell'} status=${status} title=${hint} dot=${dot}
+          allowed=${allowedHosts.length} @sat-show-hosts=${() => void this.hostsDialog.show()}
           ?connected=${connected} pending=${pending} ?can-new-tab=${!!me?.live} @sat-new-tab=${async () => {
             const r = await send({ type: 'newSessionTab' });
             if (!r?.ok) toast(r?.error || 'Could not open a tab in this group.');
@@ -274,6 +283,10 @@ export class SatPanelPage extends LitElement {
           @sat-send=${(e: CustomEvent<string>) => this.onSend(e.detail)} @sat-annotate=${() => this.onAnnotate()}
           @sat-record=${() => this.onRecord()} @sat-drop=${(e: CustomEvent<AttachmentKind>) => this.onDrop(e.detail)}
           @sat-record-discard=${async () => { await send({ type: 'recStop', discard: true }); toast('Recording discarded.'); }}></sat-composer>
+        <sat-hosts-dialog .hosts=${allowedHosts} @sat-revoke-host=${async (e: CustomEvent<string>) => {
+          const r = await send({ type: 'hostRevoke', host: e.detail });
+          toast(r?.ok ? `${e.detail} is no longer allowed.` : 'Could not take that site back.');
+        }}></sat-hosts-dialog>
       </sat-panel-layout>`;
   }
 

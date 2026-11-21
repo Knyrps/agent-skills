@@ -42,7 +42,8 @@ export function createHosts({ extDir, hostsFile = process.env.DEMO_HOSTS_FILE ||
   // Everything the extension needs to decide on its own, pushed to it whenever it changes.
   function state() {
     const list = f => (Array.isArray(readJson(f).allowlist) ? readJson(f).allowlist.map(String) : []);
-    return { allow: [...new Set([...list(base), ...list(local)])], loopback: loopback(), granted: [...granted] };
+    // saved: what the user granted with "Always" (config.local.json); the panel lists it with the session grants to take back.
+    return { allow: [...new Set([...list(base), ...list(local)])], saved: list(local), loopback: loopback(), granted: [...granted] };
   }
 
   function check(url) {
@@ -69,5 +70,13 @@ export function createHosts({ extDir, hostsFile = process.env.DEMO_HOSTS_FILE ||
     if (!list.includes(host)) fs.writeFileSync(local, JSON.stringify({ ...cfg, allowlist: [...list, host] }, null, 2) + '\n');
   }
 
-  return { check, grant, state };
+  // Takes a grant back: from this session and from config.local.json. Patterns in config.json are shared, not the user's.
+  function revoke(host) {
+    host = String(host || '').toLowerCase().trim();
+    granted.delete(host);
+    const cfg = readJson(local);
+    if (Array.isArray(cfg.allowlist) && cfg.allowlist.includes(host)) fs.writeFileSync(local, JSON.stringify({ ...cfg, allowlist: cfg.allowlist.filter(h => h !== host) }, null, 2) + '\n');
+  }
+
+  return { check, grant, revoke, state };
 }
