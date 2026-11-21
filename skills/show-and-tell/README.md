@@ -109,6 +109,13 @@ whatever Chromium is listening on that port.
    e.g. `{ "allowlist": ["grafana.example.zz", "*.staging.example"] }` (`*.x` = x and all subdomains).
    The rule covers the `browser_*` tools too; the agent can ask but never grant.
 
+5. **Certificates.** The shared browser holds your sign-ins, so a bad certificate on a real site stops it like
+   any Chrome. Self-signed certificates are accepted on `localhost`, and on names your hosts file maps to
+   loopback when they serve HTTPS on port 443 or on a port listed in `config.local.json` as
+   `{ "httpsPorts": [5001] }`. Their keys are read when the browser starts, so a dev server started later
+   needs a browser restart. `{ "ignoreCertificateErrors": true }` accepts every certificate error everywhere;
+   it is meant for setups the above does not cover.
+
 Environment overrides: `DEMO_BROWSER_PATH` (any Chromium that honours `--load-extension`, for
 example Edge), `DEMO_CDP_PORT` (9334), `DEMO_PROFILE`, `DEMO_BRIDGE_PORT` (47613), `DEMO_LAB_PORT` (47614, the test page), `DEMO_DATA`
 (queue, screenshots and profile; default `%LOCALAPPDATA%\show-and-tell` on Windows,

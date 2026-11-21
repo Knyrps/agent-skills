@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { cdpSession } from '../bridge/ws.js';
 import { getJson, EXT_ID, DATA } from '../bridge/core.js';
 import { LAB_URL } from './lab.mjs';
+import { certificateFlags } from './certificates.mjs';
 
 const SKILL = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXT = path.join(SKILL, 'extension');
@@ -64,9 +65,8 @@ async function start() {
     fs.rmSync(path.join(PROFILE, 'Default', 'Service Worker'), { recursive: true, force: true });
     spawn(BROWSER, [`--user-data-dir=${PROFILE}`, `--remote-debugging-port=${PORT}`,
       `--load-extension=${EXT}`, `--disable-extensions-except=${EXT}`,
-      // Local dev hosts use self-signed certificates. Playwright's --ignore-https-errors does not reach
-      // a browser it only attaches to over CDP, so the demo profile ignores certificate errors itself.
-      '--ignore-certificate-errors',
+      // Local dev hosts use self-signed certificates; the browser accepts them for this machine only (see certificates.mjs).
+      ...(await certificateFlags(EXT)),
       // "Annotate" captures the page through chrome.debugger; this hides the "is being debugged" bar.
       '--silent-debugger-extension-api',
       // Video recording captures the tour tab without a click on the extension icon first.
