@@ -1,0 +1,26 @@
+// The icons the panel uses, one import each (SVG, from @m3e/icons). <m3e-icon name="…"> shows them.
+import '@m3e/web/icon';
+import '@m3e/icons/outlined/add';
+import '@m3e/icons/outlined/arrow_back';
+import '@m3e/icons/outlined/arrow_forward';
+import '@m3e/icons/outlined/arrow_upward';
+import '@m3e/icons/outlined/block';
+import '@m3e/icons/outlined/chat_bubble';
+import '@m3e/icons/outlined/close';
+import '@m3e/icons/outlined/cloud_done';
+import '@m3e/icons/outlined/cloud_off';
+import '@m3e/icons/outlined/delete';
+import '@m3e/icons/outlined/draw';
+import '@m3e/icons/outlined/hourglass_top';
+import '@m3e/icons/outlined/info';
+import '@m3e/icons/outlined/keyboard_arrow_down';
+import '@m3e/icons/outlined/lock';
+import '@m3e/icons/outlined/network_wifi_2_bar';
+import '@m3e/icons/outlined/pause';
+import '@m3e/icons/outlined/pause_circle';
+import '@m3e/icons/outlined/play_arrow';
+import '@m3e/icons/outlined/radio_button_checked';
+import '@m3e/icons/outlined/schedule';
+import '@m3e/icons/outlined/shield_lock';
+import '@m3e/icons/outlined/stop';
+import '@m3e/icons/outlined/warning';

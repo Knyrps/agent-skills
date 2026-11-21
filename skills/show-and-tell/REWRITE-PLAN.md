@@ -1,6 +1,6 @@
 # Plan: UI rewrite to Material 3 Expressive (Lit + @m3e/web, TypeScript)
 
-Status: started. Step 1 is done. Work through the steps in order and commit each step separately. The
+Status: started. Steps 1 and 2 are done. Work through the steps in order and commit each step separately. The
 existing checks (`node tests/run.mjs`) describe the old UI and need not pass during the rewrite; new
 ones are written after it (step 7). The rules that hold throughout are in `AGENTS.md`.
 
@@ -75,9 +75,9 @@ elements while the page scrolls) stay direct style writes, not re-renders.
 1. **Done.** AGENTS.md in this folder (rules above), source folder `ui-src/` (already excluded by
    `tests/run.mjs`), `package.json`, `tsconfig.json`, esbuild build writing into `extension/ui/`.
    `vendor-src/build.mjs` keeps the colour tokens (`npm run tokens`) and now writes the new palette.
-2. Side panel. Update the tests in the same step: they address panel elements by id
-   (`#pause`, `#pause-split`, `#pause-menu`, `#listen-text`, `#conn`, ...) and read
-   `md-menu`'s shadow DOM; keep ids where possible, adapt selectors where not.
+2. **Done.** Side panel: `ui-src/src/pages/panel.ts` and the levels under it, built to
+   `extension/ui/panel.js`; `panel.html` only loads it. The old `panel.js`, `panel.css` and `markdown.js`
+   are gone. Element ids are kept where they cost nothing; they now live inside shadow roots.
 3. Small pages.
 4. Overlay and video stage with `lit-html`.
 5. Demo page.
