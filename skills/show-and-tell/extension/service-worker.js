@@ -542,7 +542,7 @@ async function onBridge(m) {
     return sweepTabs(m.sessions || [], m.ended || []);
   }
   if (m.cmd === 'hosts') return setHostState(m);
-  if (m.cmd === 'lab') { await S.set({ labUrl: String(m.url || LAB_DEFAULT) }); return pinLab(); }
+  if (m.cmd === 'lab') { const labUrl = String(m.url || LAB_DEFAULT); await S.set({ labUrl }); await chrome.storage.local.set({ labUrl }); await reloadFailedLabTabs(); return pinLab(); }
   if (m.cmd === 'thinking') return serial(async () => { const { thinking = {} } = await S.get('thinking'); thinking[m.session] = m.ts; await S.set({ thinking }); });
   if (m.cmd === 'say') {
     await serial(async () => { const { thinking = {} } = await S.get('thinking'); delete thinking[m.session]; await S.set({ thinking }); });
@@ -1826,7 +1826,8 @@ chrome.webNavigation.onHistoryStateUpdated.addListener(d => userNav('urlChange',
 // shows a notice that switches to the page once a bridge is up, instead of Chrome's error page. Sessions
 // never take the lab tab over as their own; they open a tab of their own next to it.
 const LAB_DEFAULT = 'http://localhost:47614/';
-const labUrl = async () => (await S.get('labUrl')).labUrl || LAB_DEFAULT;
+// Kept across restarts too: at start-up no bridge may have said where the test page is yet.
+const labUrl = async () => (await S.get('labUrl')).labUrl || (await chrome.storage.local.get('labUrl')).labUrl || LAB_DEFAULT;
 async function isLab(url) { try { return new URL(url).origin === new URL(await labUrl()).origin; } catch { return false; } }
 // The browser's own test-page tab (the start page, owned by no session) is pinned, so it reads as part of
 // the browser rather than a stray tab. Agent tabs that open lab pages are grouped and left alone.
@@ -1853,6 +1854,22 @@ chrome.webNavigation.onErrorOccurred.addListener(async d => {
   if (d.frameId !== 0 || /ERR_ABORTED/.test(d.error) || !(await isLab(d.url))) return;
   await chrome.tabs.update(d.tabId, { url: chrome.runtime.getURL('lab-offline.html') + '?u=' + encodeURIComponent(d.url) }).catch(() => {});
 });
+// The test page is served again: tabs still showing Chrome's error page for it (its title is the bare host) load it.
+async function reloadFailedLabTabs() {
+  for (const t of await chrome.tabs.query({})) {
+    try { if (t.url && await isLab(t.url) && t.title === new URL(t.url).host) await chrome.tabs.reload(t.id); } catch { /* gone meanwhile */ }
+  }
+}
+// Tabs Chrome restores at start-up fail before this worker listens: if the test page does not answer then, the
+// restored test-page tabs get the waiting page too, instead of keeping Chrome's error page.
+chrome.runtime.onStartup.addListener(() => { for (const ms of [0, 2000, 5000, 10000]) setTimeout(() => (async () => {
+  const lab = await labUrl();
+  const up = await fetch(lab, { method: 'HEAD', cache: 'no-store' }).then(() => true, () => false);
+  if (up) return;
+  for (const t of await chrome.tabs.query({})) {
+    if (t.url && await isLab(t.url)) await chrome.tabs.update(t.id, { url: chrome.runtime.getURL('lab-offline.html') + '?u=' + encodeURIComponent(t.url) }).catch(() => {});
+  }
+})().catch(() => {}), ms); });
 
 // Jumps within the page (#anchors, a table of contents) change only the fragment.
 chrome.webNavigation.onReferenceFragmentUpdated.addListener(d => userNav('urlChange', d));
