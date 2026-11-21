@@ -263,14 +263,14 @@ export class SatPanelPage extends LitElement {
           }}></sat-throttle-card>` : nothing}
         ${pause ? this.pauseCard(pause) : nothing}
         ${blocked ? html`<sat-notice slot="pinned" id="notice" ?web=${web} ?narrow=${this.narrow} ?always-disabled=${!connected}
-          text=${web ? `${host} is not allowed, so the agent can't point, mark or record here.` : 'This page is not a website, so the agent can\'t point, mark or record here.'}
+          text=${web ? `${host} is not allowed, so the agent can't point, mark or record here. Allow only sites you trust: text on a page can try to instruct the agent.` : 'This page is not a website, so the agent can\'t point, mark or record here.'}
           @sat-allow=${(e: CustomEvent<AllowMode>) => this.onAllow(e.detail)}></sat-notice>` : nothing}
 
         <sat-conversation id="chat" .messages=${shown} .thinkingSince=${(me && (d.thinking || {})[me.id]) || null}
           request=${d.demoRequest?.prompt || ''} name=${me?.name || ''} ?empty=${!shown.length && !d.demoRequest && !questions.length}
           @sat-suggest=${(e: CustomEvent<Suggestion>) => this.onSuggest(e.detail)}>
           ${q ? html`<sat-host-question id="host-ask" host=${q.host} more=${questions.length - 1} ?narrow=${this.narrow}
-            text="${q.who || 'The agent'} wants to ${q.why || 'work on this site'}. It could then read and act on this site in the shared browser, with your sign-ins. &quot;Always&quot; saves it in config.local.json."
+            text="${q.who || 'The agent'} wants to ${q.why || 'work on this site'}. It could then read and act on this site in the shared browser, with your sign-ins. Text on the site can also try to instruct the agent, so allow only sites you trust. &quot;Always&quot; saves it in config.local.json; you can take it back from the shield in the header."
             @sat-host-decision=${(e: CustomEvent<HostDecision>) => send({ type: 'hostDecision', host: q.host, decision: e.detail })}></sat-host-question>` : nothing}
         </sat-conversation>
 

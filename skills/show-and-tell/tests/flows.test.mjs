@@ -30,6 +30,7 @@ await run('host-question', async () => {
   let shown = false;
   for (let i = 0; i < 40 && !shown; i++) { await sleep(250); shown = await pn.P(`!!$d('#host-session')`); }
   check('the host question appears', shown);
+  check('it warns that a site\'s text can instruct the agent', /can also try to instruct the agent/.test(await pn.P(`$d('#host-ask-text')?.textContent || ''`)));
   await sleep(800);
   const r = await clickInPlace(pn, '#host-session');
   check('"This session" is on screen and clickable without scrolling', r?.onScreen && r?.hits, JSON.stringify(r));

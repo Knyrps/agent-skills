@@ -451,14 +451,14 @@ var ag=Object.defineProperty;var ig=Object.getOwnPropertyDescriptor;var M=(o,e,t
           @sat-throttle-off=${async()=>{let oe=await We({type:"throttleOff"});vt(oe?.ok?"Throttling is off for this tab.":"Could not turn throttling off.")}}></sat-throttle-card>`:T}
         ${B?this.pauseCard(B):T}
         ${Y?g`<sat-notice slot="pinned" id="notice" ?web=${Z} ?narrow=${this.narrow} ?always-disabled=${!s}
-          text=${Z?`${q} is not allowed, so the agent can't point, mark or record here.`:"This page is not a website, so the agent can't point, mark or record here."}
+          text=${Z?`${q} is not allowed, so the agent can't point, mark or record here. Allow only sites you trust: text on a page can try to instruct the agent.`:"This page is not a website, so the agent can't point, mark or record here."}
           @sat-allow=${oe=>this.onAllow(oe.detail)}></sat-notice>`:T}
 
         <sat-conversation id="chat" .messages=${pe} .thinkingSince=${n&&(t.thinking||{})[n.id]||null}
           request=${t.demoRequest?.prompt||""} name=${n?.name||""} ?empty=${!pe.length&&!t.demoRequest&&!J.length}
           @sat-suggest=${oe=>this.onSuggest(oe.detail)}>
           ${Se?g`<sat-host-question id="host-ask" host=${Se.host} more=${J.length-1} ?narrow=${this.narrow}
-            text="${Se.who||"The agent"} wants to ${Se.why||"work on this site"}. It could then read and act on this site in the shared browser, with your sign-ins. &quot;Always&quot; saves it in config.local.json."
+            text="${Se.who||"The agent"} wants to ${Se.why||"work on this site"}. It could then read and act on this site in the shared browser, with your sign-ins. Text on the site can also try to instruct the agent, so allow only sites you trust. &quot;Always&quot; saves it in config.local.json; you can take it back from the shield in the header."
             @sat-host-decision=${oe=>We({type:"hostDecision",host:Se.host,decision:oe.detail})}></sat-host-question>`:T}
         </sat-conversation>
 

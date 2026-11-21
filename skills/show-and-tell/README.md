@@ -107,7 +107,9 @@ whatever Chromium is listening on that port.
    side panel asks you when the agent first wants it, or when you open it yourself: **This session** or
    **Always** (saved to the git-ignored `extension/config.local.json`). Patterns can also go there by hand,
    e.g. `{ "allowlist": ["grafana.example.zz", "*.staging.example"] }` (`*.x` = x and all subdomains).
-   The rule covers the `browser_*` tools too; the agent can ask but never grant.
+   The rule covers the `browser_*` tools too; the agent can ask but never grant. An allowed site can try to
+   instruct the agent through its own text (prompt injection), with your sign-ins at hand, so allow only sites
+   you trust. The shield in the panel header lists the sites you allowed and takes one back.
 
 5. **Certificates.** The shared browser holds your sign-ins, so a bad certificate on a real site stops it like
    any Chrome. Self-signed certificates are accepted on `localhost`, and on names your hosts file maps to
