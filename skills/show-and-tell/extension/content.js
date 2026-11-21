@@ -404,6 +404,8 @@
       const el = resolve(h).el;
       const r = el?.getBoundingClientRect();
       if (!r || (r.width === 0 && r.height === 0)) { show(n.box, false); show(n.label, false); continue; }
+      // Scrolled out of view: no box, and no label pinned to the window's edge pointing at nothing.
+      if (r.bottom < 0 || r.top > H || r.right < 0 || r.left > W) { show(n.box, false); show(n.label, false); continue; }
       const p = 4, x = r.left - p, y = r.top - p, w = r.width + 2 * p, bh = r.height + 2 * p;
       show(n.box, h.style !== 'none');
       n.box.style.transform = `translate(${x}px,${y}px)`;

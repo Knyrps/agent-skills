@@ -38,5 +38,28 @@ await run('host-question', async () => {
   await a.tool('browser_navigate', { url: LAB + '?flows' });
 });
 
+// The overlay's root is closed: read a node's inline style through the pierce tree.
+const overlayStyles = async (s, cls) => {
+  const { root } = await s.send('DOM.getDocument', { depth: -1, pierce: true });
+  const out = [], walk = n => { const a = n.attributes || [], at = {}; for (let i = 0; i < a.length; i += 2) at[a[i]] = a[i + 1];
+    if (at.class === cls && /--c:/.test(at.style || '')) out.push(at.style);
+    for (const c of [...(n.children || []), ...(n.shadowRoots || [])]) walk(c); };
+  walk(root); return out;
+};
+
+await run('offscreen-label', async () => {
+  await lab.send('Page.bringToFront');
+  await a.tool('highlight', { selector: '#tap', label: 'Tap here', scroll: false });
+  await lab.ev(`scrollTo(0, 0)`); await sleep(1200);
+  const before = await overlayStyles(lab, 'label');
+  check('a label shows next to its element in view', before.length === 1 && !/display: none/.test(before[0]), JSON.stringify(before));
+  await lab.ev(`scrollTo(0, document.body.scrollHeight)`); await sleep(600);
+  const after = await overlayStyles(lab, 'label');
+  check('scrolled out of view, the label hides instead of sticking to the edge', after.length === 1 && /display: none/.test(after[0]), JSON.stringify(after));
+  await lab.ev(`scrollTo(0, 0)`); await sleep(600);
+  check('back in view, the label shows again', !/display: none/.test((await overlayStyles(lab, 'label'))[0] || 'display: none'));
+  await a.tool('clear_highlights');
+});
+
 summary();
 await a.close(); process.exit(0);
