@@ -61,5 +61,27 @@ await run('offscreen-label', async () => {
   await a.tool('clear_highlights');
 });
 
+await run('thinking-colour', async () => {
+  await lab.send('Page.bringToFront'); await sleep(500);
+  // A message from the panel, so the "Thinking…" loader shows while no reply has come.
+  await pn.P(`chrome.runtime.sendMessage({ type: 'action', action: { type: 'question', text: 'Colour check', url: location.href } })`);
+  await a.wait(3); await sleep(800); // the agent picked it up: now it is thinking
+  const m = J(await pn.P(`(() => { const msg = $$d('sat-agent-message').find(e => e.working || e.hasAttribute('working')); const p = msg && msg.shadowRoot.querySelector('m3e-circular-progress-indicator');
+    const icon = $d('sat-app-icon'); return JSON.stringify({ loader: p && getComputedStyle(p).getPropertyValue('--m3e-progress-indicator-color').trim(), session: getComputedStyle(icon).getPropertyValue('--session').trim() }); })()`));
+  const norm = c => c && c.replace(/\s/g, '').toLowerCase();
+  check('the "Thinking…" loader takes the session colour', m.loader && m.session && (norm(m.loader) === norm(m.session) || norm(m.loader).includes(norm(m.session))), JSON.stringify(m));
+});
+
+await run('ended-highlights', async () => {
+  const b = await agent('agent-ended');
+  await b.tool('highlight', { selector: '#btn', label: 'From a session that ends', url: LAB + '?ended' });
+  const tabOf = await pn.P(`chrome.storage.session.get('highlights').then(x => (x.highlights || []).some(h => h.label === 'From a session that ends'))`);
+  check('the other session\'s highlight is there', tabOf);
+  await b.close();
+  let gone = false;
+  for (let i = 0; i < 60 && !gone; i++) { await sleep(500); gone = !(await pn.P(`chrome.storage.session.get('highlights').then(x => (x.highlights || []).some(h => h.label === 'From a session that ends'))`)); }
+  check('when that session ends, its highlights go with it', gone);
+});
+
 summary();
 await a.close(); process.exit(0);

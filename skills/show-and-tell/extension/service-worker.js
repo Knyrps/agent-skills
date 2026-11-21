@@ -462,6 +462,9 @@ function sweepTabs(live, endedIds) {
       }
       if (!e.ended && !gone.has(sid)) continue; // not reported as ended: someone may still need it
       if (!e.ended) {
+        // Nobody can move or clear an ended session's highlights any more: they go with it.
+        const { highlights = [] } = await S.get('highlights');
+        if (highlights.some(h => h.session === sid)) await S.set({ highlights: highlights.filter(h => h.session !== sid) });
         for (const x of tabs.filter(x => isPlaceholder(x.url))) await chrome.tabs.remove(x.id).catch(() => {});
         const kept = tabs.filter(x => !isPlaceholder(x.url));
         if (!kept.length) { delete map[sid]; changed = true; continue; }
