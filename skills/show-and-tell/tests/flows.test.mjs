@@ -1,6 +1,6 @@
 // End-to-end checks of agent flows through the panel, with real input and without scrolling for the tester:
 // what a user has to click must be on screen by itself.
-import { agent, panel, page, check, summary, sleep, LAB } from './lib.mjs';
+import { agent, panel, page, cdp, targets, check, summary, sleep, LAB, CDP } from './lib.mjs';
 const a = await agent();
 await a.tool('browser_navigate', { url: LAB + '?flows' });
 const pn = await panel();
@@ -137,6 +137,14 @@ await run('annotate-visible', async () => {
   check('a frame around the drop target lists what it shows', Array.isArray(els) && els.some(t => /Drop/.test(t)), JSON.stringify(els));
   check('it does not list cards scrolled out of view inside the swipe strip next to it', Array.isArray(els) && !els.some(t => /Product/.test(t)), JSON.stringify(els));
   await pn.P(`chrome.runtime.sendMessage({ type: 'annotationDrop' })`);
+});
+
+await run('new-tab', async () => {
+  const v = await (await fetch(CDP + '/json/version')).json(), br = await cdp(v.webSocketDebuggerUrl);
+  const { targetId } = await br.send('Target.createTarget', { url: 'chrome://newtab/' }); await sleep(2500);
+  const t = (await targets()).find(x => x.id === targetId);
+  check('a new tab stays Chrome\'s new tab page', t && !t.url.startsWith(LAB), t?.url);
+  await br.send('Target.closeTarget', { targetId }); br.close();
 });
 
 summary();

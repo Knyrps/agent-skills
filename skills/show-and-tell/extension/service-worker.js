@@ -1860,14 +1860,9 @@ async function pinLab() {
 }
 chrome.tabs.onUpdated.addListener((id, info) => { if (info.status === 'complete') pinLab().catch(() => {}); });
 
-// Chrome's own new tab page becomes the test page. Done by redirecting, not by overriding the new tab page,
-// which would make Chrome ask "Change back to Google?".
+// Chrome's new tab page stays Chrome's: the test page is the start page and one click away, but a new tab
+// the user opens is theirs.
 const NEW_TAB = /^chrome:\/\/(newtab|new-tab-page)\/?$/;
-const toLab = async tab => {
-  if (NEW_TAB.test(tab.pendingUrl || tab.url || '')) await chrome.tabs.update(tab.id, { url: await labUrl() }).catch(() => {});
-};
-chrome.tabs.onCreated.addListener(toLab);
-chrome.tabs.onUpdated.addListener((id, info, tab) => { if (info.url) toLab(tab); });
 
 chrome.webNavigation.onErrorOccurred.addListener(async d => {
   if (d.frameId !== 0 || /ERR_ABORTED/.test(d.error) || !(await isLab(d.url))) return;
