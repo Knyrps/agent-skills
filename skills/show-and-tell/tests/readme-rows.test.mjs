@@ -19,7 +19,7 @@ await lab.click('#load'); await sleep(800);
 check('card held', (await card()).state === 'held' && /Loading/.test(await box()), JSON.stringify(await card()));
 check('resume releases', cli('resume').released === 1 && (await sleep(500), /4 items/.test(await box())));
 const l = cli('pause', 'line', 'renderItems(data.items)');
-check('line', l.ok && /404/.test(l.at || ''), JSON.stringify(l));
+check('line', l.ok && /lab\.js:\d+/.test(l.at || '') && /renderItems\(data\.items\)/.test(l.code || ''), JSON.stringify(l));
 await lab.click('#load'); await sleep(800);
 check('card paused', (await card()).state === 'paused', JSON.stringify(await card()));
 const i = cli('inspect');

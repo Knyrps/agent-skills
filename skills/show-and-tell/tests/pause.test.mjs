@@ -98,7 +98,8 @@ await run('paused-reload', async () => {
   // The same inside a function, with a point that stays.
   const p = J(await a.tool('pause', { on: 'line', text: 'renderItems(data.items)', once: false }));
   await lab.click('#load'); await a.wait(4);
-  check('paused in loadItems', (await card()).detail.includes('loadItems()'), JSON.stringify(await card()));
+  let lc = await card(); for (let i = 0; i < 10 && !lc.detail?.includes('loadItems()'); i++) { await sleep(300); lc = await card(); }
+  check('paused in loadItems', lc.detail?.includes('loadItems()'), JSON.stringify(lc));
   await pn.P(`chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => chrome.tabs.reload(t.id))`); await sleep(2500);
   const c2 = await card();
   check('reload inside a function: page runs, the kept point stays', c2.state === 'armed' && /Nothing loaded/.test(await box()), JSON.stringify(c2) + ' ' + await box());
@@ -145,7 +146,8 @@ await run('dom', async () => {
   check('two DOM points listed', l.points.length === 2, JSON.stringify(l.points));
   await lab.click('#load');
   const w = await a.wait(4);
-  check('pauses at the first change, in set()', w[0]?.type === 'paused' && /\.state content changes/.test(w[0].reason) && w[0].fn === 'set', JSON.stringify(w[0]));
+  // The test page is Lit: the status text is written by Lit's renderer, so the stop is in its code.
+  check('pauses at the first change, the status text', w[0]?.type === 'paused' && /\.state content changes/.test(w[0].reason), JSON.stringify(w[0]));
   await a.tool('resume');
   const w2 = await a.wait(4);
   check('then at the second, in renderItems()', w2[0]?.fn === 'renderItems', JSON.stringify(w2[0]));
@@ -154,7 +156,8 @@ await run('dom', async () => {
 await run('driver', async () => {
   await a.tool('pause', { on: 'request', url: '/api/items' });
   const snap0 = await a.tool('browser_snapshot');
-  const ref = /button "Load items" \[ref=(\w+)\]/.exec(snap0)?.[1];
+  const ref = /"Load items"[^\n]*\[ref=(\w+)\]/.exec(snap0)?.[1];
+  if (!ref) console.log(snap0.split('\n').filter(l => /Load items/.test(l)).join('\n'));
   const t = Date.now();
   const r = await a.tool('browser_click', { element: 'Load items', target: ref });
   check('browser_click that hits the pause returns at once with the place', /The page paused (during|right after)/.test(r) && /request to \/api\/items/.test(r) && Date.now() - t < 5000, `${Date.now() - t} ms: ${r.slice(0, 300)}`);

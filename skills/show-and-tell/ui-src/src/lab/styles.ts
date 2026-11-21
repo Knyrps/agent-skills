@@ -52,12 +52,10 @@ export const styles = css`
   .zoom { align-self: center; color: var(--md-sys-color-on-surface-variant); transition: transform .05s; --m3e-icon-size: 28px; }
   #pinch { overflow: hidden; }
   .strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; scroll-behavior: auto; touch-action: pan-x; scrollbar-width: thin; }
-  .item { flex: none; width: 136px; height: 80px; border-radius: 12px; display: grid; place-items: center;
-    background: var(--md-sys-color-surface-container-low); color: var(--md-sys-color-on-surface); }
-  #drag { position: relative; z-index: 2; align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; height: 40px;
-    padding: 0 20px 0 12px; border-radius: 20px; cursor: grab;
-    background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
-  #drag m3e-icon { --m3e-icon-size: 20px; }
+  .item { flex: none; width: 136px; height: 80px; --m3e-card-padding: 16px; --m3e-outlined-card-container-color: var(--md-sys-color-surface-container-low); }
+  .item [slot="content"] { height: 100%; display: grid; place-items: center; }
+  /* The box keeps its place above the cards while a finger drags it (translate). */
+  #drag { position: relative; z-index: 2; cursor: grab; }
   #drop { --m3e-outlined-card-outline-color: var(--md-sys-color-outline); }
   #drop.over { --m3e-outlined-card-outline-color: var(--md-sys-color-primary);
     --m3e-outlined-card-container-color: var(--md-sys-color-primary-container); }

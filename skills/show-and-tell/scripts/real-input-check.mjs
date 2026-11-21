@@ -42,7 +42,7 @@ const deepText = n => [...(n.shadowRoot ? [n.shadowRoot] : []), ...n.childNodes]
 const deepActive = () => { let a = document.activeElement; while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement; return a; };`;
 
 function input(s) {
-  const ev = async e => { const r = await s.send('Runtime.evaluate', { expression: `(() => { ${DEEP}\nreturn (${e}); })()`, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300)); return r.result.value; };
+  const ev = async e => { const r = await s.send('Runtime.evaluate', { expression: `(() => { ${DEEP}\nreturn eval(${JSON.stringify(e)}); })()`, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300)); return r.result.value; };
   const at = async (sel, fx = .5, fy = .5) => { await ev(`$vis(${JSON.stringify(sel)}).scrollIntoView({ block: 'center', behavior: 'instant' })`); await sleep(80);
     return ev(`(() => { const r = $vis(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left + r.width * ${fx}, r.top + r.height * ${fy}]; })()`); };
   // A move with a button held reports that button, as Chrome's own input does (needed to start a drag).
@@ -96,7 +96,7 @@ check('right click opens the menu, choosing an item', menuOpen && /Chose Delete/
 [x, y] = await p.at('#hover'); await p.mouse('mouseMoved', x - 30, y); await p.mouse('mouseMoved', x, y); await sleep(100);
 check('hover', /Hovered/.test(await state('#hover')));
 [x, y] = await p.at('#scr'); await p.mouse('mouseWheel', x, y, { dy: 240 }); await sleep(400);
-check('wheel scroll inside a box', /Scrolled to [1-9]/.test(await state('#scr')));
+check('wheel scroll inside a box', /Scrolled to [1-9]/.test(await state('#scr-box')));
 [x, y] = await p.at('#strip'); await p.mouse('mouseWheel', x, y, { dx: 300 }); await sleep(300);
 check('horizontal wheel on the strip', /in view: ([2-9]|1\d|20)$/.test(await state('#strip-box')));
 await p.ev(`document.getElementById('strip').scrollLeft = 0`); await sleep(100);
@@ -218,7 +218,8 @@ check('Esc in the side panel cancels annotating', !(await doneButton()) && (awai
 await p.key(...ENTER); await sleep(200); // closes the note field if one opened
 const done = await doneButton(); if (done) await p.click(...done);
 await sleep(1500);
-check('marking an element and Done attaches the annotation', /Annotation · 1/.test(await q.ev(`$d('#annot-chip-text')?.textContent || ''`)));
+const chipText = await q.ev(`$d('#annot-chip-text')?.textContent.trim() || ''`);
+check('marking an element and Done attaches the annotation', /Annotation · 1/.test(chipText), `chip "${chipText}", Done ${done ? 'found' : 'not found'}, label ${await label()}`);
 [x, y] = await q.at('#q'); await q.click(x, y); await q.type('Is this the right target?');
 check('typing enables Send', !(await q.ev(`$d('#send').disabled`)));
 await q.key(...ENTER); await sleep(1200);
@@ -234,7 +235,8 @@ await sleep(500);
 const recLabel = await q.ev(`$d('#rec-label').textContent`);
 check('Record counts the steps while recording', /Stop · [2-9] steps/.test(recLabel), recLabel);
 [x, y] = await q.at('#rec'); await q.click(x, y); await sleep(500);
-check('Stop attaches the recording', /Recording · \d+ steps/.test(await q.ev(`$d('#rec-chip-text')?.textContent || ''`)));
+const recChip = await q.ev(`$d('#rec-chip-text')?.textContent.trim() || ''`);
+check('Stop attaches the recording', /Recording · \d+ steps/.test(recChip), `chip "${recChip}", button ${await q.ev(`$d('#rec-label').textContent`)}`);
 [x, y] = await q.at('#send'); await q.click(x, y); await sleep(1200);
 acts = await queue();
 const rec = acts.find(a => a.type === 'recording');

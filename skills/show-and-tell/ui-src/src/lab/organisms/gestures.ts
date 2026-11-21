@@ -1,6 +1,7 @@
 import { html } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import '@m3e/web/button';
+import '@m3e/web/card';
 import '@m3e/web/menu';
 import type { M3eMenuElement } from '@m3e/web/menu';
 import '../atoms/icons.js';
@@ -167,8 +168,8 @@ export class LabGestures extends LabElement {
   protected override updated() { this.dropZone.classList.toggle('over', this.over); }
 
   private box() {
-    return html`<div id="drag" class="label-l" draggable="true" @dragstart=${this.dragStart} @pointerdown=${this.dragDown}
-      @pointermove=${this.dragMove} @pointerup=${this.dragUp}><m3e-icon name="drag_indicator"></m3e-icon>Box</div>`;
+    return html`<div><m3e-button id="drag" variant="tonal" draggable="true" @dragstart=${this.dragStart} @pointerdown=${this.dragDown}
+      @pointermove=${this.dragMove} @pointerup=${this.dragUp}><m3e-icon slot="icon" name="drag_indicator"></m3e-icon>Box</m3e-button></div>`;
   }
 
   protected override render() {
@@ -182,7 +183,7 @@ export class LabGestures extends LabElement {
       ${card({ id: 'strip-box', title: 'Swipe strip', state: c.get('strip-box'), wide: true }, html`
         <div class="strip" id="strip" @pointerdown=${this.stripDown} @pointermove=${this.stripMove}
           @pointerup=${() => { this.stripDrag = null; }} @scroll=${this.stripScroll}>
-          ${PRODUCTS.map(n => html`<div class="item label-l" data-n=${n}>Product ${n}</div>`)}
+          ${PRODUCTS.map(n => html`<m3e-card class="item" variant="outlined" data-n=${n}><div slot="content" class="label-l">Product ${n}</div></m3e-card>`)}
         </div>`)}
       ${card({ id: 'drag-box', title: 'Drag me' }, this.dropped ? '' : this.box())}
       ${card({ id: 'drop', title: 'Drop here', state: c.get('drop'), outlined: true }, this.dropped ? this.box() : '')}

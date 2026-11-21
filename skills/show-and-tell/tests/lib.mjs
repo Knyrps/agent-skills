@@ -41,7 +41,7 @@ export async function cdp(wsUrl) {
   let id = 0; const pend = new Map(), events = [];
   ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id) { pend.get(m.id)?.(m.result ?? { error: m.error }); pend.delete(m.id); } else events.push(m); };
   const send = (method, params = {}) => new Promise(r => { const n = ++id; pend.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
-  const ev = async e => { const r = await Promise.race([send('Runtime.evaluate', { expression: `(() => { ${DEEP}\nreturn (${e}); })()`, returnByValue: true, awaitPromise: true }), sleep(4000).then(() => { throw new Error('NO ANSWER (page paused?)'); })]); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
+  const ev = async e => { const r = await Promise.race([send('Runtime.evaluate', { expression: `(() => { ${DEEP}\nreturn eval(${JSON.stringify(e)}); })()`, returnByValue: true, awaitPromise: true }), sleep(4000).then(() => { throw new Error('NO ANSWER (page paused?)'); })]); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
   return { send, ev, events, close: () => ws.close() };
 }
 export const targets = async () => (await fetch(CDP + '/json/list')).json();

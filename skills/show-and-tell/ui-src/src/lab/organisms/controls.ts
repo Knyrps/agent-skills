@@ -60,10 +60,11 @@ export class LabControls extends LabElement {
   private agree(e: Event) {
     const checked = (e.currentTarget as M3eCheckboxElement).checked;
     this.cards.set('agree-box', checked ? 'Checked' : 'Unchecked');
-    this.report('checkbox ' + checked, e);
+    // M3E fires change itself (untrusted); it is credited to whoever clicked, like any component event.
+    void e; this.report('checkbox ' + checked, 'component');
   }
   private volume(e: Event) { this.cards.set('vol-box', 'Volume ' + (e.currentTarget as M3eSliderThumbElement).value); }
-  private volumeChange(e: Event) { this.report('slider ' + (e.currentTarget as M3eSliderThumbElement).value, e); }
+  private volumeChange(e: Event) { this.report('slider ' + (e.currentTarget as M3eSliderThumbElement).value, 'component'); }
   private openDialog(e: Event) { void this.dialog.show(); this.cards.set('dlg-box', 'Dialog open', false); this.report('dialog opened', e); }
   private confirmDialog(e: Event) { this.cards.set('dlg-box', 'Dialog confirmed'); this.report('dialog confirmed', e); }
 

@@ -1,6 +1,6 @@
 # Plan: UI rewrite to Material 3 Expressive (Lit + @m3e/web, TypeScript)
 
-Status: started. Steps 1 to 6 are done. Work through the steps in order and commit each step separately. The
+Status: started. Steps 1 to 7 are done. Work through the steps in order and commit each step separately. The
 existing checks (`node tests/run.mjs`) describe the old UI and need not pass during the rewrite; new
 ones are written after it (step 7). The rules that hold throughout are in `AGENTS.md`.
 
@@ -86,7 +86,8 @@ elements while the page scrolls) stay direct style writes, not re-renders.
    ids), built to `scripts/lab-vendor/lab.js`; `scripts/lab.mjs` only serves it. Debug options are a side sheet.
 6. **Done.** `@material/web`, `extension/vendor/material-web.js`, `scripts/lab-vendor/material-lab.js` and their
    entry files are gone; `vendor-src/` only writes the colour tokens. README: "Rebuild the UI".
-7. New tests for the new UI, replacing the old checks in `tests/` and `scripts/real-input-check.mjs`.
+7. **Done.** Tests for the new UI: `tests/` and `scripts/real-input-check.mjs` look through shadow roots;
+   `tests/ui.test.mjs` covers the test page, the slider, the Annotate toolbar and the session colour.
 
 ## Testing
 

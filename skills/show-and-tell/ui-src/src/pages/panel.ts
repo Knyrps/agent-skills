@@ -67,6 +67,13 @@ export class SatPanelPage extends LitElement {
   @query('sat-composer') private composer!: SatComposer;
   @query('sat-conversation') private conversation!: SatConversation;
 
+  // Snackbars open in the top layer at a fixed distance from the bottom (M3E's --m3e-snackbar-margin). Keep them
+  // just above the composer, so they never cover its buttons.
+  private dock = new ResizeObserver(([e]) => document.documentElement.style.setProperty('--m3e-snackbar-margin',
+    `${Math.round(window.innerHeight - (e.target as HTMLElement).getBoundingClientRect().top) + 8}px`));
+  private docked: Element | null = null;
+  override updated() { if (this.composer && this.composer !== this.docked) { this.dock.disconnect(); this.dock.observe(this.docked = this.composer); } }
+
   override connectedCallback() {
     super.connectedCallback();
     // The open port tells the worker (and through it the agent) that the panel is visible.

@@ -17413,13 +17413,14 @@ var LabControls = class extends LabElement {
   agree(e7) {
     const checked = e7.currentTarget.checked;
     this.cards.set("agree-box", checked ? "Checked" : "Unchecked");
-    this.report("checkbox " + checked, e7);
+    void e7;
+    this.report("checkbox " + checked, "component");
   }
   volume(e7) {
     this.cards.set("vol-box", "Volume " + e7.currentTarget.value);
   }
   volumeChange(e7) {
-    this.report("slider " + e7.currentTarget.value, e7);
+    this.report("slider " + e7.currentTarget.value, "component");
   }
   openDialog(e7) {
     void this.dialog.show();
@@ -19959,8 +19960,8 @@ var LabGestures = class extends LabElement {
     this.dropZone.classList.toggle("over", this.over);
   }
   box() {
-    return b2`<div id="drag" class="label-l" draggable="true" @dragstart=${this.dragStart} @pointerdown=${this.dragDown}
-      @pointermove=${this.dragMove} @pointerup=${this.dragUp}><m3e-icon name="drag_indicator"></m3e-icon>Box</div>`;
+    return b2`<div><m3e-button id="drag" variant="tonal" draggable="true" @dragstart=${this.dragStart} @pointerdown=${this.dragDown}
+      @pointermove=${this.dragMove} @pointerup=${this.dragUp}><m3e-icon slot="icon" name="drag_indicator"></m3e-icon>Box</m3e-button></div>`;
   }
   render() {
     const c4 = this.cards;
@@ -19977,7 +19978,7 @@ var LabGestures = class extends LabElement {
           @pointerup=${() => {
       this.stripDrag = null;
     }} @scroll=${this.stripScroll}>
-          ${PRODUCTS.map((n5) => b2`<div class="item label-l" data-n=${n5}>Product ${n5}</div>`)}
+          ${PRODUCTS.map((n5) => b2`<m3e-card class="item" variant="outlined" data-n=${n5}><div slot="content" class="label-l">Product ${n5}</div></m3e-card>`)}
         </div>`)}
       ${card({ id: "drag-box", title: "Drag me" }, this.dropped ? "" : this.box())}
       ${card({ id: "drop", title: "Drop here", state: c4.get("drop"), outlined: true }, this.dropped ? this.box() : "")}
@@ -20691,12 +20692,10 @@ var styles = i`
   .zoom { align-self: center; color: var(--md-sys-color-on-surface-variant); transition: transform .05s; --m3e-icon-size: 28px; }
   #pinch { overflow: hidden; }
   .strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; scroll-behavior: auto; touch-action: pan-x; scrollbar-width: thin; }
-  .item { flex: none; width: 136px; height: 80px; border-radius: 12px; display: grid; place-items: center;
-    background: var(--md-sys-color-surface-container-low); color: var(--md-sys-color-on-surface); }
-  #drag { position: relative; z-index: 2; align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; height: 40px;
-    padding: 0 20px 0 12px; border-radius: 20px; cursor: grab;
-    background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
-  #drag m3e-icon { --m3e-icon-size: 20px; }
+  .item { flex: none; width: 136px; height: 80px; --m3e-card-padding: 16px; --m3e-outlined-card-container-color: var(--md-sys-color-surface-container-low); }
+  .item [slot="content"] { height: 100%; display: grid; place-items: center; }
+  /* The box keeps its place above the cards while a finger drags it (translate). */
+  #drag { position: relative; z-index: 2; cursor: grab; }
   #drop { --m3e-outlined-card-outline-color: var(--md-sys-color-outline); }
   #drop.over { --m3e-outlined-card-outline-color: var(--md-sys-color-primary);
     --m3e-outlined-card-container-color: var(--md-sys-color-primary-container); }

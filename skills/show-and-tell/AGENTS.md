@@ -72,6 +72,8 @@ like the M3E ones and use the same tokens. Per-frame position updates stay direc
 - `m3e-form-field` and a plain `<input>` inside it do not shrink by themselves: give them a width.
 - Snackbars (`M3eSnackbar.open`) open in the top layer, outside any wrapper: tokens and font must be on
   `:root`.
+  They sit `--m3e-snackbar-margin` above the bottom (16px by default), over the composer's buttons: the
+  panel keeps that margin at the composer's height plus 8px.
 - Buttons have an invisible 48px touch area that is larger than their box. It is not an overflow bug.
 - `m3e-menu-trigger for="…"` looks its menu up once, when it first renders: the menu must already be in the DOM.
 - A menu item's `trailing-icon` slot is a 20px icon box (`!important`), and a submenu item uses it for its
