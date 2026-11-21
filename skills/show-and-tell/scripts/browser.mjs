@@ -74,6 +74,9 @@ async function start() {
       // The tabs (and the agents' tab groups) of the last run come back; the extension hands each group
       // back to its session or ungroups it. No "Restore pages?" bubble after a hard exit.
       '--restore-last-session', '--hide-crash-restore-bubble',
+      // The agent works while the user looks at other windows: a covered window keeps painting and running its
+      // timers, or highlights, Annotate, Record, pausing and real input stall until the window is in front again.
+      '--disable-features=CalculateNativeWinOcclusion', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
       '--no-first-run', '--no-default-browser-check', '--start-maximized'],
     { detached: true, stdio: 'ignore' }).unref();
     for (let i = 0; i < 40 && !(await version()); i++) await sleep(250);
