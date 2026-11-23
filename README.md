@@ -41,3 +41,8 @@ video of the checkout".
 ## Manual install
 
 See [skills/show-and-tell/README.md](skills/show-and-tell/README.md#install).
+
+## License
+
+[MIT](LICENSE). The built extension files bundle a few libraries; their notices are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
