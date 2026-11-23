@@ -1,7 +1,7 @@
 // Owns the WebSocket to the bridge, the action outbox and the highlight list.
 // State lives in chrome.storage.session so it survives service-worker restarts and navigations;
 // the side panel and the content scripts render from it.
-import { loadConfig, reloadConfig, hostAllowed, pageKey } from './allow.js';
+import { loadConfig, hostAllowed, pageKey } from './allow.js';
 import { stepTiming, estimateMs, pickSize, bitrate } from './video-plan.js';
 import { createPauser } from './pause.js';
 
@@ -22,38 +22,50 @@ chrome.runtime.onInstalled.addListener(() => connect());
 let lock = Promise.resolve();
 const serial = fn => { const p = lock.then(fn); lock = p.catch(() => {}); return p; };
 // ------------------------------------------------------------------ allowed hosts
-// Config patterns, plus what the bridge pushes: the hosts file's loopback names, current config files and
-// this session's grants. Other hosts need the user's answer in the panel; the agent can only ask.
-// "This session" grants also live here (until the browser restarts) and go back to a restarted bridge.
-let hostState = { allow: [], saved: [], loopback: [], granted: [] }, localGrants = [];
-const hostsReady = S.get(['hostState', 'localGrants']).then(r => {
-  if (r.hostState) hostState = r.hostState;
+// This machine is always allowed: loopback addresses, and the hosts file's loopback names, which the bridge
+// reads and pushes. Every other host needs the user's click in the panel, and those grants live here, inside
+// the browser: "This session" until it restarts (localGrants), "Always" in the extension's storage
+// (alwaysHosts). No file grants a host, so nothing the agent can edit does; the bridge only gets a copy, and
+// the agent can only ask.
+let loopbackNames = [], localGrants = [], alwaysHosts = [];
+const hostsReady = Promise.all([S.get(['hostState', 'localGrants']), chrome.storage.local.get('alwaysHosts')]).then(([r, l]) => {
+  loopbackNames = r.hostState?.loopback || [];
   localGrants = r.localGrants || [];
+  alwaysHosts = l.alwaysHosts || [];
+  // After a browser restart the panel's copy is gone, the "Always" grants are not.
+  return S.set({ hostState: { loopback: loopbackNames, saved: alwaysHosts, granted: localGrants } });
 });
 const allowed = async url => {
   await hostsReady;
-  const { allow, loopback, granted } = hostState;
-  return hostAllowed(url, [...(await loadConfig()).allowlist, ...allow, ...loopback, ...granted, ...localGrants]);
+  return hostAllowed(url, [...loopbackNames, ...alwaysHosts, ...localGrants]);
 };
-const resendGrants = async () => { await hostsReady; for (const host of localGrants) send({ type: 'hostGrant', host, mode: 'session' }); };
 const hostOf = url => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } };
-
+// The panel reads hostState (saved = always, granted = this session); the bridge gets the same two lists.
+async function publishHosts() {
+  await hostsReady;
+  await S.set({ hostState: { loopback: loopbackNames, saved: alwaysHosts, granted: localGrants } });
+  send({ type: 'hostState', always: alwaysHosts, session: localGrants });
+}
+// From the bridge: the hosts file's loopback names, nothing else.
 async function setHostState(next) {
-  reloadConfig();
-  hostState = { allow: next.allow || [], saved: next.saved || [], loopback: next.loopback || [], granted: next.granted || [] };
-  await S.set({ hostState: { ...hostState, granted: [...new Set([...hostState.granted, ...localGrants])] } });
+  await hostsReady;
+  loopbackNames = (Array.isArray(next.loopback) ? next.loopback : []).map(String);
+  await S.set({ hostState: { loopback: loopbackNames, saved: alwaysHosts, granted: localGrants } });
 }
 
-// Records a grant here at once (the bridge confirms with its next push) and wakes pages on that host,
-// whose content script stayed idle.
-async function grantHost(host, mode, { tell = true } = {}) {
+// Records the user's grant and wakes pages on that host, whose content script stayed idle.
+async function grantHost(host, mode) {
   await hostsReady;
-  if (!localGrants.includes(host)) {
+  host = String(host || '').toLowerCase();
+  if (mode === 'always' && !alwaysHosts.includes(host)) {
+    alwaysHosts = [...alwaysHosts, host];
+    await chrome.storage.local.set({ alwaysHosts });
+  }
+  if (mode !== 'always' && !localGrants.includes(host) && !alwaysHosts.includes(host)) {
     localGrants = [...localGrants, host];
     await S.set({ localGrants });
-    await setHostState(hostState);
   }
-  if (tell) send({ type: 'hostGrant', host, mode });
+  await publishHosts();
   for (const t of await chrome.tabs.query({})) {
     if (hostOf(t.url || '') === host) chrome.tabs.sendMessage(t.id, { cmd: 'recheck' }).catch(() => {});
   }
@@ -107,11 +119,24 @@ const panels = new Set();
 let video = null; // the recording in progress, see "video recording" below
 S.set({ video: null });
 
+// The key this browser was started with (scripts/browser.mjs hands it over through open-panel.html). The bridge
+// refuses a socket without it, so only the extension of the browser the skill started can report grants.
+const bridgeKey = async () => (await chrome.storage.local.get('bridgeKey')).bridgeKey || '';
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.bridgeKey) return;
+  // A new key (a new browser launch): connect with it now instead of at the next retry.
+  clearTimeout(retry); retry = null; backoff = 1000;
+  if (ws) ws.close(); else connect();
+});
+
 async function connect() {
   if (ws) return;
   const { bridgeUrl } = await loadConfig();
+  const key = await bridgeKey();
   if (ws) return;
-  const sock = new WebSocket(bridgeUrl);
+  // Not handed over yet: the launcher does that right after start, and the change above connects.
+  if (!key) return;
+  const sock = new WebSocket(`${bridgeUrl}?key=${encodeURIComponent(key)}`);
   ws = sock;
   sock.onopen = () => {
     backoff = 1000;
@@ -120,7 +145,7 @@ async function connect() {
     clearInterval(ping);
     ping = setInterval(() => send({ type: 'ping' }), 20000); // traffic keeps the worker alive
     send({ type: 'panel', open: panels.size > 0 });
-    resendGrants();
+    publishHosts();
     pauser.resend();
     sessionTabs().then(map => send({ type: 'knownSessions', sessions: Object.entries(map).filter(([, e]) => e.pid && !e.ended)
       .map(([id, e]) => ({ id, name: e.name, color: e.color, pid: e.pid })) }));
@@ -610,11 +635,28 @@ async function command(m) {
       // paused: the call fails at once instead of hanging; armed: it watches for a pause while it runs.
       return { ok: true, tabId: t.id, url: t.pendingUrl || t.url, ...(pauser.paused(t.id) && { paused: pauser.paused(t.id) }), ...(pauser.has(t.id) && { armed: true }) };
     }
-    // The bridge asks on behalf of the browser_* tools; it records the grant itself.
+    // The bridge asks on behalf of the browser_* tools. A host the user already allowed is not asked again
+    // (the bridge may not have this browser's list yet, right after it started).
     case 'askHost': {
-      const decision = await askUser(String(m.host), m.why, m.who);
-      if (decision === 'session' || decision === 'always') await grantHost(String(m.host), decision, { tell: false });
+      const host = String(m.host || '').toLowerCase();
+      await hostsReady;
+      if (alwaysHosts.includes(host) || localGrants.includes(host)) { await publishHosts(); return { ok: true, decision: alwaysHosts.includes(host) ? 'always' : 'session' }; }
+      const decision = await askUser(host, m.why, m.who);
+      if (decision === 'session' || decision === 'always') await grantHost(host, decision);
       return { ok: true, decision };
+    }
+    // Where the session's tab is now, whether that page is allowed, and which sites it embeds that are not:
+    // the driver asks after each browser_* call, so a page that moved on or frames another site gives nothing away.
+    case 'pageCheck': {
+      const tab = m.session ? (await sessionTabs())[m.session] : null;
+      const t = tab?.tabId != null ? await chrome.tabs.get(tab.tabId).catch(() => null) : null;
+      if (!t) return { ok: false, error: 'no tab' };
+      const url = t.url || '', web = /^https?:/i.test(url);
+      const foreign = new Set();
+      for (const f of (await chrome.webNavigation.getAllFrames({ tabId: t.id }).catch(() => null)) || []) {
+        if (f.frameId !== 0 && /^https?:/i.test(f.url || '') && !(await allowed(f.url))) foreign.add(hostOf(f.url));
+      }
+      return { ok: true, url, allowed: !web || await allowed(url), foreign: [...foreign] };
     }
     case 'recordTour': {
       const busy = await tourBusy(m);
@@ -1549,7 +1591,7 @@ async function runVideo(v) {
     // the video gets real detail beyond the window's pixels (up to 1080 lines, at most twice the window).
     const k = opts.hidpi === false ? 1 : Math.min(2, Math.max(1, 1080 / v.height));
     v.width = even(v.width * k); v.height = even(v.height * k);
-    const info = await videoCmd({ cmd: 'start', streamId, width: v.width, height: v.height, fps: 30,
+    const info = await videoCmd({ cmd: 'start', streamId, key: (await chrome.storage.local.get('bridgeKey')).bridgeKey || '', width: v.width, height: v.height, fps: 30,
       bitrate: bitrate(v.width, v.height), name: opts.name || title });
     mimeType = info.mimeType;
     v.onCamera = true;
@@ -1724,10 +1766,10 @@ async function handle(m, sender) {
       if (!host) return { ok: false };
       await hostsReady;
       localGrants = localGrants.filter(h => h !== host);
+      alwaysHosts = alwaysHosts.filter(h => h !== host);
       await S.set({ localGrants });
-      await setHostState({ ...hostState, granted: hostState.granted.filter(h => h !== host), saved: hostState.saved.filter(h => h !== host),
-        allow: hostState.allow.filter(h => h !== host || !hostState.saved.includes(h)) });
-      send({ type: 'hostRevoke', host });
+      await chrome.storage.local.set({ alwaysHosts });
+      await publishHosts();
       // What the agent showed there goes too; the bridge refuses its next call on that host.
       const { highlights = [] } = await S.get('highlights');
       await S.set({ highlights: highlights.filter(h => hostOf(h.pageKey || '') !== host) });

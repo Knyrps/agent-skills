@@ -22,7 +22,7 @@ import type { SatConversation } from '../organisms/conversation.js';
 import type { DotState } from '../atoms/status-dot.js';
 import type { AllowMode, AttachmentKind, ChatMessage, HostDecision, PauseChoice, PauseState, Suggestion, VideoView } from '../types.js';
 import { GROUP } from '../session-colours.js';
-import { hostAllowed, loadConfig, reloadConfig } from '../../../extension/allow.js';
+import { hostAllowed } from '../../../extension/allow.js';
 
 const S = chrome.storage.session;
 const KEYS = ['step', 'steps', 'waiting', 'listener', 'connected', 'outbox', 'tour', 'tourIndex', 'tourRunning', 'tourTab', 'tourHome',
@@ -85,7 +85,6 @@ export class SatPanelPage extends LitElement {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'session') return;
       void this.load();
-      if (changes.hostState) reloadConfig(); // config.local.json may have changed with it
       if (changes.hostState || changes.connected) void this.refreshTab();
     });
     chrome.tabs.onActivated.addListener(() => void this.refreshTab());
@@ -113,7 +112,7 @@ export class SatPanelPage extends LitElement {
     this.frontTabId = id;
     this.placeholder = this.tabUrl.startsWith(chrome.runtime.getURL('tab.html'));
     const { hostState: hs = {} } = await S.get('hostState');
-    this.tabAllowed = hostAllowed(this.tabUrl, [...(await loadConfig()).allowlist, ...(hs.allow || []), ...(hs.loopback || []), ...(hs.granted || [])]);
+    this.tabAllowed = hostAllowed(this.tabUrl, [...(hs.loopback || []), ...(hs.saved || []), ...(hs.granted || [])]);
     if (changed) { await this.updateComplete; this.conversation?.jumpToEnd(); }
   }
 
@@ -236,7 +235,7 @@ export class SatPanelPage extends LitElement {
     const q = questions[0];
 
     const recording = d.recording, on = !!recording;
-    // The user's own grants: "Always" ones from config.local.json, the rest only for this session.
+    // The user's own grants: "Always" ones kept in the extension's storage, the rest only for this session.
     const hs = d.hostState || {};
     const allowedHosts: AllowedHost[] = [...new Set([...(hs.saved || []), ...(hs.granted || [])])].sort()
       .map(host => ({ host, always: (hs.saved || []).includes(host) }));
@@ -275,7 +274,7 @@ export class SatPanelPage extends LitElement {
           request=${d.demoRequest?.prompt || ''} name=${me?.name || ''} ?empty=${!shown.length && !d.demoRequest && !questions.length}
           @sat-suggest=${(e: CustomEvent<Suggestion>) => this.onSuggest(e.detail)}>
           ${q ? html`<sat-host-question id="host-ask" host=${q.host} more=${questions.length - 1} ?narrow=${this.narrow}
-            text="${q.who || 'The agent'} wants to ${q.why || 'work on this site'}. It could then read and act on this site in the shared browser, with your sign-ins. Text on the site can also try to instruct the agent, so allow only sites you trust. &quot;Always&quot; saves it in config.local.json; you can take it back from the shield in the header."
+            text="${q.who || 'The agent'} wants to ${q.why || 'work on this site'}. It could then read and act on this site in the shared browser, with your sign-ins. Text on the site can also try to instruct the agent, so allow only sites you trust. &quot;Always&quot; keeps it allowed after a browser restart; you can take it back from the shield in the header."
             @sat-host-decision=${(e: CustomEvent<HostDecision>) => send({ type: 'hostDecision', host: q.host, decision: e.detail })}></sat-host-question>` : nothing}
         </sat-conversation>
 

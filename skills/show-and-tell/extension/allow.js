@@ -1,19 +1,18 @@
 // Shared by the service worker, the side panel and the bridge. config.json holds the defaults;
-// config.local.json (git-ignored, optional) adds allowed hosts and video branding for this machine.
-// Hosts on this machine (loopback) are always allowed; the bridge adds the hosts file's loopback names
-// and the hosts the user allowed from the panel.
+// config.local.json (git-ignored, optional) adds settings for this machine, such as video branding.
+// Neither file allows a host: files can be edited by the agent. Hosts on this machine (loopback) are always
+// allowed, the bridge adds the hosts file's loopback names, and every other host is the user's click in the
+// panel, kept inside the browser (see "allowed hosts" in service-worker.js).
 let configP = null;
 
 const read = file => fetch(chrome.runtime.getURL(file)).then(r => (r.ok ? r.json() : {})).catch(() => ({}));
-
-// config.local.json changes on disk when the user allows or takes back a host: read it again after that.
-export const reloadConfig = () => { configP = null; };
+const DEFAULT_BRIDGE = 'ws://127.0.0.1:47613/ext';
+// The bridge is a program on this machine; an address elsewhere in the config is not followed.
+const localBridge = url => { try { const u = new URL(url); return u.protocol === 'ws:' && isLoopbackHost(u.hostname) ? url : ''; } catch { return ''; } };
 
 export function loadConfig() {
   configP ||= Promise.all([read('config.json'), read('config.local.json')]).then(([c, local]) => ({
-    bridgeUrl: local.bridgeUrl || c.bridgeUrl || 'ws://127.0.0.1:47613/ext',
-    allowlist: [...(Array.isArray(c.allowlist) ? c.allowlist : ['localhost']),
-      ...(Array.isArray(local.allowlist) ? local.allowlist : [])],
+    bridgeUrl: localBridge(local.bridgeUrl) || localBridge(c.bridgeUrl) || DEFAULT_BRIDGE,
     // { name, logo (file in extension/, e.g. "local/logo.svg"), accent (CSS colour), footer }
     branding: { ...(c.branding || {}), ...(local.branding || {}) },
     // Close an ended session's tabs 15 minutes after it ended, instead of only ungrouping them.

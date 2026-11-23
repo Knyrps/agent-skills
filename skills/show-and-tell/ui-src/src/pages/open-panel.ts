@@ -1,5 +1,7 @@
 // Helper tab used by scripts/browser.mjs: sidePanel.open() needs a real user gesture, so the script sends
 // a trusted click (CDP Input) to this page, which opens the panel and closes itself. A click anywhere counts.
+// The script also passes this browser's bridge key in the address; the page stores it for the service worker,
+// which connects to the bridge with it.
 import { LitElement, css, html } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import '@m3e/web/button';
@@ -15,6 +17,8 @@ export class SatOpenPanelPage extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    const key = new URLSearchParams(location.hash.slice(1)).get('key');
+    if (key) { void chrome.storage.local.set({ bridgeKey: key }); history.replaceState(null, '', location.pathname); }
     void chrome.windows.getCurrent().then(w => { this.windowId = w.id ?? null; document.title = 'show-and-tell:ready'; });
     document.addEventListener('click', () => {
       if (this.windowId == null) return;

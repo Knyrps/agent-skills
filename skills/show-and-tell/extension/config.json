@@ -1,4 +1,3 @@
 {
-  "bridgeUrl": "ws://127.0.0.1:47613/ext",
-  "allowlist": []
+  "bridgeUrl": "ws://127.0.0.1:47613/ext"
 }

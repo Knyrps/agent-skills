@@ -8,7 +8,7 @@ const TYPES = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1.4d0028', '
   'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let port = null, rec = null, stream = null, base = '', id = '', offset = 0, upload = Promise.resolve(), failed = '';
+let port = null, rec = null, stream = null, base = '', key = '', id = '', offset = 0, upload = Promise.resolve(), failed = '';
 let startedAt = 0, pausedAt = 0, pausedTotal = 0, ending = null, heartbeat = 0;
 
 const now = () => (startedAt ? Math.max(0, (pausedAt || performance.now()) - startedAt - pausedTotal) : 0);
@@ -16,7 +16,7 @@ const post = m => { try { port?.postMessage(m); } catch {} };
 
 async function bridge(method, path, body) {
   const r = await fetch(base + path, { method, body,
-    headers: body && typeof body === 'string' ? { 'Content-Type': 'application/json' } : {} });
+    headers: { 'X-Show-And-Tell-Key': key, ...(body && typeof body === 'string' ? { 'Content-Type': 'application/json' } : {}) } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `bridge answered ${r.status}`);
   return j;
@@ -75,6 +75,7 @@ async function feed(s) {
 async function start(m) {
   const { bridgeUrl } = await loadConfig();
   base = bridgeUrl.replace(/^ws/, 'http').replace(/\/ext$/, '');
+  key = m.key || '';
   constraints = { minWidth: m.width, maxWidth: m.width, minHeight: m.height, maxHeight: m.height, maxFrameRate: m.fps, minFrameRate: m.minFps ?? m.fps };
   gen = new MediaStreamTrackGenerator({ kind: 'video' });
   writer = gen.writable.getWriter();

@@ -163,6 +163,8 @@ async function runMcp() {
     // Each session works in its own tab, so parallel sessions don't navigate under each other.
     tab: () => call('POST', '/tab', { session: SESSION, label: LABEL }).catch(e => ({ ok: false, error: e.message })),
     busy: on => call('POST', '/busy', { session: SESSION, on }).catch(() => {}),
+    // The page a call ended on, and the sites it embeds, are checked before its result is handed on.
+    pageCheck: () => call('POST', '/page-check', { session: SESSION }),
     // A call on a page with pause points returns when the page stops at one, instead of hanging.
     pauseWait: (signal, now) => call('GET', `/pause/wait?session=${SESSION}${now ? '&now=1' : ''}`, null, { signal }).then(r => r?.paused || null, () => null),
     // The panel shows what the agent does in the browser, also when nothing visible changes.

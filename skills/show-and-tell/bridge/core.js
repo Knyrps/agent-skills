@@ -27,6 +27,24 @@ if (!process.env.DEMO_DATA && !fs.existsSync(DATA)) {
   try { fs.renameSync(path.join(DATA_ROOT, 'demonstrate'), DATA); } catch {}
 }
 const QUEUE_FILE = path.join(DATA, 'queue.json');
+// The key the extension shows when it connects, so the bridge takes the user's grants only from the browser it
+// started: scripts/browser.mjs makes a new one for every browser launch and hands it to the extension. A web
+// page cannot have it, nor can another user of this machine (the file is the owner's alone). A program running
+// as this user can read it: this is not a boundary against the agent's own shell.
+const KEY_FILE = path.join(DATA, 'bridge.key');
+export function bridgeKey({ rotate = false } = {}) {
+  if (!rotate) { try { const k = fs.readFileSync(KEY_FILE, 'utf8').trim(); if (k.length >= 32) return k; } catch {} }
+  const k = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(DATA, { recursive: true });
+  fs.writeFileSync(KEY_FILE, k + '\n', { mode: 0o600 });
+  try { fs.chmodSync(KEY_FILE, 0o600); } catch {}
+  return k;
+}
+const keyMatches = given => {
+  let k = ''; try { k = fs.readFileSync(KEY_FILE, 'utf8').trim(); } catch {}
+  const a = Buffer.from(String(given || '')), b = Buffer.from(k);
+  return k.length >= 32 && a.length === b.length && crypto.timingSafeEqual(a, b);
+};
 
 // Every OpenCode session starts its own bridge; one owns the port. The newest code wins: an older
 // owner hands the port over when a newer bridge asks (POST /yield), so an edit takes effect without
@@ -229,9 +247,9 @@ export function startOwner({ standalone = false } = {}) {
       flush();
     };
     setInterval(announce, 15000).unref();
-    // Allowed hosts: the extension gets the full picture on connect and whenever it changes (a config
-    // edit, a hosts-file edit, a grant), so it decides on its own even while the bridge is away.
-    const hosts = createHosts({ extDir: path.join(HERE, '..', 'extension') });
+    // Allowed hosts: the extension keeps the user's grants and tells them over its socket; this side adds the
+    // hosts file's loopback names and sends them on connect and whenever the file changes.
+    const hosts = createHosts();
     let hostsSent = '';
     const pushHosts = (force = false) => {
       const s = JSON.stringify({ cmd: 'hosts', ...hosts.state() });
@@ -360,7 +378,7 @@ export function startOwner({ standalone = false } = {}) {
     const server = http.createServer(async (req, res) => {
       const url = new URL(req.url, 'http://x');
       if (url.pathname.startsWith('/video/')) {
-        if (!HOSTS.has(req.headers.host) || req.headers.origin !== `chrome-extension://${EXT_ID}`) return json(res, 403, { error: 'forbidden' });
+        if (!HOSTS.has(req.headers.host) || req.headers.origin !== `chrome-extension://${EXT_ID}` || !keyMatches(req.headers['x-show-and-tell-key'])) return json(res, 403, { error: 'forbidden' });
         return videoRoute(req, res, url).catch(e => json(res, 500, { error: e.message }));
       }
       if (!HOSTS.has(req.headers.host) || req.headers.origin || req.headers['x-show-and-tell'] !== '1') {
@@ -440,8 +458,7 @@ export function startOwner({ standalone = false } = {}) {
         }
         const decision = await q;
         if (decision === 'session' || decision === 'always') {
-          try { hosts.grant(r.host, decision); } catch {}
-          pushHosts();
+          hosts.add(r.host);
           return json(res, 200, { ok: true, host: r.host, granted: decision });
         }
         const error = decision === 'no' ? `the user did not allow ${r.host}`
@@ -458,6 +475,14 @@ export function startOwner({ standalone = false } = {}) {
         touch(body.session, body.label);
         broadcast({ cmd: 'say', session: body.session, text, who: nameOf(body.session) });
         return json(res, 200, { ok: true, extensionConnected: exts.size > 0 });
+      }
+      // Where the session's tab is now and whether it embeds sites that are not allowed; the extension decides.
+      if (route === 'POST /page-check') {
+        let body = {};
+        try { body = JSON.parse(await readBody(req) || '{}'); } catch {}
+        if (!body.session) return json(res, 400, { error: 'session is required' });
+        try { return json(res, 200, await requestExt({ cmd: 'pageCheck', session: body.session }, 5000)); }
+        catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       }
       // A session's browser call starts or ends (only the driver of that session sends this).
       if (route === 'POST /busy') {
@@ -538,8 +563,14 @@ export function startOwner({ standalone = false } = {}) {
     server.timeout = 0;
 
     server.on('upgrade', (req, socket, head) => {
-      if (new URL(req.url, 'http://x').pathname !== '/ext' || req.headers.origin !== `chrome-extension://${EXT_ID}`) {
+      const target = new URL(req.url, 'http://x');
+      if (target.pathname !== '/ext' || req.headers.origin !== `chrome-extension://${EXT_ID}`) {
         log('rejected WebSocket from origin', req.headers.origin);
+        return rejectUpgrade(socket);
+      }
+      // The origin is only a header; the key shows it is the extension of the browser this skill started.
+      if (!keyMatches(target.searchParams.get('key'))) {
+        log('rejected WebSocket without the browser\'s key (start the browser with start_browser or `node bridge start`)');
         return rejectUpgrade(socket);
       }
       const conn = acceptUpgrade(req, socket, head);
@@ -565,10 +596,8 @@ export function startOwner({ standalone = false } = {}) {
           }
           announced = ''; announce();
         }
-        // The user allowed a host from the panel (on their own, or answering the extension's question).
-        else if (msg.type === 'hostGrant') { try { hosts.grant(msg.host, msg.mode); } catch (e) { log(e.message); } pushHosts(true); }
-        // The user took a grant back in the panel.
-        else if (msg.type === 'hostRevoke') { hosts.revoke(msg.host); pushHosts(true); }
+        // The hosts the user allowed in the panel, all of them, whenever that list changes and on connect.
+        else if (msg.type === 'hostState') hosts.setGranted([...(msg.always || []), ...(msg.session || [])]);
         else if (msg.type === 'ping') conn.send('{"type":"pong"}');
       });
       // A browser that is gone has nothing paused; one that reconnects says what is.

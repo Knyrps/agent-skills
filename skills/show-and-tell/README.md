@@ -58,8 +58,8 @@ agent ──stdio──> bridge (MCP)  ──HTTP 127.0.0.1:47613──<  `node 
 | `SKILL.md` | Instructions for the agent |
 | `scripts/browser.mjs` | `start` / `stop` / `status` / `panel` for the demo browser |
 | `extension/` | MV3 extension: side panel (Lit + `@m3e/web`, built into `extension/ui/`), service worker (bridge socket, outbox, capture), content script (highlights, annotation, recorder) |
-| `extension/config.json` | Bridge URL and shared host patterns; `config.local.json` (git-ignored) holds hosts you allowed and video branding |
-| `bridge/hosts.js` | Which hosts are allowed: loopback and the hosts file's loopback names, config patterns, your grants |
+| `extension/config.json` | Bridge URL; `config.local.json` (git-ignored) holds settings for this machine, such as video branding. Neither file allows a host |
+| `bridge/hosts.js` | Which hosts are allowed: loopback, the hosts file's loopback names, and the bridge's copy of your grants, which the extension keeps |
 | `extension/gestures.js`, `stage.js` | Gesture glyphs and the drawn pointer; the video stage (captions, cards, input shield) |
 | `extension/pause.js` | Pause points and held requests, over the same debugger connection as throttling |
 | `references/video.md` | How the agent writes review videos |
@@ -112,11 +112,23 @@ whatever Chromium is listening on that port.
 4. **Allowed hosts.** Nothing to do for sites on this machine: `localhost`, loopback addresses and every
    name your hosts file maps to `127.x` or `::1` (read live) are always allowed. For any other host the
    side panel asks you when the agent first wants it, or when you open it yourself: **This session** or
-   **Always** (saved to the git-ignored `extension/config.local.json`). Patterns can also go there by hand,
-   e.g. `{ "allowlist": ["grafana.example.zz", "*.staging.example"] }` (`*.x` = x and all subdomains).
-   The rule covers the `browser_*` tools too; the agent can ask but never grant. An allowed site can try to
-   instruct the agent through its own text (prompt injection), with your sign-ins at hand, so allow only sites
-   you trust. The shield in the panel header lists the sites you allowed and takes one back.
+   **Always**. Your click is the only thing that allows a host: the grants are kept inside the browser (the
+   extension's storage), not in a file, and an `allowlist` in `config.json` or `config.local.json` is no longer
+   read. Hosts you had saved there are asked once more; patterns like `*.staging.example` are gone, each host
+   is asked by name. The rule covers the `browser_*` tools too, also where a call ends up: if an allowed page
+   moves on to a host that is not allowed (a redirect, a link), the result is withheld, and what a page embeds
+   from such a host in a frame is left out. The shield in the panel header lists the sites you allowed and
+   takes one back.
+
+   What this protects against, and what not. It keeps web pages from using the bridge, keeps a mistaken or
+   misled agent on the sites you chose, and keeps other users of the machine out: the extension shows the
+   bridge a key that is made new for every browser start (`bridge.key` in the data folder, readable by you
+   only). It is not a wall against a program that runs as you and means harm, which includes an agent with a
+   shell that a page has talked into it: such a program can read that key and the browser profile with your
+   sign-ins, and can drive the browser through its debugging port (9334) without asking anyone. An allowed
+   site can also try to instruct the agent through its own text (prompt injection). So allow only sites you
+   trust, and use test accounts rather than your own sign-ins where that matters. A screenshot still shows
+   what an embedded frame displays.
 
 5. **Certificates.** The shared browser holds your sign-ins, so a bad certificate on a real site stops it like
    any Chrome. Self-signed certificates are accepted on `localhost`, and on names your hosts file maps to

@@ -49,6 +49,14 @@ export function labHandler(q, r) {
     if (q.method === 'HEAD') return r.end();
     return void setTimeout(() => r.end(JSON.stringify({ items: ITEMS })), 300);
   }
+  // For the checks of the host guard: a page that moves on to another address, and one that embeds another.
+  const to = new URL(q.url, 'http://x').searchParams.get('to') || '';
+  if (p === '/redirect' && /^https?:\/\//.test(to)) { r.writeHead(302, { Location: to, 'Cache-Control': 'no-store' }); return r.end(); }
+  if (p === '/embed' && /^https?:\/\//.test(to)) {
+    r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return r.end(`<!doctype html><title>Embed</title><h1>Outer page</h1><button id="outer">Outer button</button><iframe id="inner" src="${to.replace(/[^\w:/.?=&%-]/g, '')}" width="600" height="400"></iframe>`);
+  }
+  if (p === '/plain') { r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return r.end(`<!doctype html><title>Plain</title><h1>Plain page</h1><p>Secret text of ${String(q.headers.host || '').replace(/[^\w.:-]/g, '')}</p><button id="inside">Inside button</button>`); }
   if (p !== '/' && p !== '/next') { r.writeHead(404); return r.end(); }
   r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
   r.end(q.method === 'HEAD' ? undefined : p === '/next' ? NEXT : LAB);

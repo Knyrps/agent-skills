@@ -62,14 +62,33 @@ export function describe(name, args = {}, page = '') {
   return host ? `${what} on ${host}` : what;
 }
 
+// Takes the content of embedded frames out of a snapshot: an "- iframe" line keeps its place, what is nested
+// under it goes. seen collects the ref prefixes of the frames removed ("f3" of "f3e12"), so a call that names
+// such a ref can be refused.
+export function stripFrames(yaml, seen = new Set()) {
+  const out = [];
+  let inside = -1;
+  for (const line of String(yaml).split('\n')) {
+    const indent = line.search(/\S/);
+    if (inside >= 0 && (indent > inside || indent < 0)) { for (const m of line.matchAll(/\[ref=(f\d+)e\d+\]/g)) seen.add(m[1]); continue; }
+    inside = -1;
+    const frame = /^(\s*)- iframe\b[^:]*(:?)\s*$/.exec(line);
+    if (frame) { inside = indent; out.push(line.replace(/:\s*$/, '') + ': (content withheld: a site that is not allowed)'); continue; }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 // guard(url, why) -> { ok, error }: whether the tools may work on that page (it may ask the user).
+// pageCheck() -> { ok, url, allowed, foreign: [hosts] }: where the session's tab is after a call, and which
+// sites it embeds that are not allowed. The page a call ends on must be allowed too, or its result is withheld.
 // onActivity(text): told before each call that goes ahead, for the panel's activity line.
 // tab() -> { ok, tabId, url, error }: this session's own tab (the extension creates it on first use).
 // Without it the calls go to the first app tab (single-session use, tests).
 // pauseWait(signal, now) -> the pause the session's page is in (see the pause tool), or null: resolves
 // when the page pauses, or at once with `now`.
 export function createDriver({ cdp, outputDir, before = async () => {}, guard = async () => ({ ok: true }),
-  onActivity = () => {}, tab = null, busy = async () => {}, pauseWait = null, command } = {}) {
+  onActivity = () => {}, tab = null, busy = async () => {}, pauseWait = null, pageCheck = null, command } = {}) {
   let client = null, connecting = null, tools = null, confirmed = null; // confirmed: Chrome tab id the child is on
   // With session tabs, switching tabs would act on (and bring up) another session's tab.
   const hidden = new Set([...HIDDEN, ...(tab ? ['browser_tabs'] : [])]);
@@ -173,7 +192,7 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
     if (BLANK.test(url)) return null;
     const r = await guard(url, why);
     return r?.ok ? null : { isError: true, content: [{ type: 'text', text: `Not allowed: ${r?.error || url}. `
-      + 'Ask the user to allow the host in the side panel; never edit the allowlist yourself.' }] };
+      + 'Only the user can allow a host, with a click in the side panel.' }] };
   }
 
   // A page stopped at a breakpoint (the pause tool) answers nothing, so Playwright would wait until it runs
@@ -183,7 +202,30 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
   const stack = p => (p.frames?.length > 1 ? `\nCall stack: ${p.frames.map(f => `${f.fn} (${f.at})`).join(' < ')}` : '');
   let hung = null; // a call waiting for a paused page to run again
 
+  // What a call gave back refers to files Playwright wrote next to it (snapshots, logs): "(./page-….yml)".
+  const filesOf = r => [...text(r).matchAll(/\]\(\.\/([\w.:-]+)\)/g)].map(m => path.join(outputDir, path.basename(m[1])));
+  const frameRefs = new Set(); // ref prefixes of frames whose content was withheld
+  const strings = v => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatMap(strings) : v && typeof v === 'object' ? Object.values(v).flatMap(strings) : []);
+
+  // After a call: the page it ended on must be allowed, and what it embeds from other sites is not the agent's.
+  // A redirect, a link or a script can move an allowed page elsewhere; the check before the call cannot know.
+  async function screen(name, r) {
+    const pc = pageCheck ? await pageCheck().catch(() => null) : null;
+    if (!pc?.ok) return r;
+    if (pc.allowed === false && !BLANK.test(pc.url || '')) {
+      for (const f of filesOf(r)) fs.rmSync(f, { force: true });
+      return { isError: true, content: [{ type: 'text', text: `Not allowed: the page is now on ${hostOf(pc.url) || pc.url}, which the user has not allowed, so what ${name} returned is withheld. `
+        + 'Go back (browser_navigate_back) or open an allowed page; only the user can allow a host, with a click in the side panel.' }] };
+    }
+    if (!pc.foreign?.length) return r;
+    for (const f of filesOf(r)) { try { if (/\.ya?ml$/.test(f)) fs.writeFileSync(f, stripFrames(fs.readFileSync(f, 'utf8'), frameRefs)); } catch {} }
+    const note = `The page embeds ${pc.foreign.join(', ')}, which the user has not allowed: the content of embedded frames is withheld and their elements cannot be used.`;
+    return { ...r, content: [...(r.content || []).map(c => (c.type === 'text' && /- iframe\b/.test(c.text || '') ? { ...c, text: stripFrames(c.text, frameRefs) } : c)), { type: 'text', text: note }] };
+  }
+
   async function attempt(name, args) {
+    const used = strings(args).map(s => /^(f\d+)e\d+$/.exec(s)?.[1]).find(p => p && frameRefs.has(p));
+    if (used) return { isError: true, content: [{ type: 'text', text: 'Not allowed: that element is inside an embedded frame of a site the user has not allowed.' }] };
     const c = await connect();
     let page = '', drifted = false, armed = false;
     if (tab) {
@@ -204,6 +246,7 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
     let r;
     if (!armed) {
       try { r = await c.callTool({ name, arguments: args }); } finally { await busy(false); }
+      r = await screen(name, r);
     } else {
       const running = c.callTool({ name, arguments: args });
       const ac = new AbortController();
@@ -219,7 +262,7 @@ export function createDriver({ cdp, outputDir, before = async () => {}, guard = 
       const late = (await stop) || (await pauseWait(undefined, true));
       await busy(false);
       if (first.e) throw first.e;
-      r = first.r;
+      r = late ? first.r : await screen(name, first.r);
       if (late) r.content = [...(r.content || []), { type: 'text', text: `The page paused right after this call: ${stoppedAt(late)}.${stack(late)}${NEXT}` }];
     }
     if (drifted && r?.isError && /Ref .* not found/i.test(text(r))) r.content = [{ type: 'text', text: 'A tab opened from your page meanwhile, so the refs of your last snapshot are no longer valid (your calls still act on your working tab). Take a new browser_snapshot and use its refs.' }, ...(r.content || [])];

@@ -160,7 +160,11 @@ hosts file maps to loopback. Any other host, even a private one on another netwo
 panel when you first use it ("No", "This session", "Always"); the call waits up to 2 minutes for the answer.
 - `Not allowed: the user did not allow …`: respect it; don't retry or look for a way around.
 - `… did not answer …`: tell the user in one line that the panel is asking, then retry once.
-- Never edit `extension/config.json` or `config.local.json` yourself; only the user grants hosts.
+- `Not allowed: the page is now on …`: a redirect or a link took the page to a host the user has not
+  allowed, so the call's result is withheld. Go back or open an allowed page; say so if the user wanted it.
+- A snapshot that says `content withheld` at an iframe: the page embeds a site that is not allowed. You
+  cannot read or use what is inside; tell the user if the task needs it.
+- Only the user's click in the panel allows a host. No file does, so do not edit config files for it.
 
 ## The watcher: hearing the user
 

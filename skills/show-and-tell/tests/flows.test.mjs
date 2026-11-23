@@ -98,13 +98,14 @@ await run('revoke-host', async () => {
   let listed = false;
   for (let i = 0; i < 20 && !listed; i++) { await sleep(300); listed = await pn.P(`!!$d('#hosts')`); }
   check('with a site allowed, the header offers the list of allowed sites', listed);
-  check('"Always" is saved to config.local.json', (JSON.parse(fs.readFileSync(local, 'utf8')).allowlist || []).includes(host));
+  const always = () => pn.P(`chrome.storage.local.get('alwaysHosts').then(x => JSON.stringify(x.alwaysHosts || []))`).then(J);
+  check('"Always" is kept inside the browser, not in a file', (await always()).includes(host) && !fs.readFileSync(local, 'utf8').includes(host), JSON.stringify(await always()));
   await clickInPlace(pn, '#hosts'); await sleep(700);
   const row = J(await pn.P(`JSON.stringify([...$$d('#hosts-list [data-host]')].map(e => [e.dataset.host, e.textContent.replace(/\\s+/g, ' ').trim()]))`));
   check('the dialog lists the site as allowed always', row.some(([h, t]) => h === host && /Always/.test(t)), JSON.stringify(row));
   await pn.P(`$$d('#hosts-list [data-host]').find(e => e.dataset.host === ${JSON.stringify(host)}).setAttribute('data-revoke', '1')`);
   await clickInPlace(pn, '[data-revoke] m3e-icon-button'); await sleep(1500);
-  check('taking it back removes it from config.local.json', !(JSON.parse(fs.readFileSync(local, 'utf8')).allowlist || []).includes(host));
+  check('taking it back removes it there', !(await always()).includes(host), JSON.stringify(await always()));
   // The agent has to ask again.
   const again = a.tool('highlight', { selector: 'body', url: `http://${host}:47714/` });
   let asked = false;

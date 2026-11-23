@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cdpSession } from '../bridge/ws.js';
-import { getJson, EXT_ID, DATA } from '../bridge/core.js';
+import { getJson, bridgeKey, EXT_ID, DATA } from '../bridge/core.js';
 import { LAB_URL } from './lab.mjs';
 import { certificateFlags } from './certificates.mjs';
 
@@ -66,6 +66,8 @@ async function start() {
     reused = false;
     fs.mkdirSync(PROFILE, { recursive: true });
     stampExtensionVersion();
+    // A new key for this browser; openPanel hands it to the extension, which shows it to the bridge.
+    bridgeKey({ rotate: true });
     // The version stamp alone is not always honoured: Chrome can still serve the extension's old
     // background script from this cache. Nothing in the demo profile needs a cached service worker.
     fs.rmSync(path.join(PROFILE, 'Default', 'Service Worker'), { recursive: true, force: true });
@@ -141,7 +143,8 @@ async function openPanel() {
   const browser = await cdpSession(v.webSocketDebuggerUrl);
   let targetId;
   try {
-    ({ targetId } = await browser.send('Target.createTarget', { url: `chrome-extension://${EXT_ID}/open-panel.html` }));
+    // The page also stores the key the extension needs to connect to the bridge (see bridgeKey in core.js).
+    ({ targetId } = await browser.send('Target.createTarget', { url: `chrome-extension://${EXT_ID}/open-panel.html#key=${bridgeKey()}` }));
     let page;
     for (let i = 0; i < 40 && page?.title !== 'show-and-tell:ready'; i++) {
       await sleep(250);
